@@ -1,9 +1,29 @@
 import { AppState, User, Trip, Category, PackingItem } from "./types";
 
-const STORAGE_KEY = "trip-packer-data";
+/*
+ * Client-side API wrapper.
+ *
+ * This used to be a localStorage read-modify-write layer. It is now a thin
+ * client over /api/state and /api/mutate, which persist to SQLite.
+ *
+ * Every mutation posts the entity to the server and returns the authoritative
+ * state the server actually stored. Callers surface that state directly rather
+ * than re-deriving it locally, so a failed write cannot leave the UI showing
+ * data that was never persisted.
+ */
+
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
 
 function generateId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return Math.random().toString(36).slice(2, 11) + Date.now().toString(36);
 }
 
 const AVATAR_COLORS = [
@@ -17,96 +37,110 @@ const AVATAR_COLORS = [
   "bg-lime-500",
 ];
 
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
 export function createDefaultUser(): User {
+  const id = generateId();
   return {
-    id: generateId(),
+    id,
     name: "You",
-    avatarColor: AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)],
+    avatarColor: AVATAR_COLORS[hashString(id) % AVATAR_COLORS.length],
     createdAt: new Date().toISOString(),
   };
 }
 
-export function loadState(): AppState | null {
+/* ------------------------------------------------------------- transport */
+
+/**
+ * Mutations that fail to reach the server are retried once, because a dev
+ * server restart (or a brief HMR blip) would otherwise silently drop a change
+ * the user just made. A 4xx is never retried — those are deterministic.
+ */
+async function post<T>(body: unknown, attempt = 0): Promise<T> {
+  let res: Response;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
+    res = await fetch("/api/mutate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    if (attempt === 0) return post<T>(body, 1);
+    throw new ApiError("Could not reach the server", 0);
   }
+
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new ApiError(detail.error ?? `Request failed (${res.status})`, res.status);
+  }
+
+  return (await res.json()) as T;
 }
 
-export function saveState(state: AppState): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+async function mutate(body: unknown): Promise<AppState> {
+  const { state } = await post<{ state: AppState }>(body);
+  return state;
 }
 
-export function initializeState(): AppState {
-  const existing = loadState();
-  if (existing) return existing;
+/* ----------------------------------------------------------------- reads */
 
+/** Returns null when the database has no users yet (fresh install). */
+export async function fetchState(): Promise<AppState | null> {
+  const res = await fetch("/api/state", { cache: "no-store" });
+  if (!res.ok) throw new ApiError("Could not load your data", res.status);
+  const { state } = (await res.json()) as { state: AppState | null };
+  return state;
+}
+
+/**
+ * Seeds the initial user. There is no server-side "initialize" op because the
+ * server cannot invent an id the client has not seen; the client creates the
+ * default user and posts it.
+ */
+export async function initializeRemoteState(): Promise<AppState> {
   const user = createDefaultUser();
-  return {
-    users: [user],
-    activeUserId: user.id,
-    trips: [],
-    categories: [],
-    items: [],
-  };
+  return mutate({ op: "user.add", name: user.name, user });
 }
 
-export function addUser(name: string): User {
-  const state = loadState() ?? initializeState();
+/* --------------------------------------------------------------- actions */
+
+export async function addUser(name: string): Promise<{ state: AppState; user: User }> {
   const user = createDefaultUser();
   user.name = name;
-  state.users.push(user);
-  state.activeUserId = user.id;
-  saveState(state);
-  return user;
+  const state = await mutate({ op: "user.add", name, user });
+  return { state, user };
 }
 
-export function updateUser(id: string, updates: Partial<User>): void {
-  const state = loadState();
-  if (!state) return;
-  const user = state.users.find((u) => u.id === id);
-  if (user) {
-    Object.assign(user, updates);
-    saveState(state);
+export async function updateUser(id: string, updates: Partial<User>): Promise<AppState> {
+  return mutate({ op: "user.update", id, updates });
+}
+
+export async function deleteUser(id: string): Promise<AppState> {
+  return mutate({ op: "user.delete", id });
+}
+
+export async function switchUser(userId: string): Promise<AppState> {
+  return mutate({ op: "user.switch", id: userId });
+}
+
+export async function createTrip(
+  userId: string,
+  data: {
+    name: string;
+    destination: string;
+    startDate: string;
+    endDate: string;
+    notes: string;
+    icon: string;
   }
-}
-
-export function deleteUser(id: string): void {
-  const state = loadState();
-  if (!state || state.users.length <= 1) return;
-  state.users = state.users.filter((u) => u.id !== id);
-  if (state.activeUserId === id) {
-    state.activeUserId = state.users[0]?.id ?? "";
-  }
-  state.trips = state.trips.filter((t) => t.userId !== id);
-  state.categories = state.categories.filter((c) =>
-    state.trips.some((t) => t.id === c.tripId)
-  );
-  state.items = state.items.filter((i) =>
-    state.trips.some((t) => t.id === i.tripId)
-  );
-  saveState(state);
-}
-
-export function switchUser(userId: string): void {
-  const state = loadState();
-  if (!state) return;
-  state.activeUserId = userId;
-  saveState(state);
-}
-
-export function createTrip(userId: string, data: {
-  name: string;
-  destination: string;
-  startDate: string;
-  endDate: string;
-  notes: string;
-  icon: string;
-}): Trip {
-  const state = loadState() ?? initializeState();
+): Promise<{ state: AppState; trip: Trip; categories: Category[]; items: PackingItem[] }> {
   const now = new Date().toISOString();
   const trip: Trip = {
     id: generateId(),
@@ -121,7 +155,6 @@ export function createTrip(userId: string, data: {
     createdAt: now,
     updatedAt: now,
   };
-  state.trips.push(trip);
 
   const defaultCategories: { name: string; icon: string }[] = [
     { name: "Clothing", icon: "👕" },
@@ -133,7 +166,7 @@ export function createTrip(userId: string, data: {
   ];
 
   const defaultItems: Record<string, Array<{ name: string; quantity: number; icon: string }>> = {
-    "Clothing": [
+    Clothing: [
       { name: "T-shirts", quantity: 5, icon: "👕" },
       { name: "Underwear", quantity: 7, icon: "🩲" },
       { name: "Socks", quantity: 7, icon: "🧦" },
@@ -142,7 +175,7 @@ export function createTrip(userId: string, data: {
       { name: "Jacket/Outerwear", quantity: 1, icon: "🧥" },
       { name: "Shoes", quantity: 2, icon: "👟" },
     ],
-    "Toiletries": [
+    Toiletries: [
       { name: "Toothbrush", quantity: 1, icon: "🪥" },
       { name: "Toothpaste", quantity: 1, icon: "🪥" },
       { name: "Shampoo", quantity: 1, icon: "🧴" },
@@ -151,139 +184,119 @@ export function createTrip(userId: string, data: {
       { name: "Medications", quantity: 1, icon: "💊" },
       { name: "Razor", quantity: 1, icon: "🪒" },
     ],
-    "Electronics": [
+    Electronics: [
       { name: "Phone", quantity: 1, icon: "📱" },
       { name: "Phone Charger", quantity: 1, icon: "🔌" },
       { name: "Headphones", quantity: 1, icon: "🎧" },
       { name: "Laptop", quantity: 1, icon: "💻" },
       { name: "Travel Adapter", quantity: 1, icon: "🔌" },
     ],
-    "Documents": [
+    Documents: [
       { name: "Passport", quantity: 1, icon: "📘" },
-      { name: "ID/Driver's License", quantity: 1, icon: "🪪" },
-      { name: "Boarding Passes", quantity: 1, icon: "✈️" },
+      { name: "Boarding Passes", quantity: 1, icon: "🎫" },
       { name: "Hotel Confirmations", quantity: 1, icon: "🏨" },
-      { name: "Travel Insurance", quantity: 1, icon: "📋" },
     ],
-    "Money": [
-      { name: "Cash", quantity: 1, icon: "💵" },
-      { name: "Credit Cards", quantity: 2, icon: "💳" },
-      { name: "Debit Card", quantity: 1, icon: "🏧" },
+    Money: [
+      { name: "Local Currency", quantity: 1, icon: "💵" },
+      { name: "Credit Card", quantity: 1, icon: "💳" },
     ],
-    "Miscellaneous": [
-      { name: "Sunglasses", quantity: 1, icon: "🕶️" },
-      { name: "Water Bottle", quantity: 1, icon: "🍶" },
-      { name: "Snacks", quantity: 1, icon: "🍿" },
-      { name: "Pen", quantity: 1, icon: "🖊️" },
-      { name: "Travel Pillow", quantity: 1, icon: "🛋️" },
-    ],
+    Miscellaneous: [{ name: "Umbrella", quantity: 1, icon: "☂️" }],
   };
 
-  defaultCategories.forEach((cat, idx) => {
-    const catId = generateId();
-    state.categories.push({
-      id: catId,
-      tripId: trip.id,
-      name: cat.name,
-      icon: cat.icon,
-      order: idx,
-    });
+  const categories: Category[] = defaultCategories.map((c, i) => ({
+    id: generateId(),
+    tripId: trip.id,
+    name: c.name,
+    icon: c.icon,
+    order: i,
+  }));
 
-    const items = defaultItems[cat.name] || [];
-    items.forEach((item, itemIdx) => {
-      state.items.push({
+  const items: PackingItem[] = [];
+  for (const cat of categories) {
+    const defs = defaultItems[cat.name] ?? [];
+    defs.forEach((d, i) => {
+      items.push({
         id: generateId(),
         tripId: trip.id,
-        categoryId: catId,
-        name: item.name,
-        quantity: item.quantity,
+        categoryId: cat.id,
+        name: d.name,
+        quantity: d.quantity,
         checked: false,
-        icon: item.icon,
-        order: itemIdx,
+        icon: d.icon,
+        order: i,
       });
     });
+  }
+
+  // The whole tree goes in as one state.replace so a new trip can never be
+  // persisted half-built (trip without its categories, or vice versa).
+  const current = await fetchState();
+  const base: AppState = current ?? {
+    users: [],
+    activeUserId: userId,
+    trips: [],
+    categories: [],
+    items: [],
+  };
+
+  const state = await mutate({
+    op: "state.replace",
+    state: {
+      ...base,
+      trips: [...base.trips, trip],
+      categories: [...base.categories, ...categories],
+      items: [...base.items, ...items],
+    },
   });
 
-  saveState(state);
-  return trip;
+  return { state, trip, categories, items };
 }
 
-export function updateTrip(tripId: string, updates: Partial<Trip>): void {
-  const state = loadState();
-  if (!state) return;
-  const trip = state.trips.find((t) => t.id === tripId);
-  if (trip) {
-    Object.assign(trip, { ...updates, updatedAt: new Date().toISOString() });
-    saveState(state);
-  }
+export async function updateTrip(id: string, data: Partial<Trip>): Promise<AppState> {
+  return mutate({ op: "trip.update", id, updates: data });
 }
 
-export function archiveTrip(tripId: string, archived: boolean): void {
-  const state = loadState();
-  if (!state) return;
-  const trip = state.trips.find((t) => t.id === tripId);
-  if (trip) {
-    trip.archived = archived;
-    trip.updatedAt = new Date().toISOString();
-    saveState(state);
-  }
+export async function archiveTrip(id: string, archived: boolean): Promise<AppState> {
+  return mutate({ op: "trip.update", id, updates: { archived } });
 }
 
-export function deleteTrip(tripId: string): void {
-  const state = loadState();
-  if (!state) return;
-  state.trips = state.trips.filter((t) => t.id !== tripId);
-  state.categories = state.categories.filter((c) => c.tripId !== tripId);
-  state.items = state.items.filter((i) => i.tripId !== tripId);
-  saveState(state);
+export async function deleteTrip(id: string): Promise<AppState> {
+  return mutate({ op: "trip.delete", id });
 }
 
-export function createCategory(tripId: string, name: string, icon: string): Category {
-  const state = loadState();
-  if (!state) return { id: "", tripId, name, icon, order: 0 };
-  const tripCats = state.categories.filter((c) => c.tripId === tripId);
-  const cat: Category = {
-    id: generateId(),
-    tripId,
-    name,
-    icon,
-    order: tripCats.length,
-  };
-  state.categories.push(cat);
-  saveState(state);
-  return cat;
+export async function createCategory(
+  tripId: string,
+  name: string,
+  icon: string
+): Promise<{ state: AppState; category: Category }> {
+  const current = await fetchState();
+  const order =
+    current?.categories.filter((c) => c.tripId === tripId).length ?? 0;
+  const category: Category = { id: generateId(), tripId, name, icon, order };
+  const state = await mutate({ op: "category.create", category });
+  return { state, category };
 }
 
-export function updateCategory(catId: string, updates: { name?: string; icon?: string }): void {
-  const state = loadState();
-  if (!state) return;
-  const cat = state.categories.find((c) => c.id === catId);
-  if (cat) {
-    if (updates.name !== undefined) cat.name = updates.name;
-    if (updates.icon !== undefined) cat.icon = updates.icon;
-    saveState(state);
-  }
+export async function updateCategory(
+  id: string,
+  data: { name?: string; icon?: string }
+): Promise<AppState> {
+  return mutate({ op: "category.update", id, updates: data });
 }
 
-export function deleteCategory(catId: string): void {
-  const state = loadState();
-  if (!state) return;
-  const cat = state.categories.find((c) => c.id === catId);
-  if (!cat) return;
-  state.categories = state.categories.filter((c) => c.id !== catId);
-  state.items = state.items.filter((i) => i.categoryId !== catId);
-  // Reorder remaining categories
-  const tripCats = state.categories
-    .filter((c) => c.tripId === cat.tripId)
-    .sort((a, b) => a.order - b.order);
-  tripCats.forEach((c, idx) => (c.order = idx));
-  saveState(state);
+export async function deleteCategory(id: string): Promise<AppState> {
+  return mutate({ op: "category.delete", id });
 }
 
-export function createItem(tripId: string, categoryId: string, name: string, icon: string, quantity: number): PackingItem {
-  const state = loadState();
-  if (!state) return { id: "", tripId, categoryId, name, quantity, checked: false, icon, order: 0 };
-  const catItems = state.items.filter((i) => i.categoryId === categoryId);
+export async function createItem(
+  tripId: string,
+  categoryId: string,
+  name: string,
+  icon: string,
+  quantity: number
+): Promise<{ state: AppState; item: PackingItem }> {
+  const current = await fetchState();
+  const order = current?.items.filter((i) => i.categoryId === categoryId).length ?? 0;
   const item: PackingItem = {
     id: generateId(),
     tripId,
@@ -292,43 +305,34 @@ export function createItem(tripId: string, categoryId: string, name: string, ico
     quantity,
     checked: false,
     icon,
-    order: catItems.length,
+    order,
   };
-  state.items.push(item);
-  saveState(state);
-  return item;
+  const state = await mutate({ op: "item.create", item });
+  return { state, item };
 }
 
-export function updateItem(itemId: string, updates: {
-  name?: string;
-  quantity?: number;
-  checked?: boolean;
-  icon?: string;
-}): void {
-  const state = loadState();
-  if (!state) return;
-  const item = state.items.find((i) => i.id === itemId);
-  if (item) {
-    if (updates.name !== undefined) item.name = updates.name;
-    if (updates.quantity !== undefined) item.quantity = updates.quantity;
-    if (updates.checked !== undefined) item.checked = updates.checked;
-    if (updates.icon !== undefined) item.icon = updates.icon;
-    saveState(state);
-  }
+export async function updateItem(
+  id: string,
+  data: { name?: string; quantity?: number; checked?: boolean; icon?: string }
+): Promise<AppState> {
+  return mutate({ op: "item.update", id, updates: data });
 }
 
-export function deleteItem(itemId: string): void {
-  const state = loadState();
-  if (!state) return;
-  state.items = state.items.filter((i) => i.id !== itemId);
-  saveState(state);
+export async function deleteItem(id: string): Promise<AppState> {
+  return mutate({ op: "item.delete", id });
 }
 
-export function getItemProgress(tripId: string, items: PackingItem[]): number {
+/* -------------------------------------------------------------- selectors */
+
+export function getItemProgress(tripId: string, items: PackingItem[]) {
   const tripItems = items.filter((i) => i.tripId === tripId);
-  if (tripItems.length === 0) return 0;
   const checked = tripItems.filter((i) => i.checked).length;
-  return Math.round((checked / tripItems.length) * 100);
+  const total = tripItems.length;
+  return {
+    checked,
+    total,
+    percent: total === 0 ? 0 : Math.round((checked / total) * 100),
+  };
 }
 
 export function getCategoriesForTrip(tripId: string, categories: Category[]): Category[] {

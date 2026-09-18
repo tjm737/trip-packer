@@ -50,7 +50,72 @@
   }
 }
 
+/*
+ * Surface elevation scale.
+ *
+ * The app previously used zinc-900/zinc-800/zinc-950 somewhat interchangeably,
+ * which left cards barely distinguishable from the page behind them. These
+ * tokens give four deliberate steps: the page, then surfaces that sit on it,
+ * then things that sit on those. Steps get lighter as they rise (standard for
+ * dark UI) and each carries a hairline highlight on its top edge, which reads
+ * as a light source above and is what makes a dark surface feel raised rather
+ * than merely filled in.
+ */
+@theme {
+  --surface-0: #09090b; /* page background        */
+  --surface-1: #101014; /* cards, sidebar panels  */
+  --surface-2: #17171c; /* nested cards, inputs   */
+  --surface-3: #1f1f26; /* popovers, hover states */
+}
+
 @layer utilities {
+  /* Raised surface: fill + hairline top highlight + soft ambient shadow. */
+  .surface-raised {
+    background-color: var(--surface-1);
+    box-shadow:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.04),
+      0 1px 2px 0 rgb(0 0 0 / 0.4);
+  }
+
+  /* Nested surface: sits inside a raised surface, so it stays flat. */
+  .surface-inset {
+    background-color: var(--surface-2);
+  }
+
+  /*
+   * Stat tile: one step lighter than a card, with a subtle top-edge warmth so
+   * the summary band reads as distinct from the trip cards below it. Uses a
+   * gradient rather than a flat fill so the tile doesn't look like a duplicate
+   * card at the same elevation.
+   */
+  .surface-stat {
+    background-image: linear-gradient(
+      to bottom,
+      rgb(255 255 255 / 0.035),
+      rgb(255 255 255 / 0)
+    );
+    background-color: var(--surface-2);
+    box-shadow:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.05),
+      0 1px 2px 0 rgb(0 0 0 / 0.3);
+  }
+
+  /* Focus ring that reads clearly on dark surfaces without a heavy glow. */
+  .focus-ring {
+    outline: none;
+  }
+  .focus-ring:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  /* Tabular figures for numbers that sit in columns or change in place
+     (stat values, percentages, temperatures) — prevents width jitter. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+
   .scrollbar-thin::-webkit-scrollbar {
     width: 4px;
   }
@@ -63,5 +128,18 @@
   }
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
     background: #3f3f46;
+  }
+}
+
+/* Respect users who ask for less motion: collapse transitions/animations
+   rather than removing state changes entirely. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

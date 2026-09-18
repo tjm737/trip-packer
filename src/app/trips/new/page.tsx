@@ -34,24 +34,35 @@ export default function NewTripPage() {
   const [endDate, setEndDate] = useState("");
   const [notes, setNotes] = useState("");
   const [icon, setIcon] = useState("✈️");
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleCreate = () => {
-    if (!name.trim()) return;
-    const created = trip.create({
-      name: name.trim(),
-      destination: destination.trim(),
-      startDate: startDate || new Date().toISOString().split("T")[0],
-      endDate: endDate || startDate,
-      notes,
-      icon,
-    });
-    // Navigate to the newly created trip
-    setTimeout(() => {
-      const data = JSON.parse(localStorage.getItem("trip-packer-data") || "{}");
-      const trips = data.trips || [];
-      const latest = trips[trips.length - 1];
-      if (latest) router.push(`/trips/${latest.id}`);
-    }, 50);
+  const handleCreate = async () => {
+    if (!name.trim() || submitting) return;
+    // Dates are optional — store what the user picked. A start with no end is
+    // treated as a single-day trip. Never silently default to "today".
+    const start = startDate.trim();
+    const end = endDate.trim() || start;
+    setSubmitting(true);
+    try {
+      // Persisting now goes to SQLite over the network, so the trip only exists
+      // once this resolves. Navigating on the returned id keeps us from pushing
+      // to a route for a trip that failed to save.
+      const createdId = await trip.create({
+        name: name.trim(),
+        destination: destination.trim(),
+        startDate: start,
+        endDate: end,
+        notes,
+        icon,
+      });
+      if (createdId) {
+        router.push(`/trips/${createdId}`);
+      } else {
+        setSubmitting(false);
+      }
+    } catch {
+      setSubmitting(false);
+    }
   };
 
   return (

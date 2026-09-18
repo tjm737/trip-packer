@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useApp } from "@/lib/AppContext";
 import { User, Trip } from "@/lib/types";
+import { formatDateRange, isUpcoming as isUpcomingTrip, compareByDate } from "@/lib/dates";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -100,11 +101,11 @@ function UserSwitcher() {
                   }}
                 >
                   <DialogTrigger>
-                    <button className="w-3 h-3 bg-red-500/80 rounded-full text-[8px] text-white flex items-center justify-center hover:bg-red-500">
+                    <div className="w-3 h-3 bg-red-500/80 rounded-full text-[8px] text-white flex items-center justify-center hover:bg-red-500 cursor-pointer">
                       <Pencil className="w-2 h-2" />
-                    </button>
+                    </div>
                   </DialogTrigger>
-                  <DialogContent className="sm:max-w-[320px] bg-zinc-900 border-zinc-700">
+                  <DialogContent className="sm:max-w-[320px] bg-[var(--surface-2)] border-zinc-700">
                     <DialogHeader>
                       <DialogTitle className="text-zinc-100">Rename User</DialogTitle>
                     </DialogHeader>
@@ -148,11 +149,11 @@ function UserSwitcher() {
         ))}
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger>
-            <button className="w-7 h-7 border border-dashed border-zinc-600 rounded-full flex items-center justify-center text-zinc-500 hover:text-zinc-300 hover:border-zinc-400 transition-colors">
+            <div className="w-7 h-7 border border-dashed border-zinc-600 rounded-full flex items-center justify-center text-zinc-500 hover:text-zinc-300 hover:border-zinc-400 transition-colors cursor-pointer">
               <Plus className="w-3.5 h-3.5" />
-            </button>
+            </div>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[320px] bg-zinc-900 border-zinc-700">
+          <DialogContent className="sm:max-w-[320px] bg-[var(--surface-2)] border-zinc-700">
             <DialogHeader>
               <DialogTitle className="text-zinc-100">New User</DialogTitle>
               <DialogDescription className="text-zinc-400">
@@ -208,7 +209,7 @@ function TripCard({
   progress: number;
   onClick: () => void;
 }) {
-  const isUpcoming = new Date(trip.endDate) >= new Date() && !trip.archived;
+  const isUpcoming = isUpcomingTrip(trip.startDate, trip.endDate, trip.archived);
 
   return (
     <motion.button
@@ -235,15 +236,7 @@ function TripCard({
           )}
           <div className="flex items-center justify-between mt-1.5">
             <span className="text-[10px] text-zinc-600">
-              {new Date(trip.startDate).toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-              })}{" "}
-              –{" "}
-              {new Date(trip.endDate).toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-              })}
+              {formatDateRange(trip.startDate, trip.endDate)}
             </span>
             <div className="flex items-center gap-1.5">
               <div className="w-10 h-1 bg-zinc-800 rounded-full overflow-hidden">
@@ -262,17 +255,33 @@ function TripCard({
 }
 
 function TripList() {
-  const { state, trip, helpers } = useApp();
+  const { state, trip, helpers, hydrated } = useApp();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ upcoming: true, archived: false });
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
-  const upcomingTrips = state.trips
-    .filter((t) => !t.archived)
-    .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+  // Framer Motion writes inline styles during SSR (opacity:0;height:0px from
+  // `initial`) that differ from the values it computes on the client
+  // (opacity: 1; height: auto;), which trips React's hydration check.
+  // Only enable the animation after mount, and suppress `initial` on the
+  // first pass so server and client markup agree.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
-  const archivedTrips = state.trips
-    .filter((t) => t.archived)
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  // Until hydrated, render the same empty view the server produced. Persisted
+  // trips live in localStorage, which SSR cannot see, so showing them on the
+  // first client render would change the tree structure vs. the server HTML.
+  const tripsAvailable = hydrated;
+  const upcomingTrips = tripsAvailable
+    ? state.trips
+        .filter((t) => !t.archived)
+        .sort((a, b) => compareByDate(a.startDate, b.startDate))
+    : [];
+
+  const archivedTrips = tripsAvailable
+    ? state.trips
+        .filter((t) => t.archived)
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    : [];
 
   const toggleSection = (key: string) => {
     setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -296,7 +305,7 @@ function TripList() {
         <AnimatePresence>
           {expanded.upcoming && (
             <motion.div
-              initial={{ opacity: 0, height: 0 }}
+              initial={mounted ? { opacity: 0, height: 0 } : false}
               animate={{ opacity: 1, height: "auto" }}
               exit={{ opacity: 0, height: 0 }}
               className="space-y-0.5"
@@ -338,7 +347,7 @@ function TripList() {
           <AnimatePresence>
             {expanded.archived && (
               <motion.div
-                initial={{ opacity: 0, height: 0 }}
+                initial={mounted ? { opacity: 0, height: 0 } : false}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
                 className="space-y-0.5"
@@ -369,7 +378,7 @@ function TripList() {
                         open={deleteConfirm === t.id}
                         onOpenChange={(o) => !o && setDeleteConfirm(null)}
                       >
-                        <DialogTrigger>
+                        <span>
                           <Button
                             size="icon"
                             variant="ghost"
@@ -382,8 +391,8 @@ function TripList() {
                           >
                             <Trash2 className="w-3 h-3" />
                           </Button>
-                        </DialogTrigger>
-                        <DialogContent className="sm:max-w-[320px] bg-zinc-900 border-zinc-700">
+                        </span>
+                        <DialogContent className="sm:max-w-[320px] bg-[var(--surface-2)] border-zinc-700">
                           <DialogHeader>
                             <DialogTitle className="text-zinc-100">Delete Trip</DialogTitle>
                           </DialogHeader>
@@ -426,7 +435,7 @@ function TripList() {
 
 export function Sidebar({ onNewTrip }: { onNewTrip?: () => void }) {
   return (
-    <aside className="w-72 h-screen bg-zinc-950 border-r border-white/5 flex flex-col flex-shrink-0">
+    <aside className="w-72 h-screen bg-[var(--surface-1)] border-r border-white/8 flex flex-col flex-shrink-0">
       {/* Logo */}
       <div className="px-4 pt-5 pb-3 border-b border-white/5">
         <div className="flex items-center gap-2.5">

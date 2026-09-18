@@ -4,6 +4,7 @@ import "./globals.css";
 import { AppProvider } from "@/lib/AppContext";
 import { Sidebar } from "@/components/Sidebar";
 import { Toaster } from "@/components/ui/toast";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -21,10 +22,12 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <AppProvider>
-          <div className="flex">
-            <Sidebar />
-            <main className="flex-1 min-w-0">{children}</main>
-          </div>
+          <TooltipProvider>
+            <div className="flex">
+              <Sidebar />
+              <main className="flex-1 min-w-0">{children}</main>
+            </div>
+          </TooltipProvider>
         </AppProvider>
       </body>
     </html>
