@@ -467,6 +467,8 @@ export type ReservationDraft = {
   endTime?: string;
   cost?: string;
   notes?: string;
+  /** Defaults to true: a booking you are adding by hand is one you have made. */
+  confirmed?: boolean;
 };
 
 /**
@@ -496,6 +498,7 @@ export async function createReservation(
     notes: draft.notes?.trim() ?? "",
     order,
     createdAt: new Date().toISOString(),
+    confirmed: draft.confirmed ?? true,
   };
   const state = await mutate({ op: "reservation.create", reservation });
   return { state, reservation };

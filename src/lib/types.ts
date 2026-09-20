@@ -95,6 +95,24 @@ export type Reservation = {
   title: string;
   /** Booking reference / confirmation code — the thing you show at a desk. */
   confirmation: string;
+  /**
+   * Whether this booking is locked in or still being considered.
+   *
+   * Deliberately separate from `confirmation`: a confirmation code is a
+   * *reference number*, and having one does not mean the booking is settled
+   * (you might be holding a code for a reservation you intend to cancel), while
+   * a settled booking may legitimately have no code yet — a hotel booked by
+   * phone, a rental paid on arrival. Collapsing the two would make "do I have
+   * the reference handy" and "is this still a maybe" the same question, which
+   * they are not.
+   *
+   * A plain boolean rather than a wider status enum: the app only ever asks
+   * two questions of this field — should this be visually de-emphasised, and
+   * how many bookings are still unresolved — and "cancelled" is really a
+   * delete. Keeping it binary means there is no state the UI can forget to
+   * handle.
+   */
+  confirmed: boolean;
   /** Where you go. For flights this is the departure point. */
   location: string;
   /** Arrival point. Flights and trains use it; lodging and cars leave it "". */

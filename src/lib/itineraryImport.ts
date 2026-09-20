@@ -332,6 +332,7 @@ function parseFlights(sec: ParsedSection, year: number, warn: string[]) {
       type: "flight",
       title: code || route || "Flight",
       confirmation: "",
+      confirmed: true,
       location: parts[0] ?? "",
       locationTo: parts[1] ?? "",
       startDate: iso,
@@ -375,7 +376,10 @@ function parseLodging(sec: ParsedSection, year: number, warn: string[]) {
       type: "lodging",
       title: dash[0] || name,
       confirmation: "",
-      location: place,
+      // Imported from an external itinerary export, so these are real
+      // bookings rather than maybes.
+      confirmed: true,
+      location: "",
       locationTo: "",
       startDate: start,
       startTime: "",
@@ -417,6 +421,7 @@ function parseCar(sec: ParsedSection, year: number, warn: string[]) {
     type: "car" as ReservationType,
     title: toText(sub) ? `${toText(sub).split(",")[0]}` : "Rental car",
     confirmation: "",
+    confirmed: true,
     location: startBits?.[1]?.trim() || (sides[0] ?? ""),
     locationTo: "",
     startDate: start,
@@ -444,6 +449,7 @@ function parseDining(sec: ParsedSection) {
       type: "activity",
       title: name,
       confirmation: "",
+      confirmed: true,
       // The tag is "Vöran village · walkable" or "Merano · 1 star"; the first
       // segment is the town, which is what the map needs.
       location: tag.split("·")[0].trim(),

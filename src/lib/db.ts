@@ -120,7 +120,8 @@ function migrate(db: SqliteDb): void {
       cost         TEXT NOT NULL DEFAULT '',
       notes        TEXT NOT NULL DEFAULT '',
       "order"      INTEGER NOT NULL DEFAULT 0,
-      createdAt    TEXT NOT NULL
+      createdAt    TEXT NOT NULL,
+      confirmed    INTEGER NOT NULL DEFAULT 1
     );
 
     CREATE INDEX IF NOT EXISTS idx_reservations_trip ON reservations(tripId);
@@ -169,6 +170,38 @@ function migrate(db: SqliteDb): void {
 
     CREATE INDEX IF NOT EXISTS idx_share_tokens_trip ON share_tokens(tripId);
   `);
+
+  /*
+   * Additive column migrations.
+   *
+   * `CREATE TABLE IF NOT EXISTS` above is a no-op on a database that already
+   * has the table, so adding a column to that statement only ever affects a
+   * fresh install. An existing database keeps the old shape and every query
+   * naming the new column fails with "no such column" — which surfaces as a
+   * broken page rather than a migration error, since nothing here throws at
+   * startup.
+   *
+   * SQLite has no `ADD COLUMN IF NOT EXISTS`, so the column list is checked
+   * first. This is safe to run on every getDb() (see the note there): the
+   * PRAGMA is cheap and the ALTER only fires once, the first time a given
+   * database is opened after the column was introduced.
+   *
+   * The DEFAULT matters as much as the column. Existing rows are real
+   * bookings the user already made, so `confirmed` defaults to 1 — adding the
+   * field must not retroactively relabel everybody's itinerary as tentative.
+   */
+  addColumnIfMissing(db, "reservations", "confirmed", "INTEGER NOT NULL DEFAULT 1");
+}
+
+function addColumnIfMissing(
+  db: SqliteDb,
+  table: string,
+  column: string,
+  definition: string
+): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (columns.some((c) => c.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 
 export function getDb(): SqliteDb {
@@ -255,6 +288,7 @@ type ReservationRow = {
   notes: string;
   order: number;
   createdAt: string;
+  confirmed: number;
 };
 
 const toUser = (r: UserRow): User => ({
@@ -342,6 +376,8 @@ const toReservation = (r: ReservationRow): Reservation => ({
   notes: r.notes,
   order: r.order,
   createdAt: r.createdAt,
+  // SQLite hands back 0/1; the domain type is a boolean.
+  confirmed: r.confirmed !== 0,
 });
 
 /* ------------------------------------------------------------------ reads */
@@ -532,12 +568,13 @@ export const tx = {
       .prepare(
         `INSERT INTO reservations
            (id, tripId, type, title, confirmation, location, locationTo,
-            startDate, startTime, endDate, endTime, cost, notes, "order", createdAt)
+            startDate, startTime, endDate, endTime, cost, notes, "order", createdAt,
+            confirmed)
          VALUES
            (@id, @tripId, @type, @title, @confirmation, @location, @locationTo,
-            @startDate, @startTime, @endDate, @endTime, @cost, @notes, @order, @createdAt)`
-      )
-      .run(r);
+            @startDate, @startTime, @endDate, @endTime, @cost, @notes, @order, @createdAt,
+            @confirmed)`)
+      .run({ ...r, confirmed: r.confirmed ? 1 : 0 });
   },
 
   updateReservation(id: string, updates: Partial<Reservation>): void {
@@ -555,13 +592,15 @@ export const tx = {
       "cost",
       "notes",
       "order",
+      "confirmed",
     ] as const;
     const keys = allowed.filter((k) => updates[k] !== undefined);
     if (keys.length === 0) return;
     const set = keys.map((k) => (k === "order" ? `"order" = @order` : `${k} = @${k}`)).join(", ");
     const payload: Record<string, unknown> = { id };
     for (const k of keys) {
-      payload[k] = updates[k];
+      // Booleans are stored as 0/1, matching how Task.done is handled.
+      payload[k] = k === "confirmed" ? (updates.confirmed ? 1 : 0) : updates[k];
     }
     getDb()
       .prepare(`UPDATE reservations SET ${set} WHERE id = @id`)

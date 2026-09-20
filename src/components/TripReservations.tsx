@@ -19,6 +19,8 @@ import {
   MapPin,
   ArrowRight,
   Map as MapIcon,
+  CheckCheck,
+  CircleDashed,
   Hash,
   Wallet,
   StickyNote,
@@ -55,6 +57,54 @@ import { cn } from "cn";
  */
 const VAGUE_LOCATION =
   /\b(near|nearby|around|somewhere|tbd|tba|unknown|anywhere|unspecified|n\/a)\b/i;
+
+/*
+ * Confirmed vs draft, as a small pill.
+ *
+ * Always visible rather than revealed on hover: the entire question this field
+ * answers — "what still needs a decision?" — is one you ask by scanning the
+ * whole list, and a state you can only see by hovering is a state you cannot
+ * scan. This is also why it sits before the edit/delete icons in the DOM: those
+ * are per-row actions, this is row *content*.
+ *
+ * It is a button because tapping it is the primary way to change the state —
+ * making people open the full editor to tick one box would be three taps and a
+ * form for a single bit. It is therefore never disabled, and carries an
+ * aria-label naming the action rather than the state, so a screen reader
+ * announces what pressing it will do.
+ */
+function StatusPill({
+  confirmed,
+  onToggle,
+}: {
+  confirmed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <Tooltip label={confirmed ? "Mark as draft" : "Mark as confirmed"}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-pressed={confirmed}
+        aria-label={confirmed ? "Mark as draft" : "Mark as confirmed"}
+        className={cn(
+          "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5",
+          "text-[11px] font-medium transition-colors",
+          confirmed
+            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
+            : "border-amber-500/30 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20"
+        )}
+      >
+        {confirmed ? (
+          <CheckCheck className="h-3 w-3" />
+        ) : (
+          <CircleDashed className="h-3 w-3" />
+        )}
+        {confirmed ? "Confirmed" : "Draft"}
+      </button>
+    </Tooltip>
+  );
+}
 
 export function isMappableLocation(value: string | undefined | null): boolean {
   const text = (value ?? "").trim();
@@ -207,6 +257,7 @@ export type Draft = {
   endTime: string;
   cost: string;
   notes: string;
+  confirmed: boolean;
 };
 
 export const emptyDraft = (type: ReservationType = "flight"): Draft => ({
@@ -221,6 +272,9 @@ export const emptyDraft = (type: ReservationType = "flight"): Draft => ({
   endTime: "",
   cost: "",
   notes: "",
+  // A booking added by hand is one you have made; a draft is the exception you
+  // opt into, not the state you start in.
+  confirmed: true,
 });
 
 export const toDraft = (r: Reservation): Draft => ({
@@ -235,6 +289,7 @@ export const toDraft = (r: Reservation): Draft => ({
   endTime: r.endTime,
   cost: r.cost,
   notes: r.notes,
+  confirmed: r.confirmed,
 });
 
 /** "16:45" → "4:45 PM". Leaves anything unparseable untouched. */
@@ -259,6 +314,11 @@ export function TripReservations({ tripId }: { tripId: string }) {
   const [showAll, setShowAll] = useState(false);
 
   const canAdd = draft.title.trim().length > 0 && !busy;
+
+  // Pending decisions in this trip. Counted from the full list, not the
+  // collapsed `Show all` slice, so the badge does not change meaning when the
+  // list is expanded.
+  const draftCount = items.filter((r) => !r.confirmed).length;
 
   const submitNew = async () => {
     if (!canAdd) return;
@@ -322,6 +382,18 @@ export function TripReservations({ tripId }: { tripId: string }) {
     } finally {
       setBusy(false);
     }
+  };
+
+  /*
+   * Flip a booking between confirmed and draft.
+   *
+   * Optimistic on purpose: the AppContext `update` publishes the new state
+   * immediately and rolls back on failure, so the pill responds on tap instead
+   * of after a round trip. The mutation is also the same one the editor uses,
+   * so toggling here and toggling in the form cannot drift apart.
+   */
+  const toggleConfirmed = async (r: Reservation) => {
+    await reservation.update(r.id, { confirmed: !r.confirmed });
   };
 
   const remove = async (id: string) => {
@@ -499,6 +571,17 @@ export function TripReservations({ tripId }: { tripId: string }) {
               {items.length}
             </span>
           )}
+          {/*
+            Surface the draft count here because it is the one thing about this
+            list you cannot see at a glance once it is long — the pills are
+            per-row, so counting them means reading every row. Only shown when
+            non-zero: a permanent "0 drafts" is noise.
+          */}
+          {draftCount > 0 && (
+            <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-300">
+              {draftCount} draft{draftCount === 1 ? "" : "s"}
+            </span>
+          )}
         </div>
 
         {!adding && (
@@ -617,7 +700,15 @@ export function TripReservations({ tripId }: { tripId: string }) {
 
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start justify-between gap-2">
-                    <p className="truncate text-sm font-medium text-zinc-100">{r.title}</p>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <p className="truncate text-sm font-medium text-zinc-100">
+                        {r.title}
+                      </p>
+                      <StatusPill
+                        confirmed={r.confirmed}
+                        onToggle={() => toggleConfirmed(r)}
+                      />
+                    </div>
                     <div className="flex shrink-0 items-center gap-1 transition-opacity md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100">
                       <Tooltip label="Edit booking">
                         <button
