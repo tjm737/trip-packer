@@ -51,6 +51,8 @@ import { Badge } from "@/components/ui/badge";
 import { TripTasks } from "@/components/TripTasks";
 import { TripReservations } from "@/components/TripReservations";
 import { TripMap } from "@/components/TripMap";
+import { Tabs } from "@/components/Tabs";
+import { observeEditRequests } from "@/lib/editRequest";
 import {
   Select,
   SelectContent,
@@ -378,6 +380,23 @@ export default function TripDetail() {
   const [isReady, setIsReady] = useState(false);
 
   /*
+   * Which of the four sections is showing. Kept in component state rather than
+   * the URL: the tabs are a view switcher over one page, and pushing history
+   * entries for them would make the back button step through tabs instead of
+   * leaving the trip.
+   */
+  const [tab, setTab] = useState<"map" | "itinerary" | "packing" | "notes">("map");
+
+  /*
+   * A stop on the map can hand off to the full booking editor, which lives on
+   * the Itinerary tab. Switch there so the panel is mounted to receive the
+   * request — otherwise the click changes nothing the user can see.
+   */
+  useEffect(() => {
+    return observeEditRequests(() => setTab("itinerary"));
+  }, []);
+
+  /*
    * Resolve the trip, falling back to the server when context has never seen
    * this id.
    *
@@ -629,444 +648,484 @@ export default function TripDetail() {
         </div>
       </header>
 
-      {/* Main content */}
+      {/* Main content.
+           Four sections that used to be one long scroll. The header above stays
+           put so the trip identity and packing progress are always visible. */}
       <main className="max-w-5xl mx-auto px-4 sm:px-8 py-4 sm:py-6">
-        {/* Route map built from the bookings.
-             Leads the page: it is the one-glance answer to "where is this
-             trip", where notes and tasks are reference material you scroll
-             for. Full width rather than the old 7fr column, because the
-             great-circle arcs need horizontal room to stay legible. */}
-        <TripMap tripId={tripInfo.id} />
-
-        {/* Notes and tasks sit side by side: stacked they cost 593px (351 +
-             242) of vertical space for two short blocks. `items-start` keeps
-             each card at its natural height instead of stretching the shorter
-             one to match. */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6 items-start mb-6">
-          {/* Notes section */}
-          <div className="p-4 rounded-xl border border-zinc-800 surface-raised">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium text-zinc-300 flex items-center gap-1.5">
-                <Flag className="w-3.5 h-3.5 text-zinc-500" />
-                Notes
-              </span>
-              <Tooltip label={editingNotes ? "Save notes" : "Edit notes"} side="left">
-              <Button
-                size="sm"
-                variant="ghost"
-                aria-label={editingNotes ? "Save notes" : "Edit notes"}
-                className="h-6 px-2 text-zinc-500 hover:text-zinc-300 focus-ring"
-                onClick={() => {
-                  if (editingNotes) {
-                    handleSaveNotes();
-                  } else {
-                    setNotesText(tripInfo.notes);
-                    setEditingNotes(true);
-                  }
-                }}
-              >
-                <Edit3 className="w-3 h-3" />
-              </Button>
-              </Tooltip>
-            </div>
-            {editingNotes ? (
-              <Textarea
-                value={notesText}
-                onChange={(e) => setNotesText(e.target.value)}
-                onBlur={handleSaveNotes}
-                autoFocus
-                className="bg-transparent border-none text-sm text-zinc-300 resize-none focus-visible:ring-0"
-                rows={Math.min(24, Math.max(3, notesText.split("\n").length + 1))}
-              />
-            ) : (
-              /* pre-line keeps the line breaks an imported itinerary relies on
-                 to separate days. Without it the whole day-by-day body collapses
-                 into a single run-on paragraph. Capped short of half the viewport
-                 and scrollable, because an imported itinerary runs to a few
-                 thousand characters and would otherwise push the packing list
-                 below the fold. */
-              <p className="text-sm text-zinc-400 whitespace-pre-line max-h-[45vh] overflow-y-auto">
-                {tripInfo.notes || "No notes yet..."}
-              </p>
-            )}
-          </div>
-
-          {/* Pre-trip tasks */}
-          <TripTasks tripId={tripInfo.id} />
-        </div>
-
-        {/* Bookings: flights, lodging, cars. Full width now that the map has
-             moved to the top of the page; it no longer shares a row with
-             anything, so the old 5fr/7fr grid is gone. */}
-        <TripReservations tripId={tripInfo.id} />
-
-        {/* Weather forecast section */}
-        {tripInfo.destination && (
-          <div className="mb-6 p-4 rounded-xl border border-zinc-800 surface-raised">
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-sm font-medium text-zinc-300 flex items-center gap-1.5">
-                <Thermometer className="w-3.5 h-3.5 text-zinc-500" />
-                {forecastReaches ? "Weather Forecast" : "Current Weather"}
-              </span>
-              <Tooltip label="Refresh weather" side="left">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  aria-label="Refresh weather"
-                  className="w-6 h-6 text-zinc-500 hover:text-zinc-200 focus-ring"
-                  onClick={handleRefreshWeather}
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                </Button>
-              </Tooltip>
-            </div>
-
-            {!forecastReaches && !hasDates && weather && (
-              <p className="text-xs text-zinc-400 mb-3 leading-relaxed">
-                Add a start and end date to see a forecast and typical conditions
-                for your travel window. The readings below are conditions at this
-                destination right now.
-              </p>
-            )}
-
-            {!forecastReaches && hasDates && weather && (
-              <p className="text-xs text-amber-400/90 mb-3 leading-relaxed">
-                Your trip is more than 16 days out, so a forecast isn&apos;t available yet.
-                The readings below are conditions at this destination right now — see
-                Historical Climate below for what to actually expect.
-              </p>
-            )}
-
-            {weatherLoading && !weather ? (
-              <div className="flex items-center gap-3 py-4">
-                <div className="w-4 h-4 border-2 border-zinc-600 border-t-emerald-500 rounded-full animate-spin" />
-                <span className="text-sm text-zinc-400">Fetching weather for {tripInfo.destination}...</span>
-              </div>
-            ) : weatherError ? (
-              <div className="flex items-center gap-3 py-4">
-                <span className="text-sm text-amber-400">{weatherError}</span>
-              </div>
-            ) : weather ? (
-              <div className="space-y-4">
-                {/* Current conditions card */}
-                <div className="flex items-center gap-4 p-3 rounded-lg surface-inset border border-zinc-800/60">
-                  <span className="text-3xl">{weather.icon}</span>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg font-medium text-white">{Math.round(weather.temperature)}°F</span>
-                      <span className="text-sm text-zinc-400">{weather.condition}</span>
-                      {!forecastReaches && (
-                        <span className="text-xs text-zinc-600">· right now</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-3 mt-1 text-xs text-zinc-500">
-                      <span className="flex items-center gap-1"><Droplets className="w-3 h-3" />{weather.precipitation.toFixed(2)} in</span>
-                      <span className="flex items-center gap-1"><Wind className="w-3 h-3" />{Math.round(weather.windSpeed)} mph</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 7-day forecast — only meaningful when it can reach the trip */}
-                {forecastReaches && (
-                  <div>
-                    <p className="text-xs text-zinc-500 mb-2">Daily high / low (°F)</p>
-                    <div className="grid grid-cols-7 gap-1">
-                      {weather.daily.slice(0, 7).map((day) => (
-                        <div key={day.date} className="text-center p-2 rounded-lg surface-inset border border-zinc-800/60">
-                          <p className="text-xs text-zinc-500 mb-1">
-                            {new Date(day.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short" })}
-                          </p>
-                          <span className="text-sm block mb-1">{day.icon}</span>
-                          <p className="text-xs text-emerald-400">{Math.round(day.tempMax)}°</p>
-                          <p className="text-xs text-zinc-600">{Math.round(day.tempMin)}°</p>
+        <Tabs
+          value={tab}
+          onChange={(id) => setTab(id as typeof tab)}
+          tabs={[
+            {
+              id: "map",
+              label: "Map",
+              icon: <MapPin className="w-3.5 h-3.5" />,
+              content: (
+                <>
+                  {/* Route map built from the bookings. */}
+                  <TripMap tripId={tripInfo.id} />
+                </>
+              ),
+            },
+            {
+              id: "itinerary",
+              label: "Itinerary",
+              icon: <Calendar className="w-3.5 h-3.5" />,
+              content: (
+                <>
+                  {/* Bookings, then weather for the same stretch of days. */}
+                  <div className="space-y-6">
+                    {/* Bookings: flights, lodging, cars, trains, ferries. */}
+                    <TripReservations tripId={tripInfo.id} />
+                    {/* Weather forecast section */}
+                    {tripInfo.destination && (
+                      <div className="mb-6 p-4 rounded-xl border border-zinc-800 surface-raised">
+                        <div className="flex items-center justify-between mb-4">
+                          <span className="text-sm font-medium text-zinc-300 flex items-center gap-1.5">
+                            <Thermometer className="w-3.5 h-3.5 text-zinc-500" />
+                            {forecastReaches ? "Weather Forecast" : "Current Weather"}
+                          </span>
+                          <Tooltip label="Refresh weather" side="left">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              aria-label="Refresh weather"
+                              className="w-6 h-6 text-zinc-500 hover:text-zinc-200 focus-ring"
+                              onClick={handleRefreshWeather}
+                            >
+                              <RefreshCw className="w-3.5 h-3.5" />
+                            </Button>
+                          </Tooltip>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
 
-                {/* Weather-based packing suggestions */}
-                {suggestions.length > 0 && (
-                  <div>
-                    <button
-                      onClick={() => setShowSuggestions(!showSuggestions)}
-                      className="flex items-center gap-2 text-sm font-medium text-emerald-400 hover:text-emerald-300 transition-colors w-full"
-                    >
-                      <Umbrella className="w-3.5 h-3.5" />
-                      {showSuggestions ? "Hide" : "Show"} Weather-Based Suggestions
-                      <ChevronDown className={`w-3 h-3 ml-auto transition-transform ${showSuggestions ? "rotate-180" : ""}`} />
-                    </button>
+                        {!forecastReaches && !hasDates && weather && (
+                          <p className="text-xs text-zinc-400 mb-3 leading-relaxed">
+                            Add a start and end date to see a forecast and typical conditions
+                            for your travel window. The readings below are conditions at this
+                            destination right now.
+                          </p>
+                        )}
 
-                    <AnimatePresence>
-                      {showSuggestions && (
-                        <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: "auto", opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.2 }}
-                          className="overflow-hidden"
-                        >
-                          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {suggestions.map((sugg, i) => {
-                              const existingItem = helpers.getItemsForCategoryAndName(
-                                tripId,
-                                "Weather Suggestions",
-                                sugg.name
-                              );
-                              return (
-                                <div
-                                  key={i}
-                                  className={`flex items-center gap-2 p-2 rounded-lg border text-sm cursor-pointer transition-all ${
-                                    existingItem
-                                      ? "bg-emerald-900/20 border-emerald-700/30 text-emerald-400/70"
-                                      : "bg-zinc-800/50 border-zinc-700/50 text-zinc-300 hover:bg-zinc-700/50 hover:border-zinc-600"
-                                  }`}
-                                  title={existingItem ? "Already in list" : "Click to add to packing list"}
-                                >
-                                  <span>{sugg.icon}</span>
-                                  <span className="flex-1 truncate">{sugg.name}</span>
-                                  {existingItem ? (
-                                    <Check className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
-                                  ) : (
-                                    <Plus
-                                      className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0"
-                                      onClick={async (e) => {
-                                        e.stopPropagation();
-                                        const weatherCat = await helpers.findOrCreateCategory(tripId, "Weather Suggestions", "🌤️");
-                                        await itemActions.create(tripId, weatherCat, sugg.name, "🌤️", 1);
-                                      }}
-                                    />
+                        {!forecastReaches && hasDates && weather && (
+                          <p className="text-xs text-amber-400/90 mb-3 leading-relaxed">
+                            Your trip is more than 16 days out, so a forecast isn&apos;t available yet.
+                            The readings below are conditions at this destination right now — see
+                            Historical Climate below for what to actually expect.
+                          </p>
+                        )}
+
+                        {weatherLoading && !weather ? (
+                          <div className="flex items-center gap-3 py-4">
+                            <div className="w-4 h-4 border-2 border-zinc-600 border-t-emerald-500 rounded-full animate-spin" />
+                            <span className="text-sm text-zinc-400">Fetching weather for {tripInfo.destination}...</span>
+                          </div>
+                        ) : weatherError ? (
+                          <div className="flex items-center gap-3 py-4">
+                            <span className="text-sm text-amber-400">{weatherError}</span>
+                          </div>
+                        ) : weather ? (
+                          <div className="space-y-4">
+                            {/* Current conditions card */}
+                            <div className="flex items-center gap-4 p-3 rounded-lg surface-inset border border-zinc-800/60">
+                              <span className="text-3xl">{weather.icon}</span>
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-lg font-medium text-white">{Math.round(weather.temperature)}°F</span>
+                                  <span className="text-sm text-zinc-400">{weather.condition}</span>
+                                  {!forecastReaches && (
+                                    <span className="text-xs text-zinc-600">· right now</span>
                                   )}
                                 </div>
-                              );
-                            })}
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                )}
-              </div>
-            ) : null}
-          </div>
-        )}
-
-        {/* Historical climate — same dates in prior years */}
-        {tripInfo.destination && tripInfo.startDate && tripInfo.endDate && (
-          <div className="mb-6 p-4 rounded-xl border border-zinc-800 surface-raised">
-            <button
-              onClick={() => setShowClimate(!showClimate)}
-              className="flex items-center gap-1.5 text-sm font-medium text-zinc-300 hover:text-white transition-colors w-full"
-              title={showClimate ? "Collapse historical climate" : "Expand historical climate"}
-            >
-              <CalendarDays className="w-3.5 h-3.5 text-zinc-500" />
-              Historical Climate
-              <span className="text-xs font-normal text-zinc-600 ml-1">
-                {climate ? `${climate.sampledYears} yr avg` : ""}
-              </span>
-              <ChevronDown
-                className={`w-3 h-3 ml-auto transition-transform ${showClimate ? "rotate-180" : ""}`}
-              />
-            </button>
-
-            {climateLoading && !climate ? (
-              <div className="flex items-center gap-3 py-3 mt-3">
-                <div className="w-4 h-4 border-2 border-zinc-600 border-t-emerald-500 rounded-full animate-spin" />
-                <span className="text-sm text-zinc-400">
-                  Loading past years for {tripInfo.destination}...
-                </span>
-              </div>
-            ) : climate ? (
-              <AnimatePresence initial={false}>
-                {showClimate && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="pt-3 space-y-4">
-                      <p className="text-xs text-zinc-500">
-                        What {climate.windowStart} – {climate.windowEnd} has typically looked like
-                        at this destination, based on the last {climate.sampledYears} years.
-                      </p>
-
-                      {/* Averages */}
-                      <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
-                        <div className="p-2.5 rounded-lg surface-inset border border-zinc-800/60 text-center">
-                          <p className="text-xs text-zinc-500 mb-1">Avg High</p>
-                          <p className="text-lg font-medium text-emerald-400">
-                            {Math.round(climate.avgHigh)}°F
-                          </p>
-                        </div>
-                        <div className="p-2.5 rounded-lg surface-inset border border-zinc-800/60 text-center">
-                          <p className="text-xs text-zinc-500 mb-1">Avg Low</p>
-                          <p className="text-lg font-medium text-sky-400">
-                            {Math.round(climate.avgLow)}°F
-                          </p>
-                        </div>
-                        <div className="p-2.5 rounded-lg surface-inset border border-zinc-800/60 text-center">
-                          <p className="text-xs text-zinc-500 mb-1">Wet Days</p>
-                          <p className="text-lg font-medium text-zinc-300">
-                            {climate.avgWetDays.toFixed(1)}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Year-by-year */}
-                      <div>
-                        <p className="text-xs text-zinc-500 mb-2">Year by year</p>
-                        <div className="space-y-1">
-                          {climate.years.map((y) => (
-                            <div
-                              key={y.year}
-                              className="flex items-center gap-3 px-2.5 py-1.5 rounded-lg surface-inset border border-zinc-800/50 text-xs"
-                              title={`${y.year}: avg high ${y.tempMaxAvg}°F, avg low ${y.tempMinAvg}°F, peak ${y.tempMaxPeak}°F, low ${y.tempMinFloor}°F, ${y.precipitationTotal}in over ${y.wetDays} wet day(s)`}
-                            >
-                              <span className="text-zinc-500 w-10 flex-shrink-0">{y.year}</span>
-                              <span className="text-zinc-600 w-4 flex-shrink-0">{y.icon}</span>
-                              <span className="text-emerald-400 w-14 flex-shrink-0">
-                                {Math.round(y.tempMaxAvg)}°
-                              </span>
-                              <span className="text-sky-400 w-14 flex-shrink-0">
-                                {Math.round(y.tempMinAvg)}°
-                              </span>
-                              <span
-                                className={`flex-1 truncate text-right ${
-                                  y.precipitationTotal > 0.01 ? "text-zinc-400" : "text-zinc-600"
-                                }`}
-                              >
-                                {y.precipitationTotal > 0.01
-                                  ? `${y.precipitationTotal.toFixed(2)} in · ${y.wetDays}d wet`
-                                  : "dry"}
-                              </span>
-                              <span className="text-zinc-500 w-10 flex-shrink-0 text-right">
-                                {y.condition === "Clear sky" ? "Clear" : y.condition}
-                              </span>
+                                <div className="flex items-center gap-3 mt-1 text-xs text-zinc-500">
+                                  <span className="flex items-center gap-1"><Droplets className="w-3 h-3" />{weather.precipitation.toFixed(2)} in</span>
+                                  <span className="flex items-center gap-1"><Wind className="w-3 h-3" />{Math.round(weather.windSpeed)} mph</span>
+                                </div>
+                              </div>
                             </div>
-                          ))}
-                        </div>
+
+                            {/* 7-day forecast — only meaningful when it can reach the trip */}
+                            {forecastReaches && (
+                              <div>
+                                <p className="text-xs text-zinc-500 mb-2">Daily high / low (°F)</p>
+                                <div className="grid grid-cols-7 gap-1">
+                                  {weather.daily.slice(0, 7).map((day) => (
+                                    <div key={day.date} className="text-center p-2 rounded-lg surface-inset border border-zinc-800/60">
+                                      <p className="text-xs text-zinc-500 mb-1">
+                                        {new Date(day.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short" })}
+                                      </p>
+                                      <span className="text-sm block mb-1">{day.icon}</span>
+                                      <p className="text-xs text-emerald-400">{Math.round(day.tempMax)}°</p>
+                                      <p className="text-xs text-zinc-600">{Math.round(day.tempMin)}°</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Weather-based packing suggestions */}
+                            {suggestions.length > 0 && (
+                              <div>
+                                <button
+                                  onClick={() => setShowSuggestions(!showSuggestions)}
+                                  className="flex items-center gap-2 text-sm font-medium text-emerald-400 hover:text-emerald-300 transition-colors w-full"
+                                >
+                                  <Umbrella className="w-3.5 h-3.5" />
+                                  {showSuggestions ? "Hide" : "Show"} Weather-Based Suggestions
+                                  <ChevronDown className={`w-3 h-3 ml-auto transition-transform ${showSuggestions ? "rotate-180" : ""}`} />
+                                </button>
+
+                                <AnimatePresence>
+                                  {showSuggestions && (
+                                    <motion.div
+                                      initial={{ height: 0, opacity: 0 }}
+                                      animate={{ height: "auto", opacity: 1 }}
+                                      exit={{ height: 0, opacity: 0 }}
+                                      transition={{ duration: 0.2 }}
+                                      className="overflow-hidden"
+                                    >
+                                      <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        {suggestions.map((sugg, i) => {
+                                          const existingItem = helpers.getItemsForCategoryAndName(
+                                            tripId,
+                                            "Weather Suggestions",
+                                            sugg.name
+                                          );
+                                          return (
+                                            <div
+                                              key={i}
+                                              className={`flex items-center gap-2 p-2 rounded-lg border text-sm cursor-pointer transition-all ${
+                                                existingItem
+                                                  ? "bg-emerald-900/20 border-emerald-700/30 text-emerald-400/70"
+                                                  : "bg-zinc-800/50 border-zinc-700/50 text-zinc-300 hover:bg-zinc-700/50 hover:border-zinc-600"
+                                              }`}
+                                              title={existingItem ? "Already in list" : "Click to add to packing list"}
+                                            >
+                                              <span>{sugg.icon}</span>
+                                              <span className="flex-1 truncate">{sugg.name}</span>
+                                              {existingItem ? (
+                                                <Check className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
+                                              ) : (
+                                                <Plus
+                                                  className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0"
+                                                  onClick={async (e) => {
+                                                    e.stopPropagation();
+                                                    const weatherCat = await helpers.findOrCreateCategory(tripId, "Weather Suggestions", "🌤️");
+                                                    await itemActions.create(tripId, weatherCat, sugg.name, "🌤️", 1);
+                                                  }}
+                                                />
+                                              )}
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
+                              </div>
+                            )}
+                          </div>
+                        ) : null}
                       </div>
+                    )}
 
-                      {/* Extremes note */}
-                      <p className="text-xs text-zinc-600 leading-relaxed">
-                        Warmest year was {climate.warmestYear}, coolest was {climate.coolestYear},
-                        and {climate.wettestYear} was the wettest. Peak temperatures in the window
-                        have ranged from {Math.min(...climate.years.map((y) => y.tempMinFloor))}°F to{" "}
-                        {Math.max(...climate.years.map((y) => y.tempMaxPeak))}°F.
-                      </p>
+        
+                    {/* Historical climate — same dates in prior years */}
+                    {tripInfo.destination && tripInfo.startDate && tripInfo.endDate && (
+                      <div className="mb-6 p-4 rounded-xl border border-zinc-800 surface-raised">
+                        <button
+                          onClick={() => setShowClimate(!showClimate)}
+                          className="flex items-center gap-1.5 text-sm font-medium text-zinc-300 hover:text-white transition-colors w-full"
+                          title={showClimate ? "Collapse historical climate" : "Expand historical climate"}
+                        >
+                          <CalendarDays className="w-3.5 h-3.5 text-zinc-500" />
+                          Historical Climate
+                          <span className="text-xs font-normal text-zinc-600 ml-1">
+                            {climate ? `${climate.sampledYears} yr avg` : ""}
+                          </span>
+                          <ChevronDown
+                            className={`w-3 h-3 ml-auto transition-transform ${showClimate ? "rotate-180" : ""}`}
+                          />
+                        </button>
+
+                        {climateLoading && !climate ? (
+                          <div className="flex items-center gap-3 py-3 mt-3">
+                            <div className="w-4 h-4 border-2 border-zinc-600 border-t-emerald-500 rounded-full animate-spin" />
+                            <span className="text-sm text-zinc-400">
+                              Loading past years for {tripInfo.destination}...
+                            </span>
+                          </div>
+                        ) : climate ? (
+                          <AnimatePresence initial={false}>
+                            {showClimate && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: "auto", opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.2 }}
+                                className="overflow-hidden"
+                              >
+                                <div className="pt-3 space-y-4">
+                                  <p className="text-xs text-zinc-500">
+                                    What {climate.windowStart} – {climate.windowEnd} has typically looked like
+                                    at this destination, based on the last {climate.sampledYears} years.
+                                  </p>
+
+                                  {/* Averages */}
+                                  <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+                                    <div className="p-2.5 rounded-lg surface-inset border border-zinc-800/60 text-center">
+                                      <p className="text-xs text-zinc-500 mb-1">Avg High</p>
+                                      <p className="text-lg font-medium text-emerald-400">
+                                        {Math.round(climate.avgHigh)}°F
+                                      </p>
+                                    </div>
+                                    <div className="p-2.5 rounded-lg surface-inset border border-zinc-800/60 text-center">
+                                      <p className="text-xs text-zinc-500 mb-1">Avg Low</p>
+                                      <p className="text-lg font-medium text-sky-400">
+                                        {Math.round(climate.avgLow)}°F
+                                      </p>
+                                    </div>
+                                    <div className="p-2.5 rounded-lg surface-inset border border-zinc-800/60 text-center">
+                                      <p className="text-xs text-zinc-500 mb-1">Wet Days</p>
+                                      <p className="text-lg font-medium text-zinc-300">
+                                        {climate.avgWetDays.toFixed(1)}
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  {/* Year-by-year */}
+                                  <div>
+                                    <p className="text-xs text-zinc-500 mb-2">Year by year</p>
+                                    <div className="space-y-1">
+                                      {climate.years.map((y) => (
+                                        <div
+                                          key={y.year}
+                                          className="flex items-center gap-3 px-2.5 py-1.5 rounded-lg surface-inset border border-zinc-800/50 text-xs"
+                                          title={`${y.year}: avg high ${y.tempMaxAvg}°F, avg low ${y.tempMinAvg}°F, peak ${y.tempMaxPeak}°F, low ${y.tempMinFloor}°F, ${y.precipitationTotal}in over ${y.wetDays} wet day(s)`}
+                                        >
+                                          <span className="text-zinc-500 w-10 flex-shrink-0">{y.year}</span>
+                                          <span className="text-zinc-600 w-4 flex-shrink-0">{y.icon}</span>
+                                          <span className="text-emerald-400 w-14 flex-shrink-0">
+                                            {Math.round(y.tempMaxAvg)}°
+                                          </span>
+                                          <span className="text-sky-400 w-14 flex-shrink-0">
+                                            {Math.round(y.tempMinAvg)}°
+                                          </span>
+                                          <span
+                                            className={`flex-1 truncate text-right ${
+                                              y.precipitationTotal > 0.01 ? "text-zinc-400" : "text-zinc-600"
+                                            }`}
+                                          >
+                                            {y.precipitationTotal > 0.01
+                                              ? `${y.precipitationTotal.toFixed(2)} in · ${y.wetDays}d wet`
+                                              : "dry"}
+                                          </span>
+                                          <span className="text-zinc-500 w-10 flex-shrink-0 text-right">
+                                            {y.condition === "Clear sky" ? "Clear" : y.condition}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+
+                                  {/* Extremes note */}
+                                  <p className="text-xs text-zinc-600 leading-relaxed">
+                                    Warmest year was {climate.warmestYear}, coolest was {climate.coolestYear},
+                                    and {climate.wettestYear} was the wettest. Peak temperatures in the window
+                                    have ranged from {Math.min(...climate.years.map((y) => y.tempMinFloor))}°F to{" "}
+                                    {Math.max(...climate.years.map((y) => y.tempMaxPeak))}°F.
+                                  </p>
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        ) : (
+                          <p className="text-sm text-zinc-500 py-3 mt-3">
+                            No historical data available for this destination. It may be
+                            temporarily unavailable — try refreshing in a moment.
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+        
+                  </div>
+                </>
+              ),
+            },
+            {
+              id: "packing",
+              label: "Packing",
+              icon: <Cloud className="w-3.5 h-3.5" />,
+              content: (
+                <>
+                    {/* Packing list.
+                     Categories flow into two columns at lg: as a single column this
+                     block alone ran ~1850px (nearly 3 screens), because each category
+                     stacks one item per row with a mostly-empty middle. The two-column
+                     grid nearly halves the page height. `items-start` stops a short
+                     category from stretching to match a tall neighbour. */}
+                    {categories.length === 0 ? (
+                      <div className="text-center py-16">
+                    <Cloud className="w-12 h-12 text-zinc-700 mx-auto mb-3" />
+                    <p className="text-zinc-400 mb-4">No categories yet</p>
+                    <Button
+                      variant="outline"
+                      className="border-zinc-700 text-zinc-300"
+                      onClick={() => {
+                        catActions.create(tripId, "Custom", "⭐");
+                      }}
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add a Category
+                    </Button>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-4 gap-y-2 items-start">
+                    {categories.map((cat) => (
+                      <CategorySection
+                        key={cat.id}
+                        category={cat}
+                        items={helpers.getItems(cat.id)}
+                        tripProgress={progress}
+                        tripTotal={categories.length}
+                      />
+                    ))}
+
+                    {/* Add Category — inline field rather than window.prompt(), which
+                        looked alien against the dark UI and couldn't be styled or
+                        cancelled with anything but a browser-native dialog.
+                        Spans both columns so it sits below the grid, not inside a cell. */}
+                    <div className="py-2 px-3 lg:col-span-2">
+                      {addingCategory ? (
+                        <form
+                          className="flex items-center gap-2"
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            const name = newCategoryName.trim();
+                            if (!name) return;
+                            catActions.create(tripId, name, "⭐");
+                            setNewCategoryName("");
+                            setAddingCategory(false);
+                          }}
+                        >
+                          <Input
+                            value={newCategoryName}
+                            onChange={(e) => setNewCategoryName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") {
+                                setNewCategoryName("");
+                                setAddingCategory(false);
+                              }
+                            }}
+                            placeholder="Category name"
+                            autoFocus
+                            aria-label="New category name"
+                            className="h-8 max-w-xs text-sm surface-inset border-zinc-800"
+                          />
+                          <Button type="submit" size="sm" variant="ghost" className="h-8 text-emerald-400 hover:text-emerald-300">
+                            Add
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 text-zinc-500 hover:text-zinc-300"
+                            onClick={() => {
+                              setNewCategoryName("");
+                              setAddingCategory(false);
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        </form>
+                      ) : (
+                        <Tooltip label="Add a packing category" side="top">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 focus-ring"
+                            onClick={() => setAddingCategory(true)}
+                          >
+                            <Plus className="w-4 h-4 mr-1.5" />
+                            Add Category
+                          </Button>
+                        </Tooltip>
+                      )}
                     </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            ) : (
-              <p className="text-sm text-zinc-500 py-3 mt-3">
-                No historical data available for this destination. It may be
-                temporarily unavailable — try refreshing in a moment.
-              </p>
-            )}
-          </div>
-        )}
+                      </div>
+                    )}
 
-        {/* Packing list.
-             Categories flow into two columns at lg: as a single column this
-             block alone ran ~1850px (nearly 3 screens), because each category
-             stacks one item per row with a mostly-empty middle. The two-column
-             grid nearly halves the page height. `items-start` stops a short
-             category from stretching to match a tall neighbour. */}
-        {categories.length === 0 ? (
-          <div className="text-center py-16">
-            <Cloud className="w-12 h-12 text-zinc-700 mx-auto mb-3" />
-            <p className="text-zinc-400 mb-4">No categories yet</p>
-            <Button
-              variant="outline"
-              className="border-zinc-700 text-zinc-300"
-              onClick={() => {
-                catActions.create(tripId, "Custom", "⭐");
-              }}
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Add a Category
-            </Button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-4 gap-y-2 items-start">
-            {categories.map((cat) => (
-              <CategorySection
-                key={cat.id}
-                category={cat}
-                items={helpers.getItems(cat.id)}
-                tripProgress={progress}
-                tripTotal={categories.length}
-              />
-            ))}
+        
+                </>
+              ),
+            },
+            {
+              id: "notes",
+              label: "Notes",
+              icon: <Flag className="w-3.5 h-3.5" />,
+              content: (
+                <>
+                  {/* Notes and the pre-trip task list travel together: both are
+                      free-text reference material rather than trip data. */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6 items-start">
+                    {/* Notes section */}
+                    <div className="p-4 rounded-xl border border-zinc-800 surface-raised">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-zinc-300 flex items-center gap-1.5">
+                          <Flag className="w-3.5 h-3.5 text-zinc-500" />
+                          Notes
+                        </span>
+                        <Tooltip label={editingNotes ? "Save notes" : "Edit notes"} side="left">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          aria-label={editingNotes ? "Save notes" : "Edit notes"}
+                          className="h-6 px-2 text-zinc-500 hover:text-zinc-300 focus-ring"
+                          onClick={() => {
+                            if (editingNotes) {
+                              handleSaveNotes();
+                            } else {
+                              setNotesText(tripInfo.notes);
+                              setEditingNotes(true);
+                            }
+                          }}
+                        >
+                          <Edit3 className="w-3 h-3" />
+                        </Button>
+                        </Tooltip>
+                      </div>
+                      {editingNotes ? (
+                        <Textarea
+                          value={notesText}
+                          onChange={(e) => setNotesText(e.target.value)}
+                          onBlur={handleSaveNotes}
+                          autoFocus
+                          className="bg-transparent border-none text-sm text-zinc-300 resize-none focus-visible:ring-0"
+                          rows={Math.min(24, Math.max(3, notesText.split("\n").length + 1))}
+                        />
+                      ) : (
+                        /* pre-line keeps the line breaks an imported itinerary relies on
+                           to separate days. Without it the whole day-by-day body collapses
+                           into a single run-on paragraph. Capped short of half the viewport
+                           and scrollable, because an imported itinerary runs to a few
+                           thousand characters and would otherwise push the packing list
+                           below the fold. */
+                        <p className="text-sm text-zinc-400 whitespace-pre-line max-h-[45vh] overflow-y-auto">
+                          {tripInfo.notes || "No notes yet..."}
+                        </p>
+                      )}
+                    </div>
 
-            {/* Add Category — inline field rather than window.prompt(), which
-                looked alien against the dark UI and couldn't be styled or
-                cancelled with anything but a browser-native dialog.
-                Spans both columns so it sits below the grid, not inside a cell. */}
-            <div className="py-2 px-3 lg:col-span-2">
-              {addingCategory ? (
-                <form
-                  className="flex items-center gap-2"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const name = newCategoryName.trim();
-                    if (!name) return;
-                    catActions.create(tripId, name, "⭐");
-                    setNewCategoryName("");
-                    setAddingCategory(false);
-                  }}
-                >
-                  <Input
-                    value={newCategoryName}
-                    onChange={(e) => setNewCategoryName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Escape") {
-                        setNewCategoryName("");
-                        setAddingCategory(false);
-                      }
-                    }}
-                    placeholder="Category name"
-                    autoFocus
-                    aria-label="New category name"
-                    className="h-8 max-w-xs text-sm surface-inset border-zinc-800"
-                  />
-                  <Button type="submit" size="sm" variant="ghost" className="h-8 text-emerald-400 hover:text-emerald-300">
-                    Add
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="h-8 text-zinc-500 hover:text-zinc-300"
-                    onClick={() => {
-                      setNewCategoryName("");
-                      setAddingCategory(false);
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                </form>
-              ) : (
-                <Tooltip label="Add a packing category" side="top">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 focus-ring"
-                    onClick={() => setAddingCategory(true)}
-                  >
-                    <Plus className="w-4 h-4 mr-1.5" />
-                    Add Category
-                  </Button>
-                </Tooltip>
-              )}
-            </div>
-          </div>
-        )}
+                    {/* Pre-trip tasks */}
+                    <TripTasks tripId={tripInfo.id} />
+                  </div>
+                </>
+              ),
+            },
+          ]}
+        />
 
-        {/* Trip actions */}
+            {/* Trip actions */}
         <div className="mt-10 pt-6 border-t border-zinc-800/80 flex items-center gap-2">
           <Tooltip label="Change trip details" side="top">
             <Button
@@ -1102,10 +1161,10 @@ export default function TripDetail() {
               className="border-zinc-700 text-zinc-400 hover:text-red-400 hover:border-red-500/30 ml-auto focus-ring"
               onClick={async () => {
                 if (confirm(`Delete "${tripInfo.name}"? This cannot be undone.`)) {
-                  // Await the write: navigating first would unmount this page
-                  // mid-request and could drop the delete entirely.
-                  await trip.delete(tripId);
-                  router.push("/");
+            // Await the write: navigating first would unmount this page
+            // mid-request and could drop the delete entirely.
+            await trip.delete(tripId);
+            router.push("/");
                 }
               }}
             >
@@ -1114,6 +1173,7 @@ export default function TripDetail() {
             </Button>
           </Tooltip>
         </div>
+      
       </main>
     </div>
   );
