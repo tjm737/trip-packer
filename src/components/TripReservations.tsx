@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plane,
@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 
 import { useApp } from "@/lib/AppContext";
+import { subscribeEditRequests } from "@/lib/editRequest";
 import { Reservation, ReservationType } from "@/lib/types";
 import { formatDate, isValidDate } from "@/lib/dates";
 import { Button } from "@/components/ui/button";
@@ -72,7 +73,7 @@ const typeMeta = (t: ReservationType) => TYPES.find((x) => x.value === t) ?? TYP
  * two-location concept (departure → arrival) for travel types and a single
  * location for things that happen in one place.
  */
-const FIELDS: Record<
+export const FIELDS: Record<
   ReservationType,
   { fromLabel?: string; toLabel?: string; startLabel: string; endLabel?: string }
 > = {
@@ -85,7 +86,7 @@ const FIELDS: Record<
   other: { fromLabel: "Location", startLabel: "Starts", endLabel: "Ends" },
 };
 
-type Draft = {
+export type Draft = {
   type: ReservationType;
   title: string;
   confirmation: string;
@@ -99,7 +100,7 @@ type Draft = {
   notes: string;
 };
 
-const emptyDraft = (type: ReservationType = "flight"): Draft => ({
+export const emptyDraft = (type: ReservationType = "flight"): Draft => ({
   type,
   title: "",
   confirmation: "",
@@ -113,7 +114,7 @@ const emptyDraft = (type: ReservationType = "flight"): Draft => ({
   notes: "",
 });
 
-const toDraft = (r: Reservation): Draft => ({
+export const toDraft = (r: Reservation): Draft => ({
   type: r.type,
   title: r.title,
   confirmation: r.confirmation,
@@ -166,6 +167,39 @@ export function TripReservations({ tripId }: { tripId: string }) {
     setEditingId(r.id);
     setEditDraft(toDraft(r));
   };
+
+  /*
+   * Honour an "edit this booking" request from elsewhere on the page (today:
+   * the map's stop rows). Reading the record at fire time rather than trusting
+   * the caller's copy means the editor always opens on current stored values.
+   *
+   * The records are read through a ref so the subscription is installed once
+   * but always sees the latest data — capturing `items` directly in a
+   * mount-only effect would freeze it at the empty first render.
+   */
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  /* The panel's own root, so an external request can bring it into view. */
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    return subscribeEditRequests((id) => {
+      const r = itemsRef.current.find((x) => x.id === id);
+      if (!r) return;
+      setEditingId(r.id);
+      setEditDraft(toDraft(r));
+      /*
+       * The reservations panel sits below the map, so an "Open full editor"
+       * click from a map stop would otherwise appear to do nothing. Wait a
+       * frame for the editor to mount, then bring the row into view.
+       */
+      requestAnimationFrame(() => {
+        rootRef.current
+          ?.querySelector(`[data-reservation-id="${id}"]`)
+          ?.scrollIntoView({ block: "center", behavior: "smooth" });
+      });
+    });
+  }, []);
 
   const submitEdit = async () => {
     if (!editingId || !editDraft.title.trim() || busy) return;
@@ -346,7 +380,7 @@ export function TripReservations({ tripId }: { tripId: string }) {
   };
 
   return (
-    <div className="surface-raised rounded-xl border border-white/5 p-4 sm:p-5">
+    <div ref={rootRef} className="surface-raised rounded-xl border border-white/5 p-4 sm:p-5">
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <CalendarCheck className="h-4 w-4 text-emerald-400" />
@@ -425,7 +459,11 @@ export function TripReservations({ tripId }: { tripId: string }) {
 
           if (editing) {
             return (
-              <div key={r.id} className="surface-inset rounded-lg border border-emerald-500/20 p-3">
+              <div
+                key={r.id}
+                data-reservation-id={r.id}
+                className="surface-inset rounded-lg border border-emerald-500/20 p-3"
+              >
                 {renderFields(editDraft, setEditDraft)}
                 <div className="mt-3 flex items-center gap-2">
                   <Button size="sm" onClick={submitEdit} disabled={busy} className="gap-1.5">

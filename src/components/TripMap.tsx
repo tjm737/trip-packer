@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { MapPin, Route, Loader2, AlertTriangle, Clock, ExternalLink, Plane, GripVertical, ChevronUp, ChevronDown } from "lucide-react";
+import { MapPin, Route, Loader2, AlertTriangle, Clock, ExternalLink, Plane, GripVertical, ChevronUp, ChevronDown, Pencil } from "lucide-react";
 import "leaflet/dist/leaflet.css";
 
 import { useApp } from "@/lib/AppContext";
@@ -10,6 +10,7 @@ import { Reservation } from "@/lib/types";
 import { formatDate } from "@/lib/dates";
 import { readCachedCoords, writeCachedCoords } from "@/lib/geoCache";
 import { Tooltip } from "@/components/ui/tooltip";
+import { StopEditor } from "@/components/StopEditor";
 import { cn } from "cn";
 
 /*
@@ -181,6 +182,22 @@ function haversineM(a: LatLng, b: LatLng): number {
 }
 
 /**
+ * Beyond this, a hop is not a drive and must never be sent to the router.
+ *
+ * OSRM's public demo server carries only European road data, and it does NOT
+ * fail on a point it cannot represent — it silently snaps that endpoint to the
+ * nearest place in its dataset and returns a valid 200. Asking it for
+ * Philadelphia -> London returns a 1,331 mi "drive" starting in Lisbon, which
+ * paints a stray route line whose endpoint has no marker on it.
+ *
+ * Measured: PHL->LHR came back with origin [38.7807,-9.4977] vs the requested
+ * [39.8729,-75.2411]. The mirror hop LHR->PHL was worse in a quieter way — it
+ * kept its origin and routed 1,330 mi overland across Europe and Asia. A
+ * distance guard rejects both; checking only the returned origin catches one.
+ */
+const MAX_DRIVABLE_M = 2_400_000; // ~1,500 mi
+
+/**
  * Interpolate a great-circle path between two points.
  *
  * A straight line drawn in screen space is wrong for long hops: on a Mercator
@@ -251,6 +268,13 @@ export function TripMap({ tripId }: { tripId: string }) {
   const [loading, setLoading] = useState(true);
   const [mapReady, setMapReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  /*
+   * Which booking's inline editor is open in the stop list, if any. Keyed by
+   * reservation (not stop) because a flight's two pins are one record — editing
+   * either endpoint edits the same booking.
+   */
+  const [editingStopId, setEditingStopId] = useState<string | null>(null);
 
   /* Collect every distinct location named by a booking. */
   const locations = useMemo(() => {
@@ -414,12 +438,17 @@ export function TripMap({ tripId }: { tripId: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    // Road routing only makes sense for hops that are not flights.
+    // Road routing only makes sense for hops that are not flights, and only
+    // for hops near enough to plausibly be a drive. A transcontinental hop is
+    // never drivable — and OSRM does not reject one, it relocates the endpoint
+    // and returns a confident wrong route (see MAX_DRIVABLE_M). Never send it.
     const roadHops: { a: number; b: number }[] = [];
     for (let i = 0; i < stops.length - 1; i++) {
       const isAir =
         stops[i].reservationId === stops[i + 1].reservationId && stops[i].type === "flight";
-      if (!isAir) roadHops.push({ a: i, b: i + 1 });
+      if (isAir) continue;
+      if (haversineM(stops[i].point, stops[i + 1].point) > MAX_DRIVABLE_M) continue;
+      roadHops.push({ a: i, b: i + 1 });
     }
 
     if (roadHops.length === 0) {
@@ -930,10 +959,29 @@ export function TripMap({ tripId }: { tripId: string }) {
                   {s.date && <span className="shrink-0 text-zinc-500">{formatDate(s.date)}</span>}
 
                   {isGroupStart && (
-                    /* Keyboard/tap reordering. HTML5 drag is unavailable to
-                       keyboard and touch users, so the same operation is
-                       exposed as buttons. */
+                    /* Edit and reorder. HTML5 drag is unavailable to keyboard
+                       and touch users, so both operations are also exposed as
+                       buttons sized to the 24px minimum touch target. */
                     <span className="ml-auto flex shrink-0 items-center gap-0.5">
+                      <Tooltip label="Edit this stop">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEditingStopId((cur) => (cur === s.reservationId ? null : s.reservationId))
+                          }
+                          title="Edit this stop"
+                          aria-label={`Edit ${s.name}`}
+                          aria-expanded={editingStopId === s.reservationId}
+                          className={cn(
+                            "grid h-6 w-6 place-items-center rounded transition-colors",
+                            editingStopId === s.reservationId
+                              ? "text-emerald-400"
+                              : "text-zinc-600 hover:text-emerald-400"
+                          )}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                      </Tooltip>
                       <button
                         type="button"
                         onClick={() => nudge(s.reservationId, -1)}
@@ -977,6 +1025,17 @@ export function TripMap({ tripId }: { tripId: string }) {
                     )}
                   </div>
                 )}
+                {/*
+                  Inline editor. Rendered only on the group's first stop so a
+                  flight's two pins do not each offer their own copy of the same
+                  booking's form.
+                */}
+                {isGroupStart && editingStopId === s.reservationId && (() => {
+                  const res = reservations.find((x) => x.id === s.reservationId);
+                  return res ? (
+                    <StopEditor reservation={res} onClose={() => setEditingStopId(null)} />
+                  ) : null;
+                })()}
               </div>
             );
           })}
