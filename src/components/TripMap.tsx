@@ -8,6 +8,7 @@ import "leaflet/dist/leaflet.css";
 import { useApp } from "@/lib/AppContext";
 import { Reservation } from "@/lib/types";
 import { formatDate } from "@/lib/dates";
+import { readCachedCoords, writeCachedCoords } from "@/lib/geoCache";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "cn";
 
@@ -263,6 +264,28 @@ export function TripMap({ tripId }: { tripId: string }) {
 
   const locationKey = locations.join("|");
 
+  /*
+   * Location strings are often fragments that only mean something alongside
+   * their booking's title: a hotel whose location is just "Terminal 5" is a
+   * nightclub in Manhattan to a geocoder, but Heathrow's terminal once the
+   * title "Sofitel London Heathrow" is taken into account.
+   *
+   * A location may appear in more than one booking; the first title that owns
+   * it wins, and only locations that have a title are given context.
+   */
+  const contexts = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const r of reservations) {
+      const title = r.title?.trim();
+      if (!title) continue;
+      if (r.location && !map[r.location]) map[r.location] = title;
+      if (r.locationTo && !map[r.locationTo]) map[r.locationTo] = title;
+    }
+    return map;
+  }, [reservations]);
+
+  const contextKey = JSON.stringify(contexts);
+
   /* --- Step 1: geocode the locations ------------------------------------ */
   useEffect(() => {
     let cancelled = false;
@@ -276,11 +299,19 @@ export function TripMap({ tripId }: { tripId: string }) {
     (async () => {
       setLoading(true);
       setError(null);
+
+      /*
+       * Seed from previously resolved coordinates first, so a cached map
+       * appears immediately offline instead of after a failed request.
+       */
+      const cached = readCachedCoords(locations);
+      if (cached.size > 0 && !cancelled) setCoords(cached);
+
       try {
         const res = await fetch("/api/geo", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ locations }),
+          body: JSON.stringify({ locations, contexts }),
         });
         if (!res.ok) throw new Error(`Geocoding failed (${res.status})`);
         const data = (await res.json()) as {
@@ -290,8 +321,23 @@ export function TripMap({ tripId }: { tripId: string }) {
         if (cancelled) return;
         setCoords(new Map(data.points.map((p) => [p.query, { lat: p.lat, lng: p.lng }])));
         setUnresolved(data.unresolved ?? []);
+        // Persist so the next offline visit can draw the map.
+        writeCachedCoords(data.points);
       } catch {
-        if (!cancelled) setError("Could not look up those places. Check your connection.");
+        if (cancelled) return;
+        /*
+         * Offline (or the lookup failed). Fall back to whatever we had cached.
+         * Only report an error if that leaves us with nothing to draw —
+         * otherwise this is the offline case working as intended, not a
+         * failure worth showing the user.
+         */
+        const fallback = readCachedCoords(locations);
+        if (fallback.size > 0) {
+          setCoords(fallback);
+          setUnresolved([]);
+        } else {
+          setError("Could not look up those places. Check your connection.");
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -301,8 +347,9 @@ export function TripMap({ tripId }: { tripId: string }) {
       cancelled = true;
     };
     // locationKey is the stable identity of the location set; depending on the
-    // array itself would refetch on every render.
-  }, [locationKey]);
+    // array itself would refetch on every render. contextKey changes only when
+    // a disambiguating title changes, which can also change the answer.
+  }, [locationKey, contextKey]);
 
   /*
    * The list renders from `reservations`, with any active drag preview applied
