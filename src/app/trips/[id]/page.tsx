@@ -48,6 +48,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { TripTasks } from "@/components/TripTasks";
 import { TripReservations } from "@/components/TripReservations";
+import { TripMap } from "@/components/TripMap";
 import {
   Select,
   SelectContent,
@@ -653,6 +654,9 @@ export default function TripDetail() {
 
         {/* Bookings: flights, lodging, cars */}
         <TripReservations tripId={tripInfo.id} />
+
+        {/* Route map built from those bookings */}
+        <TripMap tripId={tripInfo.id} />
 
         {/* Weather forecast section */}
         {tripInfo.destination && (
