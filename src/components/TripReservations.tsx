@@ -106,6 +106,87 @@ function StatusPill({
   );
 }
 
+/*
+ * The same confirmed/draft choice, but for use inside a form.
+ *
+ * The row pill writes straight to the database, which is right for a one-tap
+ * toggle but wrong in here: a form that persists as you touch it makes Cancel a
+ * lie. This one edits the draft and nothing reaches the database until Save, so
+ * the two controls are separate components rather than one with a mode flag.
+ *
+ * Both options are laid out and the current one is marked, instead of a single
+ * button that flips. In a form the question is "which of these is it?", and
+ * showing both states as a choice answers that without the user having to
+ * predict what a tap would do.
+ */
+function StatusToggle({
+  confirmed,
+  onChange,
+}: {
+  confirmed: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  // These tones are applied only to the ACTIVE option, so they have to carry
+  // the whole selected/unselected distinction on their own. Measured on the
+  // rendered screenshot, an /10 fill over the panel read as (49,54,52) against
+  // (46,46,46) for the unselected option — a 2-point green delta nobody can see.
+  // The border is what actually signals selection, so it is solid rather than
+  // alpha (alpha blends with whatever is behind it, so its contrast is not
+  // knowable from this file) and the fill is raised to make the state legible
+  // at a glance.
+  const options = [
+    {
+      value: true,
+      label: "Confirmed",
+      icon: CheckCheck,
+      tone: "border-emerald-500 bg-emerald-500/25 text-emerald-200",
+    },
+    {
+      value: false,
+      label: "Draft",
+      icon: CircleDashed,
+      tone: "border-amber-500 bg-amber-500/25 text-amber-200",
+    },
+  ];
+
+  return (
+    <div>
+      <span className="mb-1.5 block text-xs text-zinc-400">Status</span>
+      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Status">
+        {options.map((o) => {
+          const OIcon = o.icon;
+          const active = confirmed === o.value;
+          return (
+            <Tooltip
+              key={o.label}
+              label={
+                o.value
+                  ? "This booking is booked and paid for"
+                  : "Not booked yet — still deciding"
+              }
+            >
+              <button
+                type="button"
+                onClick={() => onChange(o.value)}
+                aria-pressed={active}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs transition-colors",
+                  active
+                    ? o.tone
+                    : "border-white/8 bg-white/[0.02] text-zinc-400 hover:text-zinc-200"
+                )}
+              >
+                <OIcon className="h-3.5 w-3.5" />
+                {o.label}
+              </button>
+            </Tooltip>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function isMappableLocation(value: string | undefined | null): boolean {
   const text = (value ?? "").trim();
   if (text.length < 2) return false;
@@ -418,6 +499,11 @@ export function TripReservations({ tripId }: { tripId: string }) {
     const f = FIELDS[d.type];
     return (
       <div className="space-y-3">
+        <StatusToggle
+          confirmed={d.confirmed}
+          onChange={(next) => set((p) => ({ ...p, confirmed: next }))}
+        />
+
         {onTypeChange && (
           <div className="flex flex-wrap gap-1.5">
             {TYPES.map((t) => {
