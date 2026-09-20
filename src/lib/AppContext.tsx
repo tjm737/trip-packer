@@ -43,7 +43,9 @@ import {
   getReservationsForTrip,
   ReservationDraft,
   TaskStatus,
+  ApiError,
 } from "@/lib/storage";
+import { readCachedState, writeCachedState } from "@/lib/offlineCache";
 import { importItinerary } from "@/lib/importItinerary";
 import type { ParsedItinerary } from "@/lib/itineraryImport";
 
@@ -175,12 +177,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     (async () => {
+      // Paint from the cached copy first when there is one, so an offline cold
+      // start shows the itinerary immediately instead of an error. The network
+      // read below then reconciles it.
+      const cached = readCachedState();
+      if (cached && !cancelled) {
+        setState(cached.state);
+        setHydrated(true);
+      }
+
       try {
         const loaded = await fetchState();
         if (cancelled) return;
-        setState(loaded ?? (await initializeRemoteState()));
+        if (loaded) {
+          setState(loaded);
+          setError(null);
+        } else if (!cached) {
+          setState(await initializeRemoteState());
+        }
       } catch (err) {
-        if (!cancelled) {
+        if (cancelled) return;
+        // If we already rendered a cached copy, a failed refresh is not an
+        // error worth showing — the user is simply offline with saved data.
+        if (!cached) {
           setError(err instanceof Error ? err.message : "Failed to load your data");
         }
       } finally {
@@ -213,9 +232,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setState(authoritative);
           setError(null);
         }
+        // Keep the offline copy current even for a superseded response: the
+        // server state is authoritative regardless of which render wins.
+        writeCachedState(authoritative);
         return authoritative;
       } catch (err) {
         if (ticket === seq.current) {
+          // A queued-for-later write is not a failure — the optimistic state
+          // is the truth until it syncs, so keep it and do not raise an error.
+          if (err instanceof ApiError && err.status === 0) {
+            writeCachedState(optimistic(state));
+            return null;
+          }
           setState(snapshot);
           setError(err instanceof Error ? err.message : "Could not save your change");
         }

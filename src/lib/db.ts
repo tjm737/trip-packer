@@ -146,6 +146,28 @@ function migrate(db: SqliteDb): void {
       miss      INTEGER NOT NULL DEFAULT 0,
       createdAt TEXT NOT NULL
     );
+
+    /*
+     * Read-only share links.
+     *
+     * The token is the primary key because lookups are always by token — a
+     * shared URL only ever carries the token, never a trip id, so there is no
+     * query pattern that starts from the trip.
+     *
+     * Kept as a separate table rather than a shareToken column on trips so a
+     * trip can have several links (one per companion) and so revoking one does
+     * not disturb the others or the trip row itself.
+     *
+     * ON DELETE CASCADE: deleting the trip must not leave a live link serving a
+     * dangling id.
+     */
+    CREATE TABLE IF NOT EXISTS share_tokens (
+      token     TEXT PRIMARY KEY,
+      tripId    TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+      createdAt TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_share_tokens_trip ON share_tokens(tripId);
   `);
 }
 
@@ -588,5 +610,50 @@ export const tx = {
       tx.setActiveUser(s.activeUserId);
     });
     run(state);
+  },
+
+  /**
+   * Create a read-only share link for a trip.
+   *
+   * The token is generated with crypto.randomUUID rather than a counter or a
+   * hash of the trip id: it is the only thing guarding the trip, so it must not
+   * be guessable from a trip id an outsider could already have seen.
+   */
+  createShareToken(token: string, tripId: string): void {
+    getDb()
+      .prepare(
+        "INSERT INTO share_tokens (token, tripId, createdAt) VALUES (?, ?, ?)"
+      )
+      .run(token, tripId, new Date().toISOString());
+  },
+
+  /** All share links for a trip, newest first. */
+  listShareTokens(tripId: string): { token: string; createdAt: string }[] {
+    return getDb()
+      .prepare(
+        "SELECT token, createdAt FROM share_tokens WHERE tripId = ? ORDER BY createdAt DESC"
+      )
+      .all(tripId) as { token: string; createdAt: string }[];
+  },
+
+  /**
+   * Resolve a token to its trip id.
+   *
+   * Returns undefined for an unknown token so the caller can 404 without
+   * distinguishing "never existed" from "revoked" — both should look the same
+   * to someone holding a dead link.
+   */
+  resolveShareToken(token: string): string | undefined {
+    const row = getDb()
+      .prepare("SELECT tripId FROM share_tokens WHERE token = ?")
+      .get(token) as { tripId: string } | undefined;
+    return row?.tripId;
+  },
+
+  /** Revoke a single link. Scoped to the trip so one trip cannot delete another's. */
+  deleteShareToken(token: string, tripId: string): void {
+    getDb()
+      .prepare("DELETE FROM share_tokens WHERE token = ? AND tripId = ?")
+      .run(token, tripId);
   },
 };

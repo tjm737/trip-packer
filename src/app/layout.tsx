@@ -4,6 +4,8 @@ import "./globals.css";
 import { AppProvider } from "@/lib/AppContext";
 import { Sidebar } from "@/components/Sidebar";
 import { MobileNav } from "@/components/MobileNav";
+import { OfflineBanner } from "@/components/OfflineBanner";
+import { ServiceWorkerRegistrar } from "@/components/ServiceWorkerRegistrar";
 import { Toaster } from "@/components/ui/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
@@ -18,6 +20,16 @@ export const metadata: Metadata = {
     capable: true,
     title: "TripPlanner",
     statusBarStyle: "black-translucent",
+  },
+  manifest: "/manifest.webmanifest",
+  icons: {
+    // iOS ignores SVG and the manifest for the home screen, so it needs an
+    // explicit apple-touch-icon. The PNGs cover Android and desktop installs.
+    apple: "/icons/apple-touch-icon.png",
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
   },
 };
 
@@ -47,10 +59,13 @@ export default function RootLayout({
               <Sidebar />
               <div className="flex-1 min-w-0 flex flex-col">
                 <MobileNav />
+                {/* Above the content, below the nav — never covers the itinerary. */}
+                <OfflineBanner />
                 <main className="flex-1 min-w-0">{children}</main>
               </div>
             </div>
           </TooltipProvider>
+          <ServiceWorkerRegistrar />
         </AppProvider>
       </body>
     </html>

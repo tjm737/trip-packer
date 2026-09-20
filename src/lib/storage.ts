@@ -9,6 +9,8 @@ import {
   ReservationType,
 } from "./types";
 import { compareByDate, daysUntilDate, isValidDate } from "./dates";
+import { readCachedState, writeCachedState } from "./offlineCache";
+import { clearQueue, enqueueOp, listQueuedOps, removeQueuedOp } from "./offlineQueue";
 
 /*
  * Client-side API wrapper.
@@ -72,8 +74,12 @@ export function createDefaultUser(): User {
  * Mutations that fail to reach the server are retried once, because a dev
  * server restart (or a brief HMR blip) would otherwise silently drop a change
  * the user just made. A 4xx is never retried — those are deterministic.
+ *
+ * If it still cannot reach the server the op is queued for replay rather than
+ * thrown away. `label` is what the offline banner shows; callers that omit it
+ * get a generic one, which is still better than losing the write.
  */
-async function post<T>(body: unknown, attempt = 0): Promise<T> {
+async function post<T>(body: unknown, attempt = 0, label = "Change"): Promise<T> {
   let res: Response;
   try {
     res = await fetch("/api/mutate", {
@@ -82,8 +88,10 @@ async function post<T>(body: unknown, attempt = 0): Promise<T> {
       body: JSON.stringify(body),
     });
   } catch (err) {
-    if (attempt === 0) return post<T>(body, 1);
-    throw new ApiError("Could not reach the server", 0);
+    if (attempt === 0) return post<T>(body, 1, label);
+    // Out of retries and still unreachable: this is offline, not a bad request.
+    enqueueOp(body, label);
+    throw new ApiError(OFFLINE_MESSAGE, 0);
   }
 
   if (!res.ok) {
@@ -94,18 +102,86 @@ async function post<T>(body: unknown, attempt = 0): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function mutate(body: unknown): Promise<AppState> {
-  const { state } = await post<{ state: AppState }>(body);
+/** Marker string so callers can tell "queued for later" from a real failure. */
+export const OFFLINE_MESSAGE = "You're offline — this change is saved and will sync";
+
+/**
+ * Queues a mutation by hand. Used where an optimistic UI change is made for an
+ * op we cannot even attempt (e.g. offline at the moment of the click).
+ */
+export function queueMutation(body: unknown, label: string): void {
+  enqueueOp(body, label);
+}
+
+/**
+ * Replays queued mutations in order, stopping at the first non-connectivity
+ * failure so dependent ops are not applied out of order or against state that
+ * does not exist.
+ *
+ * Returns the authoritative state from the last successful op, or null when
+ * nothing was replayed — the caller keeps its current state in that case.
+ */
+export async function flushOfflineQueue(): Promise<AppState | null> {
+  const pending = listQueuedOps();
+  if (pending.length === 0) return null;
+
+  let latest: AppState | null = null;
+
+  for (const op of pending) {
+    try {
+      const { state } = await post<{ state: AppState }>(op.body, 0, op.label);
+      latest = state;
+      removeQueuedOp(op.id);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 0) {
+        // Still offline (and post() has re-queued a fresh copy) — stop and
+        // leave the rest for the next reconnect.
+        break;
+      }
+      // A deterministic rejection: this op will never succeed. Drop it and
+      // keep going, otherwise one bad write blocks the queue forever.
+      removeQueuedOp(op.id);
+    }
+  }
+
+  return latest;
+}
+
+/** Discards every queued mutation. Exposed for a "discard pending changes" action. */
+export function discardOfflineQueue(): void {
+  clearQueue();
+}
+
+async function mutate(body: unknown, label?: string): Promise<AppState> {
+  const { state } = await post<{ state: AppState }>(body, 0, label);
   return state;
 }
 
 /* ----------------------------------------------------------------- reads */
 
-/** Returns null when the database has no users yet (fresh install). */
+/**
+ * Returns null when the database has no users yet (fresh install).
+ *
+ * On success the result is mirrored into the offline cache. If the request
+ * fails because there is no network, the cached copy is returned instead of
+ * throwing, so a cold start offline still renders the itinerary. A genuine
+ * server error (5xx) is not masked by the cache — that is a real fault the
+ * user should see, not a connectivity problem.
+ */
 export async function fetchState(): Promise<AppState | null> {
-  const res = await fetch("/api/state", { cache: "no-store" });
+  let res: Response;
+  try {
+    res = await fetch("/api/state", { cache: "no-store" });
+  } catch {
+    const cached = readCachedState();
+    if (cached) return cached.state;
+    throw new ApiError("You're offline and no saved copy is available", 0);
+  }
+
   if (!res.ok) throw new ApiError("Could not load your data", res.status);
+
   const { state } = (await res.json()) as { state: AppState | null };
+  if (state) writeCachedState(state);
   return state;
 }
 
@@ -113,8 +189,15 @@ export async function fetchState(): Promise<AppState | null> {
  * Seeds the initial user. There is no server-side "initialize" op because the
  * server cannot invent an id the client has not seen; the client creates the
  * default user and posts it.
+ *
+ * Cannot work offline: seeding only makes sense against a database that is
+ * actually reachable, and inventing a user locally would risk a second id on
+ * top of one that already exists.
  */
 export async function initializeRemoteState(): Promise<AppState> {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    throw new ApiError("You're offline — connect once to set up your account", 0);
+  }
   const user = createDefaultUser();
   return mutate({ op: "user.add", name: user.name, user });
 }

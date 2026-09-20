@@ -1,6 +1,7 @@
 import "server-only";
 
 import { getDb } from "./db";
+import { resolveAirportText } from "./airports";
 
 /*
  * Geocoding via Nominatim (OpenStreetMap).
@@ -173,6 +174,30 @@ function scoreHit(hit: NominatimHit, wantsAirport: boolean): number {
 export async function geocode(raw: string): Promise<{ point: GeoPoint | null; cached: boolean }> {
   const query = normaliseQuery(raw);
   if (!query) return { point: null, cached: true };
+
+  /*
+   * Airport codes are resolved locally before anything else.
+   *
+   * This runs ahead of the cache read on purpose. Earlier versions cached
+   * whatever Nominatim returned for a bare code, which was often a real but
+   * unrelated place — "lhr" was stored as Lahore, "phl" as Liverpool. Those
+   * rows are still in the database, so consulting the cache first would keep
+   * serving the wrong answer forever. An exact airport match is authoritative
+   * and overwrites whatever was cached before.
+   *
+   * Offline, instant, and no rate limit; "LHR" means Heathrow.
+   */
+  const airport = resolveAirportText(raw);
+  if (airport) {
+    const point: GeoPoint = {
+      query,
+      lat: airport.lat,
+      lng: airport.lng,
+      label: airport.label,
+    };
+    writeCache(query, point);
+    return { point, cached: false };
+  }
 
   const hit = readCache(query);
   if (hit !== undefined) return { point: hit, cached: true };
