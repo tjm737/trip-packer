@@ -640,10 +640,16 @@ export default function TripDetail() {
               onBlur={handleSaveNotes}
               autoFocus
               className="bg-transparent border-none text-sm text-zinc-300 resize-none focus-visible:ring-0"
-              rows={3}
+              rows={Math.min(24, Math.max(3, notesText.split("\n").length + 1))}
             />
           ) : (
-            <p className="text-sm text-zinc-400">
+            /* pre-line keeps the line breaks an imported itinerary relies on
+               to separate days. Without it the whole day-by-day body collapses
+               into a single run-on paragraph. Capped short of half the viewport
+               and scrollable, because an imported itinerary runs to a few
+               thousand characters and would otherwise push the packing list
+               below the fold. */
+            <p className="text-sm text-zinc-400 whitespace-pre-line max-h-[45vh] overflow-y-auto">
               {tripInfo.notes || "No notes yet..."}
             </p>
           )}

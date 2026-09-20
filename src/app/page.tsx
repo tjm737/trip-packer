@@ -19,7 +19,9 @@ import {
   Sparkles,
   Package,
   CheckCircle2,
+  Upload,
 } from "lucide-react";
+import { ImportTripModal } from "@/components/ImportTripModal";
 import { cn } from "cn";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
@@ -370,6 +372,7 @@ function CreateTripModal({ open, onOpenChange }: { open: boolean; onOpenChange: 
 export default function Dashboard() {
   const { state, helpers, hydrated } = useApp();
   const [createOpen, setCreateOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   // Suppress entrance animations until after mount: Framer Motion's `initial`
   // styles are serialized into the SSR HTML and then differ on the client
   // (the animation has already resolved), which triggers a hydration warning.
@@ -406,15 +409,27 @@ export default function Dashboard() {
                 : `${upcomingTrips.length} upcoming trip${upcomingTrips.length > 1 ? "s" : ""}`}
             </p>
           </div>
-          <Tooltip label="Create a new trip" side="left">
-            <Button
-              onClick={() => setCreateOpen(true)}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 shadow-lg shadow-emerald-900/30 transition-colors focus-ring"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              New Trip
-            </Button>
-          </Tooltip>
+          <div className="flex items-center gap-2">
+            <Tooltip label="Create a trip from a saved itinerary file" side="left">
+              <Button
+                onClick={() => setImportOpen(true)}
+                variant="outline"
+                className="border-zinc-700 text-zinc-300 hover:text-white hover:bg-zinc-800 focus-ring"
+              >
+                <Upload className="w-4 h-4 mr-2" />
+                Import
+              </Button>
+            </Tooltip>
+            <Tooltip label="Create a new trip" side="left">
+              <Button
+                onClick={() => setCreateOpen(true)}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 shadow-lg shadow-emerald-900/30 transition-colors focus-ring"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                New Trip
+              </Button>
+            </Tooltip>
+          </div>
         </div>
 
         {/* Stats row.
@@ -491,6 +506,7 @@ export default function Dashboard() {
         )}
       </header>
       <CreateTripModal open={createOpen} onOpenChange={setCreateOpen} />
+      <ImportTripModal open={importOpen} onOpenChange={setImportOpen} />
     </div>
   );
 }
