@@ -124,6 +124,28 @@ function migrate(db: SqliteDb): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_reservations_trip ON reservations(tripId);
+
+    /*
+     * Geocode cache.
+     *
+     * Nominatim is rate-limited to about one request per second and needs a
+     * network round trip, so coordinates are resolved once and kept.
+     *
+     * Keyed on the normalised query text rather than a reservation id: the
+     * same place ("Keflavík Airport") recurs across trips and across the
+     * from/to sides of a flight, and all of those should share one lookup.
+     *
+     * The "miss" flag marks a query Nominatim could not resolve, so a vague
+     * or mistyped string is not retried on every single page load.
+     */
+    CREATE TABLE IF NOT EXISTS geocache (
+      query     TEXT PRIMARY KEY,
+      lat       REAL,
+      lng       REAL,
+      label     TEXT NOT NULL DEFAULT '',
+      miss      INTEGER NOT NULL DEFAULT 0,
+      createdAt TEXT NOT NULL
+    );
   `);
 }
 
