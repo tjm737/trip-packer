@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useApp } from "@/lib/AppContext";
 import { getWeatherForDestination, WeatherForecast, getSuggestions, getHistoricalClimate, ClimateSummary, isWithinForecastRange } from "@/lib/weather";
-import { formatDateRange } from "@/lib/dates";
+import { formatDateRange, isValidDate } from "@/lib/dates";
 import { Trip } from "@/lib/types";
 import {
   MapPin,
@@ -362,6 +362,7 @@ export default function TripDetail() {
   // forecast panel would show weather for the wrong dates, so we surface
   // historical climate instead and say so.
   const [forecastReaches, setForecastReaches] = useState(true);
+  const [hasDates, setHasDates] = useState(false);
   const [suggestions, setSuggestions] = useState<{ name: string; icon: string; category: string }[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
@@ -402,6 +403,13 @@ export default function TripDetail() {
     }
     setForecastReaches(
       isWithinForecastRange(tripInfo.startDate, tripInfo.endDate)
+    );
+    // A trip with no dates is a DIFFERENT case from one that is simply too far
+    // out. Without this distinction the message below tells the user their trip
+    // is ">16 days away" and points them at a climate panel that can never load
+    // (it samples the trip's own dates in prior years, so it needs dates too).
+    setHasDates(
+      isValidDate(tripInfo.startDate) && isValidDate(tripInfo.endDate)
     );
     let cancelled = false;
     const loadWeather = async () => {
@@ -535,7 +543,7 @@ export default function TripDetail() {
     <div className="min-h-screen bg-zinc-950">
       {/* Header */}
       <header className="sticky top-0 z-10 bg-zinc-950/80 backdrop-blur-xl border-b border-white/5">
-        <div className="max-w-5xl mx-auto px-6 sm:px-8 py-4">
+        <div className="max-w-5xl mx-auto px-4 sm:px-8 py-3 sm:py-4">
           <div className="flex items-center gap-3 mb-3">
             <Tooltip label="Back to all trips" side="right">
               <Button
@@ -595,7 +603,7 @@ export default function TripDetail() {
       </header>
 
       {/* Main content */}
-      <main className="max-w-5xl mx-auto px-6 sm:px-8 py-6">
+      <main className="max-w-5xl mx-auto px-4 sm:px-8 py-4 sm:py-6">
         {/* Notes section */}
         <div className="mb-6 p-4 rounded-xl border border-zinc-800 surface-raised">
           <div className="flex items-center justify-between mb-2">
@@ -659,7 +667,15 @@ export default function TripDetail() {
               </Tooltip>
             </div>
 
-            {!forecastReaches && weather && (
+            {!forecastReaches && !hasDates && weather && (
+              <p className="text-xs text-zinc-400 mb-3 leading-relaxed">
+                Add a start and end date to see a forecast and typical conditions
+                for your travel window. The readings below are conditions at this
+                destination right now.
+              </p>
+            )}
+
+            {!forecastReaches && hasDates && weather && (
               <p className="text-xs text-amber-400/90 mb-3 leading-relaxed">
                 Your trip is more than 16 days out, so a forecast isn&apos;t available yet.
                 The readings below are conditions at this destination right now — see
@@ -736,7 +752,7 @@ export default function TripDetail() {
                           transition={{ duration: 0.2 }}
                           className="overflow-hidden"
                         >
-                          <div className="mt-3 grid grid-cols-2 gap-2">
+                          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
                             {suggestions.map((sugg, i) => {
                               const existingItem = helpers.getItemsForCategoryAndName(
                                 tripId,
@@ -823,7 +839,7 @@ export default function TripDetail() {
                       </p>
 
                       {/* Averages */}
-                      <div className="grid grid-cols-3 gap-2">
+                      <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                         <div className="p-2.5 rounded-lg surface-inset border border-zinc-800/60 text-center">
                           <p className="text-xs text-zinc-500 mb-1">Avg High</p>
                           <p className="text-lg font-medium text-emerald-400">
@@ -892,7 +908,8 @@ export default function TripDetail() {
               </AnimatePresence>
             ) : (
               <p className="text-sm text-zinc-500 py-3 mt-3">
-                No historical data available for this destination.
+                No historical data available for this destination. It may be
+                temporarily unavailable — try refreshing in a moment.
               </p>
             )}
           </div>

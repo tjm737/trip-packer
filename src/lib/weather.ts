@@ -330,64 +330,87 @@ export async function getHistoricalClimate(
 
     const thisYear = new Date().getFullYear();
 
-    const requests: Promise<ClimateYear | null>[] = [];
-    for (let i = 1; i <= yearsBack; i++) {
-      const yr = thisYear - i;
-      const s = new Date(start);
-      s.setFullYear(yr);
-      const e = new Date(s.getTime() + spanDays * 86_400_000);
-      const sd = localISO(s);
-      const ed = localISO(e);
-
+    // Open-Meteo's archive endpoint enforces a CONCURRENCY cap, not just a rate
+    // cap: firing all N years at once reliably returns HTTP 429 with
+    // {"reason":"Too many concurrent requests"}, which previously made every
+    // year resolve to null and the UI claim "no historical data available" when
+    // in fact the data exists and we were merely throttled.
+    //
+    // So: fetch sequentially, and retry a 429 after a short backoff. A handful
+    // of years against a cheap endpoint is still well under a second of added
+    // latency, and correctness beats the parallel shortcut here.
+    const fetchYear = async (yr: number, sd: string, ed: string): Promise<ClimateYear | null> => {
       const url =
         `https://archive-api.open-meteo.com/v1/archive?latitude=${geo.latitude}&longitude=${geo.longitude}` +
         `&start_date=${sd}&end_date=${ed}` +
         `&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weathercode` +
         `&temperature_unit=fahrenheit&precipitation_unit=inch&timezone=auto`;
 
-      requests.push(
-        fetch(url)
-          .then((r) => (r.ok ? r.json() : null))
-          .then((d) => {
-            const daily = d?.daily;
-            if (!daily?.time?.length) return null;
-
-            const maxes: number[] = daily.temperature_2m_max.filter((v: number | null) => v != null);
-            const mins: number[] = daily.temperature_2m_min.filter((v: number | null) => v != null);
-            const precips: number[] = daily.precipitation_sum.filter((v: number | null) => v != null);
-            if (!maxes.length || !mins.length) return null;
-
-            const avg = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
-
-            // Pick the most common weather code in the window
-            const codes: number[] = (daily.weathercode || []).filter((v: number | null) => v != null);
-            const counts: Record<number, number> = {};
-            for (const c of codes) counts[c] = (counts[c] || 0) + 1;
-            let topCode = 0;
-            let topCount = -1;
-            for (const key of Object.keys(counts)) {
-              const c = Number(key);
-              if (counts[c] > topCount) { topCount = counts[c]; topCode = c; }
+      const MAX_ATTEMPTS = 3;
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        try {
+          const r = await fetch(url);
+          if (r.status === 429) {
+            // Throttled — wait and try again rather than discarding the year.
+            if (attempt < MAX_ATTEMPTS) {
+              await new Promise((res) => setTimeout(res, 1200 * attempt));
+              continue;
             }
-            const info = getWeatherInfo(topCode);
+            return null;
+          }
+          if (!r.ok) return null;
+          const d = await r.json();
+          const daily = d?.daily;
+          if (!daily?.time?.length) return null;
 
-            return {
-              year: yr,
-              tempMaxAvg: Math.round(avg(maxes) * 10) / 10,
-              tempMinAvg: Math.round(avg(mins) * 10) / 10,
-              tempMaxPeak: Math.round(Math.max(...maxes)),
-              tempMinFloor: Math.round(Math.min(...mins)),
-              precipitationTotal: Math.round(precips.reduce((x, y) => x + y, 0) * 100) / 100,
-              wetDays: precips.filter((p) => p > 0.01).length,
-              condition: info.condition,
-              icon: info.icon,
-            } satisfies ClimateYear;
-          })
-          .catch(() => null)
-      );
+          const maxes: number[] = daily.temperature_2m_max.filter((v: number | null) => v != null);
+          const mins: number[] = daily.temperature_2m_min.filter((v: number | null) => v != null);
+          const precips: number[] = daily.precipitation_sum.filter((v: number | null) => v != null);
+          if (!maxes.length || !mins.length) return null;
+
+          const avg = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
+
+          // Pick the most common weather code in the window
+          const codes: number[] = (daily.weathercode || []).filter((v: number | null) => v != null);
+          const counts: Record<number, number> = {};
+          for (const c of codes) counts[c] = (counts[c] || 0) + 1;
+          let topCode = 0;
+          let topCount = -1;
+          for (const key of Object.keys(counts)) {
+            const c = Number(key);
+            if (counts[c] > topCount) { topCount = counts[c]; topCode = c; }
+          }
+          const info = getWeatherInfo(topCode);
+
+          return {
+            year: yr,
+            tempMaxAvg: Math.round(avg(maxes) * 10) / 10,
+            tempMinAvg: Math.round(avg(mins) * 10) / 10,
+            tempMaxPeak: Math.round(Math.max(...maxes)),
+            tempMinFloor: Math.round(Math.min(...mins)),
+            precipitationTotal: Math.round(precips.reduce((x, y) => x + y, 0) * 100) / 100,
+            wetDays: precips.filter((p) => p > 0.01).length,
+            condition: info.condition,
+            icon: info.icon,
+          } satisfies ClimateYear;
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    };
+
+    // Sequential on purpose — see the concurrency note above.
+    const results: ClimateYear[] = [];
+    for (let i = 1; i <= yearsBack; i++) {
+      const yr = thisYear - i;
+      const s = new Date(start);
+      s.setFullYear(yr);
+      const e = new Date(s.getTime() + spanDays * 86_400_000);
+      const row = await fetchYear(yr, localISO(s), localISO(e));
+      if (row) results.push(row);
     }
 
-    const results = (await Promise.all(requests)).filter((r): r is ClimateYear => r !== null);
     if (results.length === 0) return null;
 
     results.sort((a, b) => a.year - b.year);

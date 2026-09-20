@@ -16,8 +16,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Sidebar } from "@/components/Sidebar";
-
 const EMOJI_OPTIONS = [
   "✈️", "🏖️", "🏔️", "🌆", "🗼", "🏝️", "🎿", "🚢",
   "🏕️", "🌴", "🗺️", "🎡", "🏛️", "🌋", "🚂", "🛸",
@@ -66,10 +64,9 @@ export default function NewTripPage() {
   };
 
   return (
-    <div className="flex min-h-screen bg-zinc-950">
-      <Sidebar onNewTrip={() => {}} />
-      <main className="flex-1">
-        <div className="max-w-xl mx-auto px-8 py-8">
+    <div className="min-h-screen bg-zinc-950">
+      <main>
+        <div className="max-w-xl mx-auto px-4 sm:px-8 py-6 sm:py-8">
           <Button
             variant="ghost"
             size="sm"
@@ -118,7 +115,7 @@ export default function NewTripPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Label className="text-zinc-300 flex items-center gap-1.5">
                     <Calendar className="w-3.5 h-3.5 text-zinc-500" />

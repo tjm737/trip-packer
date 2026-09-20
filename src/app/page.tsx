@@ -277,7 +277,7 @@ function CreateTripModal({ open, onOpenChange }: { open: boolean; onOpenChange: 
                 onKeyDown={(e) => e.key === "Enter" && name.trim() && setStep(2)}
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <Label className="text-zinc-300">Start Date</Label>
                 <Input
@@ -394,7 +394,7 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-zinc-950">
-      <header className="px-6 sm:px-8 pt-8 pb-10 max-w-6xl">
+      <header className="px-4 sm:px-8 pt-6 sm:pt-8 pb-8 sm:pb-10 max-w-6xl">
         <div className="flex items-start justify-between gap-4 mb-6">
           <div className="min-w-0">
             <h1 className="text-[26px] sm:text-3xl font-bold text-zinc-50 tracking-tight truncate">
