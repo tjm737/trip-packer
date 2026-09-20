@@ -24,7 +24,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useApp } from "@/lib/AppContext";
-import { importItinerary } from "@/lib/importItinerary";
 import type { ParsedItinerary } from "@/lib/itineraryImport";
 
 type Preview = ParsedItinerary & { filename: string };
@@ -43,7 +42,7 @@ export function ImportTripModal({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
-  const { state } = useApp();
+  const { trip } = useApp();
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -99,7 +98,11 @@ export function ImportTripModal({
     setImporting(true);
     setError("");
     try {
-      const { tripId } = await importItinerary(state.activeUserId, preview);
+      // Goes through the context action rather than calling the API
+      // directly: the trip page renders "Trip not found" for any id missing
+      // from context, so navigating before context knows about the new trip
+      // showed an error even though the import had succeeded.
+      const { tripId } = await trip.import(preview);
       handleClose(false);
       router.push(`/trips/${tripId}`);
     } catch (err) {

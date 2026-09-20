@@ -7,6 +7,7 @@ import { useApp } from "@/lib/AppContext";
 import { getWeatherForDestination, WeatherForecast, getSuggestions, getHistoricalClimate, ClimateSummary, isWithinForecastRange } from "@/lib/weather";
 import { formatDateRange, isValidDate } from "@/lib/dates";
 import { Trip } from "@/lib/types";
+import { fetchState } from "@/lib/storage";
 import {
   MapPin,
   Calendar,
@@ -372,20 +373,39 @@ export default function TripDetail() {
   const [tripInfo, setTripInfo] = useState<Trip | null>(null);
   const [isReady, setIsReady] = useState(false);
 
-  // Hydrate from context + localStorage after mount
+  /*
+   * Resolve the trip, falling back to the server when context has never seen
+   * this id.
+   *
+   * `hydrated` only means "the initial load finished" — it says nothing about
+   * whether the list contains a trip that was created moments ago. So a
+   * navigation immediately after creating one (an import, say) used to hit the
+   * `!hydrated` branch as false and render "Trip not found" against a list that
+   * was simply not caught up. Fetching on a miss makes the page authoritative
+   * instead of trusting a client cache that may lag the write.
+   */
   useEffect(() => {
     const fromContext = state.trips.find((t) => t.id === tripId);
     if (fromContext) {
       setTripInfo(fromContext);
       setIsReady(true);
-    } else {
-      // State arrives from the SQLite-backed context; on a deep link the
-      // provider may still be loading, so wait for hydration before deciding
-      // the trip does not exist.
-      if (!hydrated) return;
-      setIsReady(true);
+      return;
     }
-  }, [tripId, state.trips]);
+    if (!hydrated) return;
+
+    let cancelled = false;
+    (async () => {
+      const fresh = await fetchState().catch(() => null);
+      if (cancelled) return;
+      const found = fresh?.trips.find((t) => t.id === tripId) ?? null;
+      if (found) setTripInfo(found);
+      setIsReady(true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tripId, state.trips, hydrated]);
 
   // Keep tripInfo in sync with context so edits from elsewhere propagate
   useEffect(() => {

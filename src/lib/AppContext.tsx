@@ -44,6 +44,8 @@ import {
   ReservationDraft,
   TaskStatus,
 } from "@/lib/storage";
+import { importItinerary } from "@/lib/importItinerary";
+import type { ParsedItinerary } from "@/lib/itineraryImport";
 
 /*
  * Client store.
@@ -83,6 +85,12 @@ interface AppContextType {
     update: (id: string, data: Partial<Trip>) => Promise<void>;
     archive: (id: string, archived: boolean) => Promise<void>;
     delete: (id: string) => Promise<void>;
+    /**
+     * Create a trip and all of its reservations and tasks from a parsed
+     * itinerary. Uneven compared with its siblings: it issues many writes, so
+     * it owns state publication rather than going through `run` once.
+     */
+    import: (parsed: ParsedItinerary) => Promise<{ tripId: string; created: number }>;
   };
   category: {
     create: (tripId: string, name: string, icon: string) => Promise<string>;
@@ -307,6 +315,53 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }),
         () => deleteTrip(id)
       );
+    },
+    /**
+     * Import a parsed itinerary as a new trip.
+     *
+     * Deliberately does not delegate to `run`. That helper bumps the sequence
+     * ticket once and discards responses from stale tickets, which is correct
+     * for a single write but wrong for a batch: the importer issues N+1
+     * requests, and each intermediate response would be published in turn,
+     * briefly rendering a trip with none of its bookings.
+     *
+     * Instead we take the ticket once up front, hold every intermediate state
+     * back until the batch completes, and publish only the final response. The
+     * caller can navigate as soon as this resolves, because by then the trip is
+     * in context — navigating against stale context is what produced the
+     * "Trip not found" screen after a successful import.
+     */
+    import: async (parsed: ParsedItinerary) => {
+      const ticket = ++seq.current;
+      const snapshot = state;
+
+      // Resolve the owner server-side for the same reason trip.create does:
+      // React state may be stale pre-hydration and picking the wrong owner
+      // would orphan the trip.
+      const current = await fetchState();
+      const ownerId =
+        current?.activeUserId && current.users.some((u) => u.id === current.activeUserId)
+          ? current.activeUserId
+          : (current?.users[0]?.id ?? state.activeUserId);
+
+      try {
+        const { state: next, tripId, created } = await importItinerary(ownerId, parsed);
+        if (ticket === seq.current) {
+          setState(next);
+          setError(null);
+        }
+        return { tripId, created };
+      } catch (err) {
+        // Partial imports are real: some records may have landed. Re-read so
+        // the UI reflects what actually exists rather than the pre-import
+        // snapshot, which would hide records the user needs to finish by hand.
+        const authoritative = await fetchState().catch(() => null);
+        if (ticket === seq.current) {
+          setState(authoritative ?? snapshot);
+          setError(err instanceof Error ? err.message : "Import failed");
+        }
+        throw err;
+      }
     },
   };
 
