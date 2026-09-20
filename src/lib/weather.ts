@@ -1,4 +1,5 @@
 import { isValidDate } from "./dates";
+import { extractAirportCode, lookupAirportCode } from "./airports";
 
 export interface WeatherForecast {
   temperature: number;
@@ -62,6 +63,43 @@ const WEATHER_MAP: Record<number, { condition: string; icon: string }> = {
 
 function getWeatherInfo(code: number): { condition: string; icon: string } {
   return WEATHER_MAP[code] || { condition: "Unknown", icon: "🌡️" };
+}
+
+/**
+ * Resolve a destination to coordinates for the weather APIs.
+ *
+ * Destinations in this app are not always place names. They come from the trip
+ * header, which people fill from boarding passes, so they look like "near MUC",
+ * "MUC", "LHR (T5)" or "Philadelphia (PHL)". Open-Meteo's geocoder only
+ * understands place names: it returns zero results for "near MUC", which made
+ * BOTH the forecast and the historical climate panel render empty while the
+ * network and the APIs were perfectly healthy.
+ *
+ * So an airport code is resolved offline against the OurAirports dataset first
+ * (the same resolver the map and itinerary already use), and only genuine place
+ * names are handed to Open-Meteo. This keeps one lookup path for codes across
+ * the app rather than a second, weather-specific one.
+ *
+ * Returns null when neither path resolves, which callers treat as "no weather".
+ */
+async function resolveDestination(
+  destination: string
+): Promise<{ latitude: number; longitude: number } | null> {
+  const code = extractAirportCode(destination);
+  if (code) {
+    const airport = lookupAirportCode(code);
+    if (airport) {
+      return { latitude: airport.lat, longitude: airport.lng };
+    }
+  }
+
+  const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(destination)}&count=1&language=en`;
+  const geoRes = await fetch(geoUrl);
+  if (!geoRes.ok) return null;
+  const geoData = await geoRes.json();
+  if (!geoData.results || geoData.results.length === 0) return null;
+  const geo = geoData.results[0];
+  return { latitude: geo.latitude, longitude: geo.longitude };
 }
 
 // Map weather conditions to packing suggestions
@@ -165,14 +203,9 @@ export async function getWeatherForDestination(
   endDate: string
 ): Promise<WeatherForecast | null> {
   try {
-    // Step 1: Geocode the destination
-    const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(destination)}&count=1&language=en`;
-    const geoRes = await fetch(geoUrl);
-    if (!geoRes.ok) return null;
-    const geoData = await geoRes.json();
-
-    if (!geoData.results || geoData.results.length === 0) return null;
-    const geo = geoData.results[0];
+    // Step 1: Resolve the destination (airport code or place name)
+    const geo = await resolveDestination(destination);
+    if (!geo) return null;
 
     // Step 2: Fetch weather forecast.
     // Dates are optional and may be missing/invalid — fall back to a 7-day
@@ -304,12 +337,8 @@ export async function getHistoricalClimate(
     if (!isValidDate(startDate) || !isValidDate(endDate)) return null;
 
     // Geocode (same source as the forecast, so coordinates agree)
-    const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(destination)}&count=1&language=en`;
-    const geoRes = await fetch(geoUrl);
-    if (!geoRes.ok) return null;
-    const geoData = await geoRes.json();
-    if (!geoData.results || geoData.results.length === 0) return null;
-    const geo = geoData.results[0];
+    const geo = await resolveDestination(destination);
+    if (!geo) return null;
 
     // Sample the same month/day in prior years. A window that runs over a
     // month boundary (or year boundary) is fine because we rebuild the date

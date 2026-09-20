@@ -899,7 +899,7 @@ export default function TripDetail() {
                                       {climate.years.map((y) => (
                                         <div
                                           key={y.year}
-                                          className="flex items-center gap-3 px-2.5 py-1.5 rounded-lg surface-inset border border-zinc-800/50 text-xs"
+                                          className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2.5 py-1.5 rounded-lg surface-inset border border-zinc-800/50 text-xs"
                                           title={`${y.year}: avg high ${y.tempMaxAvg}°F, avg low ${y.tempMinAvg}°F, peak ${y.tempMaxPeak}°F, low ${y.tempMinFloor}°F, ${y.precipitationTotal}in over ${y.wetDays} wet day(s)`}
                                         >
                                           <span className="text-zinc-500 w-10 flex-shrink-0">{y.year}</span>
@@ -910,8 +910,20 @@ export default function TripDetail() {
                                           <span className="text-sky-400 w-14 flex-shrink-0">
                                             {Math.round(y.tempMinAvg)}°
                                           </span>
+                                          {/*
+                                           * No `truncate` here. The row's fixed-width
+                                           * siblings plus gaps leave this column
+                                           * ~74px at a 430px viewport while the text
+                                           * needs ~88px, so "0.42 in · 4d wet" was
+                                           * rendering as "0.42 in · 4…" — the
+                                           * precipitation figure, the whole point of
+                                           * the panel, was unreadable on a phone.
+                                           * The row wraps instead, so a narrow screen
+                                           * moves this onto its own line rather than
+                                           * hiding half the number.
+                                           */}
                                           <span
-                                            className={`flex-1 truncate text-right ${
+                                            className={`flex-1 min-w-[5.5rem] text-right ${
                                               y.precipitationTotal > 0.01 ? "text-zinc-400" : "text-zinc-600"
                                             }`}
                                           >
