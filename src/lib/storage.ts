@@ -429,6 +429,19 @@ export async function deleteReservation(id: string): Promise<AppState> {
   return mutate({ op: "reservation.delete", id });
 }
 
+/**
+ * Persist a manual itinerary order for a trip.
+ *
+ * Takes the reservation ids in their new order; the server assigns positions
+ * by array index within a single transaction.
+ */
+export async function reorderReservations(
+  tripId: string,
+  orderedIds: string[]
+): Promise<AppState> {
+  return mutate({ op: "reservation.reorder", tripId, orderedIds });
+}
+
 /* -------------------------------------------------------------- selectors */
 
 export function getItemProgress(tripId: string, items: PackingItem[]) {

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { MapPin, Route, Loader2, AlertTriangle, Clock, ExternalLink, Plane } from "lucide-react";
+import { MapPin, Route, Loader2, AlertTriangle, Clock, ExternalLink, Plane, GripVertical, ChevronUp, ChevronDown } from "lucide-react";
 import "leaflet/dist/leaflet.css";
 
 import { useApp } from "@/lib/AppContext";
@@ -60,7 +60,14 @@ type Leg = {
   isAir?: boolean;
 };
 
-/** Order reservations the same way the reservations list does. */
+/**
+ * Order reservations the same way the reservations list does: by date, with
+ * `order` as the tiebreaker.
+ *
+ * Note that a manual reorder (see `manualOrder`) deliberately takes precedence
+ * over this — a drag would otherwise appear to do nothing on any trip whose
+ * bookings all fall on different dates, which is every real trip.
+ */
 function inItineraryOrder(res: Reservation[]): Reservation[] {
   return [...res]
     .filter((r) => r.startDate || r.location)
@@ -76,18 +83,46 @@ function inItineraryOrder(res: Reservation[]): Reservation[] {
 }
 
 /**
+ * Blend a user's manual order with the natural date order.
+ *
+ * A reservation is "manually placed" when its stored `order` differs from its
+ * chronological rank — that is the signature of a drag that has been saved.
+ * Those keep their stored position; everything else keeps its date rank, so a
+ * newly added booking still lands in a sensible spot rather than at the end.
+ *
+ * Reading the persisted column (rather than only the in-memory drag state) is
+ * what makes a reorder visible after the write completes and after a reload.
+ */
+function orderReservations(res: Reservation[]): Reservation[] {
+  const chronological = inItineraryOrder(res);
+  const manual = chronological.some(
+    (r, i) => Number.isFinite(r.order) && r.order !== i
+  );
+  if (!manual) return chronological;
+  return chronological
+    .map((r, i) => ({ r, rank: Number.isFinite(r.order) ? r.order : i }))
+    .sort((a, b) => a.rank - b.rank)
+    .map(({ r }) => r);
+}
+
+/**
  * Flatten reservations into map stops.
  *
  * A booking with both endpoints (a flight, train or ferry) yields two stops;
  * everything else yields one. Only bookings whose location actually geocoded
  * are included, so an unresolved place silently drops out rather than
  * producing a pin at 0,0 in the Atlantic.
+ *
+ * `orderById` carries a user's manual drag order. When a reservation has an
+ * entry there it is placed by that value and dated sorting is skipped for it —
+ * otherwise a drag would visibly do nothing on any trip whose bookings fall on
+ * different dates.
  */
 function buildStops(res: Reservation[], coords: Map<string, LatLng>): Stop[] {
   const stops: Stop[] = [];
   const norm = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
 
-  for (const r of inItineraryOrder(res)) {
+  for (const r of orderReservations(res)) {
     const from = r.location ? coords.get(norm(r.location)) : undefined;
     const to = r.locationTo ? coords.get(norm(r.locationTo)) : undefined;
 
@@ -187,8 +222,17 @@ function greatCircle(a: LatLng, b: LatLng, segments = 64): [number, number][] {
 }
 
 export function TripMap({ tripId }: { tripId: string }) {
-  const { helpers } = useApp();
+  const { helpers, reservation } = useApp();
   const reservations = helpers.getReservations(tripId);
+
+  /*
+   * In-flight drag preview: a copy of the reservations with `order` rewritten
+   * to the prospective positions. Null when no drag is active, in which case
+   * the list renders straight from the persisted values.
+   */
+  const [previewOrder, setPreviewOrder] = useState<Map<string, number> | null>(null);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
 
   const mapEl = useRef<HTMLDivElement | null>(null);
   /* Leaflet instances live in refs, not state: they are mutable third-party
@@ -260,7 +304,22 @@ export function TripMap({ tripId }: { tripId: string }) {
     // array itself would refetch on every render.
   }, [locationKey]);
 
-  const stops = useMemo(() => buildStops(reservations, coords), [reservations, coords]);
+  /*
+   * The list renders from `reservations`, with any active drag preview applied
+   * on top. Persisted order comes along in each reservation's `order` field, so
+   * there is nothing else to keep in sync.
+   */
+  const orderedReservations = useMemo(() => {
+    if (!previewOrder) return reservations;
+    return reservations.map((r) =>
+      previewOrder.has(r.id) ? { ...r, order: previewOrder.get(r.id) as number } : r
+    );
+  }, [reservations, previewOrder]);
+
+  const stops = useMemo(
+    () => buildStops(orderedReservations, coords),
+    [orderedReservations, coords]
+  );
 
   /*
    * Air legs are derived locally — no network call — because they do not need
@@ -514,6 +573,88 @@ export function TripMap({ tripId }: { tripId: string }) {
   // rather than as a bug.
   const skippedLegs = Math.max(0, stops.length - 1 - allLegs.length);
 
+  /*
+   * --- Reordering ---------------------------------------------------------
+   *
+   * Ordering operates on reservations, not on map stops. A flight contributes
+   * two stops, so dragging one of its pins cannot meaningfully move it on its
+   * own — the booking would have to leave half of itself behind. Grouping at
+   * the reservation level keeps a flight's endpoints together.
+   *
+   * `stop.reservationId` is translated to a position in the current stop list,
+   * so a drag expressed in stop indices maps onto the reservation it belongs to.
+   */
+  const reservationIds = useMemo(
+    () => Array.from(new Set(stops.map((s) => s.reservationId))),
+    [stops]
+  );
+
+  /** Move the reservation at `from` so it sits at `to`, returning the new id order. */
+  const moveReservation = (from: number, to: number): string[] => {
+    const next = [...reservationIds];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    return next;
+  };
+
+  /**
+   * Commit an order: paint it immediately so the drag feels instant, then
+   * persist. The preview is dropped once the server echoes the new order back,
+   * so the rendered list falls through to the stored `order` column.
+   */
+  const commitOrder = async (ids: string[]) => {
+    setPreviewOrder(new Map(ids.map((id, i) => [id, i])));
+    try {
+      await reservation.reorder(tripId, ids);
+    } finally {
+      // Clear either way: on success the persisted order is now correct, and
+      // on failure dropping the preview reveals the true stored order rather
+      // than leaving an optimistic one on screen.
+      setPreviewOrder(null);
+    }
+  };
+
+  const nudge = (resId: string, delta: number) => {
+    const from = reservationIds.indexOf(resId);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= reservationIds.length) return;
+    void commitOrder(moveReservation(from, to));
+  };
+
+  /* Reservation position for the stop at index `i` — used by the drag rows. */
+  const resPosOfStop = (i: number) => reservationIds.indexOf(stops[i].reservationId);
+
+  const onDragStart = (i: number) => {
+    setDragIndex(resPosOfStop(i));
+    setOverIndex(resPosOfStop(i));
+  };
+
+  /*
+   * Recompute the previewed order as the pointer crosses each row, so the list
+   * shows where the booking will land rather than only highlighting a target.
+   */
+  const onDragOverRow = (i: number) => {
+    if (dragIndex === null) return;
+    const target = resPosOfStop(i);
+    if (target === overIndex) return;
+    setOverIndex(target);
+    const ids = moveReservation(dragIndex, target);
+    setPreviewOrder(new Map(ids.map((id, idx) => [id, idx])));
+  };
+
+  const onDrop = () => {
+    if (dragIndex !== null && overIndex !== null && dragIndex !== overIndex) {
+      const ids = moveReservation(dragIndex, overIndex);
+      setDragIndex(null);
+      setOverIndex(null);
+      void commitOrder(ids);
+      return;
+    }
+    setDragIndex(null);
+    setOverIndex(null);
+    setPreviewOrder(null);
+  };
+
   return (
     <div className="surface-raised rounded-xl border border-white/5 p-4 sm:p-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -591,14 +732,85 @@ export function TripMap({ tripId }: { tripId: string }) {
             // flight landing where a car is collected). Showing "0.0 mi drive"
             // is noise, so those are rendered as a plain connection.
             const showLeg = leg && i < stops.length - 1 && (leg.isAir || leg.distanceM > 10);
+            /*
+             * A row is draggable only when its stop is the first one belonging
+             * to its booking. For a flight that means the departure pin carries
+             * the handle and the arrival pin does not, so a two-stop booking
+             * presents one drag target instead of two that fight each other.
+             */
+            const resPos = resPosOfStop(i);
+            const isGroupStart = stops.findIndex((x) => x.reservationId === s.reservationId) === i;
+            const isDragging = dragIndex !== null && dragIndex === resPos && isGroupStart;
             return (
-              <div key={s.key}>
+              <div
+                key={s.key}
+                onDragOver={(e) => {
+                  if (dragIndex === null) return;
+                  // Required for onDrop to fire at all.
+                  e.preventDefault();
+                  onDragOverRow(i);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  onDrop();
+                }}
+                className={cn(
+                  "rounded-md transition-colors",
+                  isDragging && "opacity-40",
+                  isGroupStart && dragIndex !== null && "bg-white/[0.03]"
+                )}
+              >
                 <div className="flex items-center gap-2 text-xs">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-semibold text-white">
-                    {s.index}
-                  </span>
+                  {isGroupStart ? (
+                    <div
+                      draggable
+                      onDragStart={() => onDragStart(i)}
+                      onDragEnd={onDrop}
+                      title="Drag to reorder"
+                      className="group flex cursor-grab items-center gap-1 active:cursor-grabbing"
+                    >
+                      <GripVertical className="h-3.5 w-3.5 shrink-0 text-zinc-600 group-hover:text-emerald-400" />
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-semibold text-white">
+                        {s.index}
+                      </span>
+                    </div>
+                  ) : (
+                    /* Indent under the handle so a flight's arrival pin reads as
+                       a continuation of the booking above it. */
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-900/60 text-[10px] font-semibold text-emerald-300 ring-1 ring-emerald-500/20 ml-[18px]">
+                      {s.index}
+                    </span>
+                  )}
                   <span className="truncate text-zinc-300">{s.name}</span>
                   {s.date && <span className="shrink-0 text-zinc-500">{formatDate(s.date)}</span>}
+
+                  {isGroupStart && (
+                    /* Keyboard/tap reordering. HTML5 drag is unavailable to
+                       keyboard and touch users, so the same operation is
+                       exposed as buttons. */
+                    <span className="ml-auto flex shrink-0 items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => nudge(s.reservationId, -1)}
+                        disabled={resPos === 0}
+                        title="Move earlier"
+                        aria-label="Move earlier"
+                        className="rounded p-0.5 text-zinc-600 transition-colors hover:text-emerald-400 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:text-zinc-600"
+                      >
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => nudge(s.reservationId, 1)}
+                        disabled={resPos === reservationIds.length - 1}
+                        title="Move later"
+                        aria-label="Move later"
+                        className="rounded p-0.5 text-zinc-600 transition-colors hover:text-emerald-400 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:text-zinc-600"
+                      >
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  )}
                 </div>
                 {showLeg && (
                   <div
@@ -643,7 +855,8 @@ export function TripMap({ tripId }: { tripId: string }) {
           {skippedLegs > 0
             ? `${skippedLegs} leg${skippedLegs === 1 ? "" : "s"} not drivable (ferry or no road) · `
             : ""}
-          Driving distances via OSRM · Maps © OpenStreetMap contributors
+          Drag <GripVertical className="inline h-3 w-3" /> to reorder stops · Driving
+          distances via OSRM · Maps © OpenStreetMap contributors
         </p>
       )}
     </div>

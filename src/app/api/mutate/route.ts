@@ -37,6 +37,7 @@ type Body =
   | { op: "task.delete"; id: string }
   | { op: "reservation.create"; reservation: Reservation }
   | { op: "reservation.update"; id: string; updates: Partial<Reservation> }
+  | { op: "reservation.reorder"; tripId: string; orderedIds: string[] }
   | { op: "reservation.delete"; id: string }
   | { op: "state.replace"; state: NonNullable<ReturnType<typeof readState>> };
 
@@ -135,6 +136,13 @@ export async function POST(req: Request) {
 
       case "reservation.update":
         tx.updateReservation(body.id, body.updates);
+        break;
+
+      case "reservation.reorder":
+        if (!Array.isArray(body.orderedIds) || typeof body.tripId !== "string") {
+          return NextResponse.json({ error: "tripId and orderedIds required" }, { status: 400 });
+        }
+        tx.setReservationOrder(body.tripId, body.orderedIds);
         break;
 
       case "reservation.delete":

@@ -33,6 +33,7 @@ import {
   createReservation,
   updateReservation,
   deleteReservation,
+  reorderReservations,
   getItemProgress,
   getCategoriesForTrip,
   getItemsForCategory,
@@ -117,6 +118,7 @@ interface AppContextType {
       data: Partial<Omit<Reservation, "id" | "tripId" | "type" | "createdAt">>
     ) => Promise<void>;
     delete: (id: string) => Promise<void>;
+    reorder: (tripId: string, orderedIds: string[]) => Promise<void>;
   };
   helpers: {
     getProgress: (tripId: string) => number;
@@ -420,6 +422,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await run(
         (prev) => ({ ...prev, reservations: prev.reservations.filter((r) => r.id !== id) }),
         () => deleteReservation(id)
+      );
+    },
+    /*
+     * Optimistically renumber the affected trip's reservations, then persist.
+     * The local update mirrors what the server does — position equals array
+     * index — so a refetch cannot produce a different order than what the user
+     * just saw.
+     */
+    reorder: async (tripId: string, orderedIds: string[]) => {
+      const positions = new Map(orderedIds.map((id, i) => [id, i]));
+      await run(
+        (prev) => ({
+          ...prev,
+          reservations: prev.reservations.map((r) =>
+            r.tripId === tripId && positions.has(r.id)
+              ? { ...r, order: positions.get(r.id) as number }
+              : r
+          ),
+        }),
+        () => reorderReservations(tripId, orderedIds)
       );
     },
   };

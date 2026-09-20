@@ -550,6 +550,28 @@ export const tx = {
     getDb().prepare("DELETE FROM reservations WHERE id = ?").run(id);
   },
 
+  /**
+   * Persist a manual itinerary order for one trip.
+   *
+   * Applied as a single transaction over the whole ordering rather than one
+   * write per moved row: a drag rewrites the positions of everything between
+   * the old and new spot, and a half-applied reorder would leave the user with
+   * a scrambled itinerary.
+   *
+   * Only rows belonging to `tripId` are touched, so a stale client cannot
+   * reorder another trip's bookings.
+   */
+  setReservationOrder(tripId: string, orderedIds: string[]): void {
+    const db = getDb();
+    const stmt = db.prepare(
+      'UPDATE reservations SET "order" = ? WHERE id = ? AND tripId = ?'
+    );
+    const run = db.transaction((ids: string[]) => {
+      ids.forEach((id, i) => stmt.run(i, id, tripId));
+    });
+    run(orderedIds);
+  },
+
   /** Replace the whole tree in one transaction — used for import/seed. */
   replaceAll(state: AppState): void {
     const db = getDb();
