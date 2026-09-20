@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { readState, tx } from "@/lib/db";
-import type { Category, PackingItem, Task, Trip, User } from "@/lib/types";
+import type { Category, PackingItem, Reservation, Task, Trip, User } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +35,9 @@ type Body =
   | { op: "task.create"; task: Task }
   | { op: "task.update"; id: string; updates: Partial<Task> }
   | { op: "task.delete"; id: string }
+  | { op: "reservation.create"; reservation: Reservation }
+  | { op: "reservation.update"; id: string; updates: Partial<Reservation> }
+  | { op: "reservation.delete"; id: string }
   | { op: "state.replace"; state: NonNullable<ReturnType<typeof readState>> };
 
 export async function POST(req: Request) {
@@ -124,6 +127,18 @@ export async function POST(req: Request) {
 
       case "task.delete":
         tx.deleteTask(body.id);
+        break;
+
+      case "reservation.create":
+        tx.insertReservation(body.reservation);
+        break;
+
+      case "reservation.update":
+        tx.updateReservation(body.id, body.updates);
+        break;
+
+      case "reservation.delete":
+        tx.deleteReservation(body.id);
         break;
 
       case "state.replace":

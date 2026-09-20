@@ -4,7 +4,16 @@ import Database from "better-sqlite3";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import type { AppState, Category, PackingItem, Task, Trip, User } from "../lib/types";
+import type {
+  AppState,
+  Category,
+  PackingItem,
+  Reservation,
+  ReservationType,
+  Task,
+  Trip,
+  User,
+} from "../lib/types";
 
 /*
  * SQLite persistence layer.
@@ -95,6 +104,26 @@ function migrate(db: SqliteDb): void {
     CREATE INDEX IF NOT EXISTS idx_items_category  ON items(categoryId);
     CREATE INDEX IF NOT EXISTS idx_items_trip      ON items(tripId);
     CREATE INDEX IF NOT EXISTS idx_tasks_trip      ON tasks(tripId);
+
+    CREATE TABLE IF NOT EXISTS reservations (
+      id           TEXT PRIMARY KEY,
+      tripId       TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+      type         TEXT NOT NULL DEFAULT 'other',
+      title        TEXT NOT NULL,
+      confirmation TEXT NOT NULL DEFAULT '',
+      location     TEXT NOT NULL DEFAULT '',
+      locationTo   TEXT NOT NULL DEFAULT '',
+      startDate    TEXT NOT NULL DEFAULT '',
+      startTime    TEXT NOT NULL DEFAULT '',
+      endDate      TEXT NOT NULL DEFAULT '',
+      endTime      TEXT NOT NULL DEFAULT '',
+      cost         TEXT NOT NULL DEFAULT '',
+      notes        TEXT NOT NULL DEFAULT '',
+      "order"      INTEGER NOT NULL DEFAULT 0,
+      createdAt    TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_reservations_trip ON reservations(tripId);
   `);
 }
 
@@ -166,6 +195,24 @@ type TaskRow = {
   createdAt: string;
 };
 
+type ReservationRow = {
+  id: string;
+  tripId: string;
+  type: string;
+  title: string;
+  confirmation: string;
+  location: string;
+  locationTo: string;
+  startDate: string;
+  startTime: string;
+  endDate: string;
+  endTime: string;
+  cost: string;
+  notes: string;
+  order: number;
+  createdAt: string;
+};
+
 const toUser = (r: UserRow): User => ({
   id: r.id,
   name: r.name,
@@ -217,6 +264,42 @@ const toTask = (r: TaskRow): Task => ({
   createdAt: r.createdAt,
 });
 
+const RESERVATION_TYPES: ReservationType[] = [
+  "flight",
+  "lodging",
+  "car",
+  "train",
+  "ferry",
+  "activity",
+  "other",
+];
+
+/**
+ * SQLite hands back `type` as an unconstrained string. Narrow it here so a
+ * hand-edited database or a future row written by an older build cannot leak a
+ * value the UI has no rendering branch for.
+ */
+const toReservationType = (v: string): ReservationType =>
+  (RESERVATION_TYPES as string[]).includes(v) ? (v as ReservationType) : "other";
+
+const toReservation = (r: ReservationRow): Reservation => ({
+  id: r.id,
+  tripId: r.tripId,
+  type: toReservationType(r.type),
+  title: r.title,
+  confirmation: r.confirmation,
+  location: r.location,
+  locationTo: r.locationTo,
+  startDate: r.startDate,
+  startTime: r.startTime,
+  endDate: r.endDate,
+  endTime: r.endTime,
+  cost: r.cost,
+  notes: r.notes,
+  order: r.order,
+  createdAt: r.createdAt,
+});
+
 /* ------------------------------------------------------------------ reads */
 
 const ACTIVE_USER_KEY = "activeUserId";
@@ -240,6 +323,10 @@ export function readState(): AppState | null {
     toTask
   );
 
+  const reservations = (
+    db.prepare('SELECT * FROM reservations ORDER BY "order", rowid').all() as ReservationRow[]
+  ).map(toReservation);
+
   const activeRow = db.prepare("SELECT value FROM settings WHERE key = ?").get(ACTIVE_USER_KEY) as
     | { value: string }
     | undefined;
@@ -249,7 +336,7 @@ export function readState(): AppState | null {
   const activeUserId =
     activeRow && users.some((u) => u.id === activeRow.value) ? activeRow.value : users[0].id;
 
-  return { users, activeUserId, trips, categories, items, tasks };
+  return { users, activeUserId, trips, categories, items, tasks, reservations };
 }
 
 /* ----------------------------------------------------------------- writes */
@@ -396,16 +483,64 @@ export const tx = {
     getDb().prepare("DELETE FROM tasks WHERE id = ?").run(id);
   },
 
+  insertReservation(r: Reservation): void {
+    getDb()
+      .prepare(
+        `INSERT INTO reservations
+           (id, tripId, type, title, confirmation, location, locationTo,
+            startDate, startTime, endDate, endTime, cost, notes, "order", createdAt)
+         VALUES
+           (@id, @tripId, @type, @title, @confirmation, @location, @locationTo,
+            @startDate, @startTime, @endDate, @endTime, @cost, @notes, @order, @createdAt)`
+      )
+      .run(r);
+  },
+
+  updateReservation(id: string, updates: Partial<Reservation>): void {
+    // `tripId` and `type` are excluded: a booking does not move between trips
+    // or change category after it is created (delete and re-add instead).
+    const allowed = [
+      "title",
+      "confirmation",
+      "location",
+      "locationTo",
+      "startDate",
+      "startTime",
+      "endDate",
+      "endTime",
+      "cost",
+      "notes",
+      "order",
+    ] as const;
+    const keys = allowed.filter((k) => updates[k] !== undefined);
+    if (keys.length === 0) return;
+    const set = keys.map((k) => (k === "order" ? `"order" = @order` : `${k} = @${k}`)).join(", ");
+    const payload: Record<string, unknown> = { id };
+    for (const k of keys) {
+      payload[k] = updates[k];
+    }
+    getDb()
+      .prepare(`UPDATE reservations SET ${set} WHERE id = @id`)
+      .run(payload);
+  },
+
+  deleteReservation(id: string): void {
+    getDb().prepare("DELETE FROM reservations WHERE id = ?").run(id);
+  },
+
   /** Replace the whole tree in one transaction — used for import/seed. */
   replaceAll(state: AppState): void {
     const db = getDb();
     const run = db.transaction((s: AppState) => {
-      db.exec("DELETE FROM items; DELETE FROM tasks; DELETE FROM categories; DELETE FROM trips; DELETE FROM users;");
+      db.exec(
+        "DELETE FROM items; DELETE FROM tasks; DELETE FROM reservations; DELETE FROM categories; DELETE FROM trips; DELETE FROM users;"
+      );
       for (const u of s.users) tx.insertUser(u);
       for (const t of s.trips) tx.insertTrip(t);
       for (const c of s.categories) tx.insertCategory(c);
       for (const i of s.items) tx.insertItem(i);
       for (const t of s.tasks) tx.insertTask(t);
+      for (const r of s.reservations) tx.insertReservation(r);
       tx.setActiveUser(s.activeUserId);
     });
     run(state);

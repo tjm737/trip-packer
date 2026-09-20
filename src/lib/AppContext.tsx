@@ -9,7 +9,7 @@ import {
   useRef,
   ReactNode,
 } from "react";
-import { AppState, User, Trip, Category, PackingItem, Task } from "@/lib/types";
+import { AppState, User, Trip, Category, PackingItem, Task, Reservation } from "@/lib/types";
 import {
   fetchState,
   initializeRemoteState,
@@ -30,12 +30,17 @@ import {
   createTask,
   updateTask,
   deleteTask,
+  createReservation,
+  updateReservation,
+  deleteReservation,
   getItemProgress,
   getCategoriesForTrip,
   getItemsForCategory,
   getTasksForTrip,
   getTaskProgress,
   getTaskStatus,
+  getReservationsForTrip,
+  ReservationDraft,
   TaskStatus,
 } from "@/lib/storage";
 
@@ -105,6 +110,14 @@ interface AppContextType {
     ) => Promise<void>;
     delete: (id: string) => Promise<void>;
   };
+  reservation: {
+    create: (tripId: string, draft: ReservationDraft) => Promise<void>;
+    update: (
+      id: string,
+      data: Partial<Omit<Reservation, "id" | "tripId" | "type" | "createdAt">>
+    ) => Promise<void>;
+    delete: (id: string) => Promise<void>;
+  };
   helpers: {
     getProgress: (tripId: string) => number;
     getCategories: (tripId: string) => Category[];
@@ -123,6 +136,7 @@ interface AppContextType {
       percent: number;
     };
     getTaskStatus: (dueDate: string, done: boolean) => TaskStatus;
+    getReservations: (tripId: string) => Reservation[];
   };
 }
 
@@ -133,6 +147,7 @@ const EMPTY: AppState = {
   categories: [],
   items: [],
   tasks: [],
+  reservations: [],
 };
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -382,6 +397,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
   };
 
+  const reservationActions = {
+    create: async (tripId: string, draft: ReservationDraft) => {
+      await run(
+        (prev) => prev,
+        async () => (await createReservation(tripId, draft)).state
+      );
+    },
+    update: async (
+      id: string,
+      data: Partial<Omit<Reservation, "id" | "tripId" | "type" | "createdAt">>
+    ) => {
+      await run(
+        (prev) => ({
+          ...prev,
+          reservations: prev.reservations.map((r) => (r.id === id ? { ...r, ...data } : r)),
+        }),
+        () => updateReservation(id, data)
+      );
+    },
+    delete: async (id: string) => {
+      await run(
+        (prev) => ({ ...prev, reservations: prev.reservations.filter((r) => r.id !== id) }),
+        () => deleteReservation(id)
+      );
+    },
+  };
+
   const helpers = {
     getProgress: (tripId: string) => getItemProgress(tripId, state.items).percent,
     getCategories: (tripId: string) => getCategoriesForTrip(tripId, state.categories),
@@ -400,6 +442,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     getTasks: (tripId: string) => getTasksForTrip(tripId, state.tasks),
     getTaskProgress: (tripId: string) => getTaskProgress(tripId, state.tasks),
     getTaskStatus,
+    getReservations: (tripId: string) => getReservationsForTrip(tripId, state.reservations),
   };
 
   return (
@@ -415,6 +458,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         category: categoryActions,
         item: itemActions,
         task: taskActions,
+        reservation: reservationActions,
         helpers,
       }}
     >

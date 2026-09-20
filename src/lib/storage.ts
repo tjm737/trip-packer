@@ -1,4 +1,13 @@
-import { AppState, User, Trip, Category, PackingItem, Task } from "./types";
+import {
+  AppState,
+  User,
+  Trip,
+  Category,
+  PackingItem,
+  Task,
+  Reservation,
+  ReservationType,
+} from "./types";
 import { compareByDate, daysUntilDate, isValidDate } from "./dates";
 
 /*
@@ -239,6 +248,7 @@ export async function createTrip(
     categories: [],
     items: [],
     tasks: [],
+    reservations: [],
   };
 
   const state = await mutate({
@@ -360,6 +370,65 @@ export async function deleteTask(id: string): Promise<AppState> {
   return mutate({ op: "task.delete", id });
 }
 
+/* ----------------------------------------------------------- reservations */
+
+export type ReservationDraft = {
+  type: ReservationType;
+  title: string;
+  confirmation?: string;
+  location?: string;
+  locationTo?: string;
+  startDate?: string;
+  startTime?: string;
+  endDate?: string;
+  endTime?: string;
+  cost?: string;
+  notes?: string;
+};
+
+/**
+ * Every detail field defaults to "" rather than being omitted, so a partially
+ * filled booking still round-trips as a complete row. `type` and `title` are
+ * the only required inputs — you can always add the confirmation number later.
+ */
+export async function createReservation(
+  tripId: string,
+  draft: ReservationDraft
+): Promise<{ state: AppState; reservation: Reservation }> {
+  const current = await fetchState();
+  const order = current?.reservations.filter((r) => r.tripId === tripId).length ?? 0;
+  const reservation: Reservation = {
+    id: generateId(),
+    tripId,
+    type: draft.type,
+    title: draft.title.trim(),
+    confirmation: draft.confirmation?.trim() ?? "",
+    location: draft.location?.trim() ?? "",
+    locationTo: draft.locationTo?.trim() ?? "",
+    startDate: draft.startDate ?? "",
+    startTime: draft.startTime ?? "",
+    endDate: draft.endDate ?? "",
+    endTime: draft.endTime ?? "",
+    cost: draft.cost?.trim() ?? "",
+    notes: draft.notes?.trim() ?? "",
+    order,
+    createdAt: new Date().toISOString(),
+  };
+  const state = await mutate({ op: "reservation.create", reservation });
+  return { state, reservation };
+}
+
+export async function updateReservation(
+  id: string,
+  data: Partial<Omit<Reservation, "id" | "tripId" | "type" | "createdAt">>
+): Promise<AppState> {
+  return mutate({ op: "reservation.update", id, updates: data });
+}
+
+export async function deleteReservation(id: string): Promise<AppState> {
+  return mutate({ op: "reservation.delete", id });
+}
+
 /* -------------------------------------------------------------- selectors */
 
 export function getItemProgress(tripId: string, items: PackingItem[]) {
@@ -448,6 +517,36 @@ export function getTasksForTrip(tripId: string, tasks: Task[]): Task[] {
         if (cmp !== 0) return cmp;
       }
       // Stable fallback for undated or identical-date tasks.
+      if (a.order !== b.order) return a.order - b.order;
+      return a.createdAt.localeCompare(b.createdAt);
+    });
+}
+
+/* ------------------------------------------------------ reservations */
+
+/**
+ * Reservations in itinerary order: earliest first, undated ones last.
+ *
+ * Unlike tasks, there is no "done" state and no urgency colouring — a booking
+ * is either made or it isn't, and what matters is when it happens. Undated
+ * entries sink to the bottom because a reservation's date is the whole point;
+ * one missing a date is a record still being filled in, not something that
+ * should push a confirmed flight down the list.
+ */
+export function getReservationsForTrip(tripId: string, reservations: Reservation[]): Reservation[] {
+  return reservations
+    .filter((r) => r.tripId === tripId)
+    .sort((a, b) => {
+      const aDated = isValidDate(a.startDate);
+      const bDated = isValidDate(b.startDate);
+      if (aDated && bDated) {
+        const cmp = compareByDate(a.startDate, b.startDate);
+        if (cmp !== 0) return cmp;
+        // Same day: order by clock time so a 06:00 flight precedes a 14:00 one.
+        if (a.startTime !== b.startTime) return a.startTime.localeCompare(b.startTime);
+      } else if (aDated !== bDated) {
+        return aDated ? -1 : 1;
+      }
       if (a.order !== b.order) return a.order - b.order;
       return a.createdAt.localeCompare(b.createdAt);
     });
