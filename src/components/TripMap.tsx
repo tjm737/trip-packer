@@ -629,16 +629,56 @@ export function TripMap({ tripId }: { tripId: string }) {
    * `stop.reservationId` is translated to a position in the current stop list,
    * so a drag expressed in stop indices maps onto the reservation it belongs to.
    */
+  /*
+   * Reservations that actually appear on the map, in itinerary order. These are
+   * the ones with a draggable row.
+   */
   const reservationIds = useMemo(
     () => Array.from(new Set(stops.map((s) => s.reservationId))),
     [stops]
   );
 
-  /** Move the reservation at `from` so it sits at `to`, returning the new id order. */
+  /*
+   * Every reservation on the trip, in itinerary order — including the ones with
+   * no coordinates that therefore have no map stop.
+   *
+   * Reordering has to renumber this full list, not just the mapped subset. The
+   * `order` column is one sequence per trip, so rewriting only the mapped ids
+   * leaves the unmapped ones holding their old values: positions collide and
+   * whichever value the moved ids vacated simply disappears. That showed up as
+   * two bookings sharing order 5 and order 10 going missing.
+   *
+   * The unmapped bookings are carried through in their existing positions, so a
+   * drag never disturbs an order the user set for something off-map.
+   */
+  const allReservationIds = useMemo(() => {
+    const sorted = [...reservations].sort((a, b) => {
+      const ao = Number.isFinite(a.order) ? a.order : Number.MAX_SAFE_INTEGER;
+      const bo = Number.isFinite(b.order) ? b.order : Number.MAX_SAFE_INTEGER;
+      if (ao !== bo) return ao - bo;
+      return String(a.id).localeCompare(String(b.id));
+    });
+    return sorted.map((r) => r.id);
+  }, [reservations]);
+
+  /**
+   * Move the reservation at `from` so it sits at `to`, returning the full id
+   * order for the trip.
+   *
+   * `from`/`to` are positions in the mapped subset (the draggable rows), so they
+   * are translated into the full list before splicing — otherwise the splice
+   * would move the wrong booking whenever an unmapped one is interleaved.
+   */
   const moveReservation = (from: number, to: number): string[] => {
-    const next = [...reservationIds];
-    const [moved] = next.splice(from, 1);
-    next.splice(to, 0, moved);
+    const next = [...allReservationIds];
+    const movedId = reservationIds[from];
+    const targetId = reservationIds[to];
+    if (!movedId || !targetId) return next;
+    const fromFull = next.indexOf(movedId);
+    const toFull = next.indexOf(targetId);
+    if (fromFull < 0 || toFull < 0) return next;
+    const [moved] = next.splice(fromFull, 1);
+    next.splice(toFull, 0, moved);
     return next;
   };
 
@@ -853,7 +893,7 @@ export function TripMap({ tripId }: { tripId: string }) {
                         disabled={resPos === 0}
                         title="Move earlier"
                         aria-label="Move earlier"
-                        className="rounded p-0.5 text-zinc-600 transition-colors hover:text-emerald-400 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:text-zinc-600"
+                        className="grid h-6 w-6 place-items-center rounded text-zinc-600 transition-colors hover:text-emerald-400 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:text-zinc-600"
                       >
                         <ChevronUp className="h-3.5 w-3.5" />
                       </button>
@@ -863,7 +903,7 @@ export function TripMap({ tripId }: { tripId: string }) {
                         disabled={resPos === reservationIds.length - 1}
                         title="Move later"
                         aria-label="Move later"
-                        className="rounded p-0.5 text-zinc-600 transition-colors hover:text-emerald-400 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:text-zinc-600"
+                        className="grid h-6 w-6 place-items-center rounded text-zinc-600 transition-colors hover:text-emerald-400 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:text-zinc-600"
                       >
                         <ChevronDown className="h-3.5 w-3.5" />
                       </button>
