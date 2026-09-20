@@ -388,7 +388,27 @@ export async function geocodeMany(
     seen.add(dedupeKey);
 
     const { point } = await geocode(raw, context);
-    if (point) points.push(point);
+    /*
+     * Re-key the point to the caller's own location string before returning.
+     *
+     * `geocode` identifies a point by its cache key, which for a
+     * context-resolved lookup is "<location>\0<context>" — a distinct string so
+     * that "Terminal 5" cannot be served the answer found for a bare "Terminal
+     * 5" somewhere else. That is the right identity for the cache, but the wrong
+     * one for the caller, which indexes the results by the location it asked
+     * for.
+     *
+     * Worse, the two disagreed: a cold lookup returned the plain location while
+     * a cache hit returned the compound key, so the same request produced two
+     * different keys. The client looked up "merano" and found only
+     * "merano\0in viaggio", so every booking carrying a title — i.e. every
+     * restaurant and hotel — silently dropped off the map on the second load
+     * after working correctly on the first.
+     *
+     * The public shape of a GeoPoint is therefore "coordinates for the location
+     * you asked about". The cache key stays internal to `geocode`.
+     */
+    if (point) points.push({ ...point, query: q });
     else unresolved.push(raw.trim());
   }
 
