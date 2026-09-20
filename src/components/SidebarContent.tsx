@@ -443,8 +443,8 @@ export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
             <span className="text-sm">✈️</span>
           </div>
           <div>
-            <h1 className="text-sm font-bold text-white tracking-tight">TripPacker</h1>
-            <p className="text-[10px] text-zinc-500 -mt-0.5">Pack smarter, stress less</p>
+            <h1 className="text-sm font-bold text-white tracking-tight">TripPlanner</h1>
+            <p className="text-[10px] text-zinc-500 -mt-0.5">Plan smarter, stress less</p>
           </div>
         </div>
       </div>

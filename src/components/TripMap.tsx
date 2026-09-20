@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { MapPin, Route, Loader2, AlertTriangle, Clock, ExternalLink } from "lucide-react";
+import { MapPin, Route, Loader2, AlertTriangle, Clock, ExternalLink, Plane } from "lucide-react";
 import "leaflet/dist/leaflet.css";
 
 import { useApp } from "@/lib/AppContext";
@@ -38,6 +38,10 @@ type LatLng = { lat: number; lng: number };
 
 type Stop = {
   key: string;
+  /** Reservation this stop came from; used to group a booking's endpoints. */
+  reservationId: string;
+  /** Reservation kind, so flights can be drawn as air hops. */
+  type: string;
   name: string;
   detail: string;
   point: LatLng;
@@ -52,6 +56,8 @@ type Leg = {
   distanceM: number;
   durationS: number;
   geometry: [number, number][]; // [lat, lng]
+  /** True for an air hop drawn as a great-circle arc rather than a road. */
+  isAir?: boolean;
 };
 
 /** Order reservations the same way the reservations list does. */
@@ -88,6 +94,8 @@ function buildStops(res: Reservation[], coords: Map<string, LatLng>): Stop[] {
     if (from) {
       stops.push({
         key: `${r.id}-from`,
+        reservationId: r.id,
+        type: r.type,
         name: r.location,
         detail: r.title,
         point: from,
@@ -98,6 +106,8 @@ function buildStops(res: Reservation[], coords: Map<string, LatLng>): Stop[] {
     if (to) {
       stops.push({
         key: `${r.id}-to`,
+        reservationId: r.id,
+        type: r.type,
         name: r.locationTo,
         detail: r.title,
         point: to,
@@ -118,6 +128,63 @@ const fmtDuration = (s: number) => {
   const m = Math.round((s % 3600) / 60);
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 };
+
+const toRad = (d: number) => (d * Math.PI) / 180;
+const toDeg = (r: number) => (r * 180) / Math.PI;
+
+/** Great-circle distance in metres between two points. */
+function haversineM(a: LatLng, b: LatLng): number {
+  const R = 6371008.8; // mean Earth radius
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/**
+ * Interpolate a great-circle path between two points.
+ *
+ * A straight line drawn in screen space is wrong for long hops: on a Mercator
+ * projection a Seattle-to-Keflavik line bows toward the equator and appears to
+ * pass nowhere near the real route. Slerp follows the actual shortest path
+ * over the globe, so a flight to Iceland correctly arcs north.
+ */
+function greatCircle(a: LatLng, b: LatLng, segments = 64): [number, number][] {
+  const lat1 = toRad(a.lat);
+  const lng1 = toRad(a.lng);
+  const lat2 = toRad(b.lat);
+  const lng2 = toRad(b.lng);
+
+  const d =
+    2 *
+    Math.asin(
+      Math.min(
+        1,
+        Math.sqrt(
+          Math.sin((lat2 - lat1) / 2) ** 2 +
+            Math.cos(lat1) * Math.cos(lat2) * Math.sin((lng2 - lng1) / 2) ** 2
+        )
+      )
+    );
+
+  // Coincident points: nothing to interpolate.
+  if (d === 0) return [[a.lat, a.lng], [b.lat, b.lng]];
+
+  const out: [number, number][] = [];
+  for (let i = 0; i <= segments; i++) {
+    const f = i / segments;
+    const A = Math.sin((1 - f) * d) / Math.sin(d);
+    const B = Math.sin(f * d) / Math.sin(d);
+    const x = A * Math.cos(lat1) * Math.cos(lng1) + B * Math.cos(lat2) * Math.cos(lng2);
+    const y = A * Math.cos(lat1) * Math.sin(lng1) + B * Math.cos(lat2) * Math.sin(lng2);
+    const z = A * Math.sin(lat1) + B * Math.sin(lat2);
+    out.push([toDeg(Math.atan2(z, Math.sqrt(x * x + y * y))), toDeg(Math.atan2(y, x))]);
+  }
+  return out;
+}
 
 export function TripMap({ tripId }: { tripId: string }) {
   const { helpers } = useApp();
@@ -195,12 +262,61 @@ export function TripMap({ tripId }: { tripId: string }) {
 
   const stops = useMemo(() => buildStops(reservations, coords), [reservations, coords]);
 
+  /*
+   * Air legs are derived locally — no network call — because they do not need
+   * a router: a flight is a great-circle arc between its two endpoints.
+   *
+   * A leg counts as air when both of its stops belong to the same booking and
+   * that booking is a flight. Grouping by reservation (rather than trusting
+   * adjacency alone) means a flight's departure and arrival stop are joined
+   * even after the stops are reordered, while a hotel sitting between two
+   * unrelated stops never becomes an arc.
+   */
+  const airLegs = useMemo<Leg[]>(() => {
+    const out: Leg[] = [];
+    for (let i = 0; i < stops.length - 1; i++) {
+      const a = stops[i];
+      const b = stops[i + 1];
+      if (a.reservationId !== b.reservationId) continue;
+      if (a.type !== "flight") continue;
+      // A single-endpoint flight produces one stop, so there is nothing to join.
+      if (a.key === b.key) continue;
+      out.push({
+        fromIndex: i,
+        toIndex: i + 1,
+        distanceM: haversineM(a.point, b.point),
+        durationS: 0, // a flight's duration is not a driving duration
+        geometry: greatCircle(a.point, b.point, 64),
+        isAir: true,
+      });
+    }
+    return out;
+  }, [stops]);
+
+  const airKey = airLegs.map((l) => `${l.fromIndex}-${l.toIndex}`).join(",");
+
+  /* Road and air legs merged into one list, ordered along the itinerary.
+     Declared before the drawing effect because both the map layers and the
+     itinerary rows read from it. */
+  const allLegs = useMemo(
+    () => [...legs, ...airLegs].sort((a, b) => a.fromIndex - b.fromIndex),
+    [legs, airLegs]
+  );
+
   /* --- Step 2: driving legs between consecutive stops -------------------- */
   const stopsKey = stops.map((s) => `${s.point.lat},${s.point.lng}`).join(";");
 
   useEffect(() => {
     let cancelled = false;
-    if (stops.length < 2) {
+    // Road routing only makes sense for hops that are not flights.
+    const roadHops: { a: number; b: number }[] = [];
+    for (let i = 0; i < stops.length - 1; i++) {
+      const isAir =
+        stops[i].reservationId === stops[i + 1].reservationId && stops[i].type === "flight";
+      if (!isAir) roadHops.push({ a: i, b: i + 1 });
+    }
+
+    if (roadHops.length === 0) {
       setLegs([]);
       return;
     }
@@ -211,12 +327,22 @@ export function TripMap({ tripId }: { tripId: string }) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            waypoints: stops.map((s) => s.point),
+            hops: roadHops.map((h) => ({ from: stops[h.a].point, to: stops[h.b].point })),
           }),
         });
         if (!res.ok) return; // legs are a bonus; the map still works without them
-        const data = (await res.json()) as { legs: Leg[] };
-        if (!cancelled) setLegs(data.legs ?? []);
+        const data = (await res.json()) as {
+          legs: { distanceM: number; durationS: number; geometry: [number, number][] }[];
+        };
+        if (cancelled) return;
+        // The API answers in request order, so zip the results back onto the
+        // hop indices to preserve which stops each leg connects.
+        const mapped: Leg[] = (data.legs ?? []).map((l, i) => ({
+          ...l,
+          fromIndex: roadHops[i].a,
+          toIndex: roadHops[i].b,
+        }));
+        setLegs(mapped);
       } catch {
         // Ignore: the pins are the essential part, the route line is not.
       }
@@ -225,7 +351,7 @@ export function TripMap({ tripId }: { tripId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [stopsKey]);
+  }, [stopsKey, airKey]);
 
   /* --- Step 3: create the Leaflet map once ------------------------------- */
   useEffect(() => {
@@ -296,16 +422,21 @@ export function TripMap({ tripId }: { tripId: string }) {
 
       const group = L.layerGroup();
 
-      // Route lines first, so pins sit on top of them.
-      for (const leg of legs) {
+      // Route lines first, so pins sit on top of them. Both kinds are drawn
+      // from the merged list — drawing only the road legs would silently drop
+      // every flight arc.
+      for (const leg of allLegs) {
         if (leg.geometry?.length > 1) {
           L.polyline(
             leg.geometry.map(([la, ln]) => [la, ln] as [number, number]),
             {
-              color: "#10b981",
-              weight: 3,
-              opacity: 0.75,
-              dashArray: "6 6",
+              // Flights are a distinct visual language: solid emerald rather
+              // than the dashed road style, so an air hop never reads as a
+              // drivable leg.
+              color: leg.isAir ? "#34d399" : "#10b981",
+              weight: leg.isAir ? 2 : 3,
+              opacity: leg.isAir ? 0.9 : 0.75,
+              dashArray: leg.isAir ? undefined : "6 6",
             }
           ).addTo(group);
         }
@@ -369,15 +500,19 @@ export function TripMap({ tripId }: { tripId: string }) {
         frame();
       }
     })();
-  }, [mapReady, stopsKey, legs]);
+  }, [mapReady, stopsKey, legs, airKey]);
 
-  const totalDistance = legs.reduce((sum, l) => sum + l.distanceM, 0);
-  const totalDuration = legs.reduce((sum, l) => sum + l.durationS, 0);
+  // Totals cover driving only: mixing a 3,600-mile flight into a "miles
+  // driven" figure would make the driving total meaningless.
+  const driven = allLegs.filter((l) => !l.isAir);
+  const totalDistance = driven.reduce((sum, l) => sum + l.distanceM, 0);
+  const totalDuration = driven.reduce((sum, l) => sum + l.durationS, 0);
+  const flownDistance = airLegs.reduce((sum, l) => sum + l.distanceM, 0);
   const hasStops = stops.length > 0;
-  // Legs that have no driving route — flights, ferries, or anywhere OSRM has
-  // no coverage. Surfaced in the footer so a missing line reads as "not
-  // drivable" rather than as a bug.
-  const skippedLegs = Math.max(0, stops.length - 1 - legs.length);
+  // Hops with no driving route and no flight either — ferries, or anywhere
+  // OSRM has no coverage. Surfaced so a missing line reads as "not drivable"
+  // rather than as a bug.
+  const skippedLegs = Math.max(0, stops.length - 1 - allLegs.length);
 
   return (
     <div className="surface-raised rounded-xl border border-white/5 p-4 sm:p-5">
@@ -392,16 +527,26 @@ export function TripMap({ tripId }: { tripId: string }) {
           )}
         </div>
 
-        {totalDistance > 0 && (
-          <div className="flex items-center gap-3 text-[11px] text-zinc-400">
-            <span className="inline-flex items-center gap-1">
-              <Route className="h-3 w-3 text-zinc-500" />
-              {fmtDistance(totalDistance)}
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <Clock className="h-3 w-3 text-zinc-500" />
-              {fmtDuration(totalDuration)}
-            </span>
+        {(totalDistance > 0 || flownDistance > 0) && (
+          <div className="flex flex-wrap items-center gap-3 text-[11px] text-zinc-400">
+            {totalDistance > 0 && (
+              <>
+                <span className="inline-flex items-center gap-1" title="Total distance driven">
+                  <Route className="h-3 w-3 text-zinc-500" />
+                  {fmtDistance(totalDistance)} drive
+                </span>
+                <span className="inline-flex items-center gap-1" title="Total time driving">
+                  <Clock className="h-3 w-3 text-zinc-500" />
+                  {fmtDuration(totalDuration)}
+                </span>
+              </>
+            )}
+            {flownDistance > 0 && (
+              <span className="inline-flex items-center gap-1 text-emerald-300/80" title="Total distance flown">
+                <Plane className="h-3 w-3" />
+                {fmtDistance(flownDistance)} flight
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -440,11 +585,12 @@ export function TripMap({ tripId }: { tripId: string }) {
       {!loading && hasStops && (
         <div className="mt-3 space-y-1.5">
           {stops.map((s, i) => {
-            const leg = legs[i]; // leg i connects stop i -> i+1
-            // A zero-distance leg means two bookings share a location (a
+            // The leg leaving this stop, of whichever kind.
+            const leg = allLegs.find((l) => l.fromIndex === i);
+            // A zero-distance road leg means two bookings share a location (a
             // flight landing where a car is collected). Showing "0.0 mi drive"
             // is noise, so those are rendered as a plain connection.
-            const showLeg = leg && i < stops.length - 1 && leg.distanceM > 10;
+            const showLeg = leg && i < stops.length - 1 && (leg.isAir || leg.distanceM > 10);
             return (
               <div key={s.key}>
                 <div className="flex items-center gap-2 text-xs">
@@ -455,8 +601,23 @@ export function TripMap({ tripId }: { tripId: string }) {
                   {s.date && <span className="shrink-0 text-zinc-500">{formatDate(s.date)}</span>}
                 </div>
                 {showLeg && (
-                  <div className="ml-2.5 border-l border-dashed border-white/10 py-0.5 pl-4 text-[11px] text-zinc-500">
-                    {fmtDistance(leg.distanceM)} · {fmtDuration(leg.durationS)} drive
+                  <div
+                    className={cn(
+                      "ml-2.5 py-0.5 pl-4 text-[11px]",
+                      leg.isAir
+                        ? "border-l border-emerald-400/30 text-emerald-300/80"
+                        : "border-l border-dashed border-white/10 text-zinc-500"
+                    )}
+                  >
+                    {leg.isAir ? (
+                      <>
+                        {fmtDistance(leg.distanceM)} · flight
+                      </>
+                    ) : (
+                      <>
+                        {fmtDistance(leg.distanceM)} · {fmtDuration(leg.durationS)} drive
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -480,7 +641,7 @@ export function TripMap({ tripId }: { tripId: string }) {
         <p className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[10px] text-zinc-600">
           <ExternalLink className="h-3 w-3" />
           {skippedLegs > 0
-            ? `${skippedLegs} leg${skippedLegs === 1 ? "" : "s"} not drivable (flight, ferry or no road) · `
+            ? `${skippedLegs} leg${skippedLegs === 1 ? "" : "s"} not drivable (ferry or no road) · `
             : ""}
           Driving distances via OSRM · Maps © OpenStreetMap contributors
         </p>

@@ -10,13 +10,13 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "TripPacker — Pack Smarter, Stress Less",
+  title: "TripPlanner — Plan Smarter, Stress Less",
   description: "Plan your trips and pack efficiently with organized checklists",
   // Installed to the iPhone home screen, this runs standalone rather than in
   // Safari chrome, which is what makes it feel like a native app.
   appleWebApp: {
     capable: true,
-    title: "TripPacker",
+    title: "TripPlanner",
     statusBarStyle: "black-translucent",
   },
 };

@@ -29,7 +29,7 @@ export function MobileNav() {
             <span className="text-[11px]">✈️</span>
           </div>
           <span className="text-sm font-bold text-white tracking-tight truncate">
-            TripPacker
+            TripPlanner
           </span>
         </div>
       </div>

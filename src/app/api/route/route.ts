@@ -6,115 +6,134 @@ export const dynamic = "force-dynamic";
 /*
  * POST /api/route
  *
- * Body: { waypoints: { lat, lng }[] }
- * Returns: { legs: [{ fromIndex, toIndex, distanceM, durationS, geometry }] }
+ * Body: { hops: { from: {lat,lng}, to: {lat,lng} }[] }
+ * Returns: { legs: { distanceM, durationS, geometry }[] }
  *
- * Uses the public OSRM demo server to measure driving legs between consecutive
- * stops.
+ * Each hop is routed independently rather than as one multi-waypoint request.
+ * A single request fails outright — "Impossible route between points" — as soon
+ * as one hop crosses an ocean or lies outside the routing data, which would
+ * discard every other leg too. Asking per hop means an unroutable leg is simply
+ * absent from the response while its neighbours still resolve.
  *
- * Two important properties of that server shape this file:
+ * Flights are not sent here at all: the client draws those as great-circle
+ * arcs, since no router can produce them.
  *
- *   1. It routes each leg independently rather than asking for one route
- *      through every waypoint. A single multi-waypoint request fails entirely
- *      with "Impossible route between points" as soon as one hop crosses an
- *      ocean — which is exactly what a flight between continents does. Routing
- *      per leg means the drivable hops still resolve while the flight is
- *      cleanly skipped.
- *
- *   2. Coverage is regional rather than global, so a leg may legitimately have
- *      no route. That is not an error: the client simply draws no line for it.
- *
- * Requests are proxied through the server so the user's IP stays off
- * third-party logs and the upstream URL lives in one place, ready to be
- * swapped for a self-hosted OSRM later.
- *
- * OSRM takes coordinates as lng,lat — the reverse of the order used almost
- * everywhere else, and a classic source of transposed, silently-wrong routes.
+ * Results are returned in request order, so the caller can zip them back onto
+ * the hops it asked about.
  */
+
+type Point = { lat: number; lng: number };
 
 const OSRM = "https://router.project-osrm.org/route/v1/driving";
 
-type Waypoint = { lat: number; lng: number };
+/** Beyond this, a "leg" is almost certainly two unrelated places. */
+const MAX_LEG_M = 5_000_000;
 
-type OsrmResponse = {
-  code: string;
-  routes?: {
-    distance: number;
-    duration: number;
-    geometry?: { coordinates: [number, number][] };
-  }[];
+function isValidPoint(p: unknown): p is Point {
+  if (!p || typeof p !== "object") return false;
+  const { lat, lng } = p as Record<string, unknown>;
+  return (
+    typeof lat === "number" &&
+    typeof lng === "number" &&
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180
+  );
+}
+
+type OsrmRoute = {
+  distance: number;
+  duration: number;
+  geometry?: { coordinates?: [number, number][] };
 };
 
-/** Measure one driving leg. Returns null when no route exists. */
-async function routeLeg(
-  from: Waypoint,
-  to: Waypoint
-): Promise<{ distanceM: number; durationS: number; geometry: [number, number][] } | null> {
+async function routeHop(from: Point, to: Point): Promise<{
+  distanceM: number;
+  durationS: number;
+  geometry: [number, number][];
+} | null> {
+  // OSRM wants lng,lat — the opposite of Leaflet and of our own types.
   const url = `${OSRM}/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`;
 
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-    if (!res.ok) return null; // NoRoute, or upstream trouble
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(15_000),
+    headers: { "User-Agent": "trip-packer/1.0" },
+  });
+  if (!res.ok) return null;
 
-    const data = (await res.json()) as OsrmResponse;
-    if (data.code !== "Ok" || !data.routes?.length) return null;
+  const data = (await res.json()) as { code?: string; routes?: OsrmRoute[] };
+  if (data.code !== "Ok" || !data.routes?.length) return null;
 
-    const route = data.routes[0];
-    const geometry: [number, number][] = (route.geometry?.coordinates ?? []).map(
-      ([lng, lat]) => [lat, lng] as [number, number]
-    );
+  const route = data.routes[0];
+  if (typeof route.distance !== "number" || route.distance > MAX_LEG_M) return null;
 
-    return { distanceM: route.distance, durationS: route.duration, geometry };
-  } catch {
-    return null;
-  }
+  // GeoJSON is [lng, lat]; flip to [lat, lng] for Leaflet.
+  const geometry = (route.geometry?.coordinates ?? []).map(
+    ([lng, lat]) => [lat, lng] as [number, number]
+  );
+
+  return {
+    distanceM: route.distance,
+    durationS: typeof route.duration === "number" ? route.duration : 0,
+    geometry,
+  };
 }
 
 export async function POST(req: Request) {
-  let body: { waypoints?: unknown };
-
+  let body: unknown;
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  if (!Array.isArray(body.waypoints)) {
-    return NextResponse.json({ error: "waypoints must be an array" }, { status: 400 });
+  const raw = (body as { hops?: unknown })?.hops;
+  if (!Array.isArray(raw)) {
+    return NextResponse.json({ error: "hops must be an array" }, { status: 400 });
+  }
+  if (raw.length > 60) {
+    return NextResponse.json({ error: "Too many hops" }, { status: 400 });
   }
 
-  const waypoints = body.waypoints.filter(
-    (w): w is Waypoint =>
-      typeof w === "object" &&
-      w !== null &&
-      Number.isFinite((w as Waypoint).lat) &&
-      Number.isFinite((w as Waypoint).lng)
-  );
+  const hops = raw.map((h) => {
+    const { from, to } = (h ?? {}) as { from?: unknown; to?: unknown };
+    return isValidPoint(from) && isValidPoint(to) ? { from, to } : null;
+  });
 
-  if (waypoints.length < 2) return NextResponse.json({ legs: [] });
-  if (waypoints.length > 25) {
-    return NextResponse.json({ error: "Too many waypoints" }, { status: 400 });
+  if (hops.some((h) => h === null)) {
+    return NextResponse.json({ error: "Each hop needs valid from/to points" }, { status: 400 });
   }
 
-  // Legs are independent, so fetch them concurrently. The demo server is not
-  // rate-limited the way Nominatim is, and a 6-stop trip is only 5 requests.
-  const results = await Promise.all(
-    waypoints.slice(0, -1).map((from, i) => routeLeg(from, waypoints[i + 1]))
+  /*
+   * Routing is best-effort by design. A hop with no drivable route (a flight,
+   * a ferry, or somewhere the routing graph does not reach) yields null rather
+   * than failing the whole request, and the client renders it as not drivable.
+   *
+   * Requests are sequential, not parallel: the public OSRM instance is a
+   * shared demo server and hammering it with a burst of concurrent requests
+   * is how clients get rate-limited.
+   */
+  const legs: (Awaited<ReturnType<typeof routeHop>>)[] = [];
+  for (const hop of hops as { from: Point; to: Point }[]) {
+    try {
+      legs.push(await routeHop(hop.from, hop.to));
+    } catch {
+      legs.push(null); // timeout or network failure: treat as unroutable
+    }
+  }
+
+  const resolved = legs.filter((l): l is NonNullable<typeof l> => l !== null);
+
+  return NextResponse.json(
+    {
+      legs: resolved,
+      /** Indices (into the request array) that produced no driving route. */
+      unroutable: legs.map((l, i) => (l === null ? i : -1)).filter((i) => i >= 0),
+      warning: resolved.length === 0 ? "No driving routes available" : undefined,
+    },
+    { headers: { "Cache-Control": "no-store" } }
   );
-
-  const legs = results
-    .map((r, i) =>
-      r
-        ? {
-            fromIndex: i + 1,
-            toIndex: i + 2,
-            distanceM: r.distanceM,
-            durationS: r.durationS,
-            geometry: r.geometry,
-          }
-        : null
-    )
-    .filter((l): l is NonNullable<typeof l> => l !== null);
-
-  return NextResponse.json({ legs });
 }
