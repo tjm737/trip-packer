@@ -18,6 +18,7 @@ import {
   Clock,
   MapPin,
   ArrowRight,
+  Map as MapIcon,
   Hash,
   Wallet,
   StickyNote,
@@ -31,6 +32,114 @@ import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import { cn } from "cn";
+
+/*
+ * Is this location string something a maps provider can actually resolve?
+ *
+ * The `location` field is free text, and users reasonably type both "12 Baker
+ * Street, London" and "near the airport". Handing the second to a maps provider
+ * is worse than showing no button: it resolves to *something* — a confidently
+ * wrong pin, the same failure mode as OSRM silently relocating an
+ * out-of-coverage endpoint. So the check is deliberately conservative and the
+ * button simply does not appear when the text is not a place.
+ *
+ * Two classes are rejected:
+ *
+ *   - vague descriptors ("near MUC", "somewhere in the centre"), which have no
+ *     single coordinate;
+ *   - anything with too little to go on (a bare "TBD"), which would resolve to
+ *     nothing useful.
+ *
+ * Airport codes are deliberately *kept*: "PHL" and "MUC (T1)" are real,
+ * resolvable places and are exactly what a traveller needs at a counter.
+ */
+const VAGUE_LOCATION =
+  /\b(near|nearby|around|somewhere|tbd|tba|unknown|anywhere|unspecified|n\/a)\b/i;
+
+export function isMappableLocation(value: string | undefined | null): boolean {
+  const text = (value ?? "").trim();
+  if (text.length < 2) return false;
+  // A bare placeholder or a single stray character is not a destination.
+  if (!/[a-z0-9]/i.test(text)) return false;
+  return !VAGUE_LOCATION.test(text);
+}
+
+/*
+ * A Google Maps search URL for a location.
+ *
+ * The documented `search` endpoint with `query` is used rather than the
+ * `/maps/place/` form: `query` accepts a free-form string and needs no place
+ * ID, which is all we have — the app stores text, never a Google identifier.
+ * `api=1` is Google's marker for the supported cross-platform URL scheme, and
+ * the whole thing is returned as a plain https link so it opens the Maps app on
+ * iOS and Android and a new tab on desktop.
+ */
+export function googleMapsUrl(query: string): string {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query.trim())}`;
+}
+
+/*
+ * The location to send to a maps provider for a booking.
+ *
+ * Travel bookings have two ends; a map link is only ever for one of them, so
+ * the primary location is preferred and the destination is the fallback (a
+ * flight whose origin was left blank still has somewhere worth showing). The
+ * booking title is appended as a hint when it is not already part of the
+ * address, because "Sofitel London Heathrow" resolves far better than
+ * "Terminal 5" on its own.
+ */
+/*
+ * Titles that describe a stay rather than name a venue.
+ *
+ * A title is only useful to a maps provider when it is the *name of a place* —
+ * "Hidalgo", "Arunda Sektkellerei". Many are descriptions instead: "Fantastic
+ * Penthouse, Lake View", "Reykjavík hotel (not yet booked)", "PHL to Iceland".
+ * Appending those produces a long, low-signal query that geocoders handle
+ * worse than the plain location, so they are filtered out and the location is
+ * used alone.
+ */
+const DESCRIPTIVE_TITLE =
+  /\b(not yet booked|to be booked|tbd|tba|penthouse|apartment|flat|house|home|room|hotel|airbnb|vrbo|booking|stay|rental|guesthouse|hostel|lodge|to\s+[a-z]+|from\s+[a-z]+)\b/i;
+
+export function mappableLocation(r: {
+  location?: string;
+  locationTo?: string;
+  title?: string;
+}): string | null {
+  const loc = (r.location ?? "").trim();
+  const to = (r.locationTo ?? "").trim();
+
+  /*
+   * Prefer a resolvable location. When neither end is usable — "near MUC" is
+   * the real case — fall back to the title *only if it names a place*, since a
+   * hotel whose location the user left vague often has a perfectly good town as
+   * its name ("Erding").
+   */
+  let primary: string | null = null;
+  let fromTitleOnly = false;
+  if (isMappableLocation(loc)) primary = loc;
+  else if (isMappableLocation(to)) primary = to;
+  else if ((r.title ?? "").trim().length >= 3 && isMappableLocation(r.title)) {
+    primary = r.title!.trim();
+    fromTitleOnly = true;
+  }
+  if (!primary) return null;
+
+  // When the location itself came from the title there is nothing to append.
+  if (fromTitleOnly) return primary;
+
+  const title = (r.title ?? "").trim();
+  if (!title || title.length < 3) return primary;
+  // Flight numbers (BA936) and booking codes are not places.
+  if (/^[A-Z]{2}\d{1,4}$/.test(title)) return primary;
+  // Descriptions of a stay make a worse query than the address alone.
+  if (DESCRIPTIVE_TITLE.test(title)) return primary;
+  // The departure→arrival form of a travel title names two places at once.
+  if (/\b(to|→)\b/.test(title)) return primary;
+  if (primary.toLowerCase().includes(title.toLowerCase())) return primary;
+
+  return `${primary}, ${title}`;
+}
 
 /*
  * Reservations: the flights, beds and cars that make up the trip.
@@ -251,7 +360,7 @@ export function TripReservations({ tripId }: { tripId: string }) {
                     "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs transition-colors",
                     active
                       ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                      : "border-white/5 bg-white/[0.02] text-zinc-400 hover:text-zinc-200"
+                      : "border-white/8 bg-white/[0.02] text-zinc-400 hover:text-zinc-200"
                   )}
                 >
                   <Icon className="h-3.5 w-3.5" />
@@ -380,7 +489,7 @@ export function TripReservations({ tripId }: { tripId: string }) {
   };
 
   return (
-    <div ref={rootRef} className="surface-raised rounded-xl border border-white/5 p-4 sm:p-5">
+    <div ref={rootRef} className="surface-raised rounded-xl border border-white/8 p-4 sm:p-5">
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <CalendarCheck className="h-4 w-4 text-emerald-400" />
@@ -425,7 +534,7 @@ export function TripReservations({ tripId }: { tripId: string }) {
             exit={{ opacity: 0, height: 0 }}
             className="overflow-hidden"
           >
-            <div className="surface-inset mb-3 rounded-lg border border-white/5 p-3">
+            <div className="surface-inset mb-3 rounded-lg border border-white/8 p-3">
               {renderFields(draft, setDraft, (t) => setDraft((p) => ({ ...p, type: t })))}
               <div className="mt-3 flex items-center gap-2">
                 <Button size="sm" onClick={submitNew} disabled={!canAdd} className="gap-1.5">
@@ -486,11 +595,15 @@ export function TripReservations({ tripId }: { tripId: string }) {
 
           const hasWhen = isValidDate(r.startDate);
           const travel = Boolean(f.toLabel);
+          // Where the "Map" link points, or null when the stored text is not a
+          // resolvable place. Computed per row rather than per render so the
+          // link either exists or does not, with no half-state.
+          const mapsQuery = mappableLocation(r);
 
           return (
             <div
               key={r.id}
-              className="group rounded-lg border border-white/5 bg-white/[0.02] p-3 transition-colors hover:border-white/10"
+              className="group rounded-lg border border-white/8 bg-white/[0.02] p-3 transition-colors hover:border-white/10"
             >
               <div className="flex items-start gap-3">
                 <div
@@ -505,7 +618,7 @@ export function TripReservations({ tripId }: { tripId: string }) {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start justify-between gap-2">
                     <p className="truncate text-sm font-medium text-zinc-100">{r.title}</p>
-                    <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                    <div className="flex shrink-0 items-center gap-1 transition-opacity md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100">
                       <Tooltip label="Edit booking">
                         <button
                           onClick={() => startEdit(r)}
@@ -539,6 +652,39 @@ export function TripReservations({ tripId }: { tripId: string }) {
                         </>
                       ) : (
                         <span className="truncate">{r.location || r.locationTo}</span>
+                      )}
+
+                      {/*
+                        * Map link, shown only when the stored text is something
+                        * a maps provider can resolve — see `mappableLocation`.
+                        *
+                        * An anchor rather than a button because it navigates:
+                        * the browser gives it middle-click, cmd-click, "copy
+                        * link" and long-press-to-open-in-app for free, none of
+                        * which a click handler would provide.
+                        *
+                        * The accessible name names the destination, so a screen
+                        * reader hearing a list of identical "Open in Maps" links
+                        * still knows which booking each one belongs to.
+                        */}
+                      {mapsQuery && (
+                        <Tooltip label={`Open ${mapsQuery} in Google Maps`}>
+                          <a
+                            href={googleMapsUrl(mapsQuery)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={`Open ${mapsQuery} in Google Maps`}
+                            title={`Open ${mapsQuery} in Google Maps`}
+                            // `-my-1 py-1` grows the tap target to a reliable
+                            // 24px without adding height to the row: the extra
+                            // padding is pulled back out by the negative margin,
+                            // which is why this does not shift the layout.
+                            className="-my-1 inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[11px] text-zinc-400 transition-colors hover:bg-white/5 hover:text-emerald-400"
+                          >
+                            <MapIcon className="h-3 w-3" />
+                            <span className="hidden sm:inline">Map</span>
+                          </a>
+                        </Tooltip>
                       )}
                     </div>
                   )}
