@@ -159,7 +159,7 @@ export default function NewTripPage() {
               <Button
                 onClick={() => name.trim() && setStep(2)}
                 disabled={!name.trim()}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-6 text-base"
+                className="w-full bg-primary hover:bg-emerald-700 text-white py-6 text-base"
               >
                 Continue <Plus className="w-4 h-4 ml-2" />
               </Button>
@@ -208,7 +208,7 @@ export default function NewTripPage() {
                 </Button>
                 <Button
                   onClick={handleCreate}
-                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-6"
+                  className="flex-1 bg-primary hover:bg-emerald-700 text-white py-6"
                 >
                   <Sparkles className="w-4 h-4 mr-2" />
                   Create Trip

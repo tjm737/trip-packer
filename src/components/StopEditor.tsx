@@ -140,7 +140,7 @@ export function StopEditor({ reservation: r, onClose }: Props) {
               onClose();
             }}
             className={cn(
-              "inline-flex h-8 items-center gap-1.5 rounded-md border border-white/5 bg-white/[0.02]",
+              "inline-flex h-8 items-center gap-1.5 rounded-md border border-white/8 bg-white/[0.02]",
               "px-2.5 text-xs text-zinc-400 transition-colors hover:text-emerald-300"
             )}
           >

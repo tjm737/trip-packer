@@ -200,7 +200,7 @@ function TaskRow({ task }: { task: Task }) {
             )}
           </div>
 
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+          <div className="flex items-center gap-1 transition-opacity md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100">
             <Tooltip label="Edit task or due date" side="top">
               <Button
                 size="icon"

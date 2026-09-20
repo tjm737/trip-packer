@@ -102,7 +102,7 @@ export default function EditTripPage() {
 
           <div className="mb-8">
             <div className="flex items-center gap-2 mb-1">
-              <Edit3 className="w-5 h-5 text-cyan-400" />
+              <Edit3 className="w-5 h-5 text-emerald-400" />
               <h1 className="text-2xl font-bold text-white">
                 Edit Trip
               </h1>
@@ -185,7 +185,7 @@ export default function EditTripPage() {
                     onClick={() => setIcon(emoji)}
                     className={`w-10 h-10 rounded-lg text-lg flex items-center justify-center transition-all ${
                       icon === emoji
-                        ? "bg-cyan-600 ring-2 ring-cyan-400 scale-110"
+                        ? "bg-emerald-600 ring-2 ring-emerald-400 scale-110"
                         : "bg-zinc-900 hover:bg-zinc-800"
                     }`}
                   >
@@ -206,7 +206,7 @@ export default function EditTripPage() {
               <Button
                 onClick={handleSave}
                 disabled={!name.trim()}
-                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+                className="flex-1 bg-primary hover:bg-emerald-700 text-white"
               >
                 <Sparkles className="w-4 h-4 mr-2" />
                 Save Changes

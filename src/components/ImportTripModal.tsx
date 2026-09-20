@@ -274,7 +274,7 @@ export function ImportTripModal({
                 <Button
                   onClick={handleConfirm}
                   disabled={importing}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white"
+                  className="bg-primary hover:bg-emerald-700 text-white"
                 >
                   {importing ? (
                     <>

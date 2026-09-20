@@ -25,7 +25,7 @@ export function MobileNav() {
         </button>
 
         <div className="flex min-w-0 items-center gap-2">
-          <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400 to-cyan-500">
+          <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400 to-emerald-600">
             <span className="text-[13px] leading-none">✈️</span>
           </div>
           <span className="truncate text-sm font-bold tracking-tight text-white">

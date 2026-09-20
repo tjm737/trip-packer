@@ -105,7 +105,7 @@ function PackingItemRow({ item }: { item: any }) {
         </span>
       </div>
 
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+      <div className="flex items-center gap-1 transition-opacity md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100">
         <Tooltip label="Decrease quantity" side="top">
           <Button
             size="icon"
@@ -212,7 +212,7 @@ function CategorySection({
         </span>
 
         {/* Category edit */}
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+        <div className="flex items-center gap-1 md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
           <Dialog
             open={editingCategoryId === category.id}
             onOpenChange={(o) => {
@@ -285,7 +285,7 @@ function CategorySection({
                     catActions.update(category.id, { name: editName, icon: editIcon });
                     setEditingCategoryId(null);
                   }}
-                  className="bg-emerald-600 hover:bg-emerald-700"
+                  className="bg-primary hover:bg-emerald-700"
                 >
                   Save
                 </Button>
@@ -588,7 +588,7 @@ export default function TripDetail() {
   return (
     <div className="min-h-screen bg-zinc-950">
       {/* Header */}
-      <header className="sticky top-0 z-10 bg-zinc-950/80 backdrop-blur-xl border-b border-white/5">
+      <header className="sticky top-0 z-10 bg-zinc-950/80 backdrop-blur-xl border-b border-white/8">
         <div className="max-w-5xl mx-auto px-4 sm:px-8 py-3 sm:py-4">
           <div className="flex items-center gap-3 mb-3">
             <Tooltip label="Back to all trips" side="right">
@@ -639,8 +639,8 @@ export default function TripDetail() {
                 transition={{ duration: 0.6, ease: "easeOut" }}
                 className={`h-full rounded-full ${
                   isComplete
-                    ? "bg-gradient-to-r from-emerald-400 via-green-500 to-emerald-400"
-                    : "bg-gradient-to-r from-emerald-500 to-cyan-500"
+                    ? "bg-gradient-to-r from-emerald-400 via-emerald-500 to-emerald-400"
+                    : "bg-gradient-to-r from-emerald-500 to-emerald-700"
                 }`}
               />
             </div>

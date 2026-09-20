@@ -76,7 +76,7 @@ function UserSwitcher() {
   if (!activeUser) return null;
 
   return (
-    <div className="px-4 py-3 border-b border-white/5">
+    <div className="px-4 py-3 border-b border-white/8">
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-1.5">
           <Users className="h-3.5 w-3.5 text-zinc-500" />
@@ -120,7 +120,7 @@ function UserSwitcher() {
               </button>
 
               {state.users.length > 1 && (
-                <div className="flex flex-shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                <div className="flex flex-shrink-0 items-center gap-0.5 transition-opacity md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100">
                   <button
                     onClick={() => {
                       setEditingId(u.id);
@@ -179,7 +179,7 @@ function UserSwitcher() {
                         if (editName.trim()) user.update(u.id, { name: editName.trim() });
                         setEditingId(null);
                       }}
-                      className="bg-emerald-600 hover:bg-emerald-700"
+                      className="bg-primary hover:bg-emerald-700"
                     >
                       Save
                     </Button>
@@ -268,7 +268,7 @@ function UserSwitcher() {
                   setOpen(false);
                 }
               }}
-              className="bg-emerald-600 hover:bg-emerald-700"
+              className="bg-primary hover:bg-emerald-700"
               disabled={!newName.trim()}
             >
               Create
@@ -434,7 +434,7 @@ function TripList() {
 
       {/* Archived */}
       {archivedTrips.length > 0 && (
-        <div className="mt-3 border-t border-white/5 pt-2">
+        <div className="mt-3 border-t border-white/8 pt-2">
           <button
             onClick={() => toggleSection("archived")}
             className="flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500 transition-colors hover:text-zinc-300 focus-ring"
@@ -466,7 +466,7 @@ function TripList() {
                         window.location.href = `/trips/${t.id}`;
                       }}
                     />
-                    <div className="absolute right-1.5 top-1.5 flex gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/arch:opacity-100">
+                    <div className="absolute right-1.5 top-1.5 flex gap-0.5 transition-opacity md:opacity-0 focus-within:opacity-100 md:group-hover/arch:opacity-100">
                       <button
                         className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200 focus-ring"
                         onClick={(e) => {
@@ -538,8 +538,8 @@ export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
   return (
     <>
       {/* Brand */}
-      <div className="flex items-center gap-2.5 border-b border-white/5 px-4 py-3.5">
-        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400 to-cyan-500">
+      <div className="flex items-center gap-2.5 border-b border-white/8 px-4 py-3.5">
+        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400 to-emerald-600">
           <span className="text-sm leading-none">✈️</span>
         </div>
         <div className="min-w-0">
@@ -557,10 +557,10 @@ export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
       <TripList />
 
       {/* New Trip */}
-      <div className="border-t border-white/5 p-3">
+      <div className="border-t border-white/8 p-3">
         <Button
           onClick={onNewTrip}
-          className="h-9 w-full bg-emerald-600 font-medium text-white hover:bg-emerald-700 focus-ring"
+          className="h-9 w-full bg-primary font-medium text-white hover:bg-emerald-700 focus-ring"
           title="Create a new trip"
         >
           <Plus className="mr-1.5 h-4 w-4" />

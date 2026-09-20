@@ -43,14 +43,26 @@ const EMOJI_OPTIONS = [
   "🏕️", "🌴", "🗺️", "🎡", "🏛️", "🌋", "🚂", "🛸",
 ];
 
+/*
+ * Stat-tile accents.
+ *
+ * These were emerald / cyan / violet — three unrelated hues sitting side by
+ * side. Tailwind's cyan-400 resolves to #00d3f2 (H=188, S=100%, V=95%), which
+ * is both off-palette and by far the brightest, most saturated colour on the
+ * dashboard; it read as a stray teal against the sage system.
+ *
+ * The first two are now tints of the sage ramp itself, separated by *luminance*
+ * rather than hue, so the row stays on-material. `violet` is kept as the single
+ * deliberate contrast accent for the date tile.
+ */
 const STAT_ACCENTS = {
   emerald: {
     icon: "bg-emerald-500/15 text-emerald-400",
     ring: "group-hover:border-emerald-500/40",
   },
-  cyan: {
-    icon: "bg-cyan-500/15 text-cyan-400",
-    ring: "group-hover:border-cyan-500/40",
+  sage: {
+    icon: "bg-emerald-700/20 text-emerald-300",
+    ring: "group-hover:border-emerald-700/45",
   },
   violet: {
     icon: "bg-violet-500/15 text-violet-400",
@@ -122,7 +134,7 @@ function TripCard({ trip, progress }: { trip: any; progress: number }) {
     >
       {/* Accent wash on hover — kept very low opacity so it tints without
           washing out the text sitting on top of it. */}
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-emerald-500/[0.07] to-cyan-500/[0.04] opacity-0 group-hover:opacity-100 transition-opacity" />
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-emerald-500/[0.07] to-emerald-700/[0.05] opacity-0 group-hover:opacity-100 transition-opacity" />
       <div className="relative">
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="flex items-center gap-3 min-w-0">
@@ -185,8 +197,8 @@ function TripCard({ trip, progress }: { trip: any; progress: number }) {
               transition={{ duration: 0.5, ease: "easeOut" }}
               className={`h-full rounded-full ${
                 isDone
-                  ? "bg-gradient-to-r from-emerald-400 to-green-500"
-                  : "bg-gradient-to-r from-emerald-500 to-cyan-500"
+                  ? "bg-gradient-to-r from-emerald-400 to-emerald-600"
+                  : "bg-gradient-to-r from-emerald-500 to-emerald-700"
               }`}
             />
           </div>
@@ -357,7 +369,7 @@ function CreateTripModal({ open, onOpenChange }: { open: boolean; onOpenChange: 
           </Button>
           <Button
             onClick={handleCreate}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            className="bg-primary hover:bg-emerald-700 text-white"
             disabled={step === 1 && !name.trim()}
           >
             {step === 1 ? "Continue" : "Create Trip"}
@@ -423,7 +435,7 @@ export default function Dashboard() {
             <Tooltip label="Create a new trip" side="left">
               <Button
                 onClick={() => setCreateOpen(true)}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 shadow-lg shadow-emerald-900/30 transition-colors focus-ring"
+                className="bg-primary hover:bg-emerald-700 text-white px-5 shadow-lg shadow-emerald-950/40 transition-colors focus-ring"
               >
                 <Plus className="w-4 h-4 mr-2" />
                 New Trip
@@ -448,7 +460,7 @@ export default function Dashboard() {
             icon={<CheckCircle2 className="w-4 h-4" />}
             value={checkedItems}
             label="Packed"
-            accent="cyan"
+            accent="sage"
             hint="Items you have ticked off"
             sub={
               totalItems > 0
@@ -496,7 +508,7 @@ export default function Dashboard() {
             <Tooltip label="Create your first trip" side="bottom">
               <Button
                 onClick={() => setCreateOpen(true)}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 transition-colors focus-ring"
+                className="bg-primary hover:bg-emerald-700 text-white px-6 transition-colors focus-ring"
               >
                 <Plus className="w-4 h-4 mr-2" />
                 Create Your First Trip

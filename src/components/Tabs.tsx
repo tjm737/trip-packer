@@ -83,7 +83,7 @@ export function Tabs({ tabs, value, onChange, className }: Props) {
           "flex items-stretch gap-1 overflow-x-auto",
           // The bar sits on the page background, so give it a bottom rule that
           // the active tab's underline can land on rather than floating.
-          "border-b border-white/5"
+          "border-b border-white/8"
         )}
       >
         {tabs.map((t) => {
