@@ -82,7 +82,14 @@ export function readCachedCoords(queries: string[]): Map<string, LatLng> {
   const out = new Map<string, LatLng>();
   for (const q of queries) {
     const hit = findWithContextFallback(all, norm(q));
-    if (hit) out.set(q, hit);
+    /*
+     * Key by the normalised form, not the original string. Callers look these
+     * up with their own lower-cased key (buildStops does `coords.get(norm(...))`),
+     * and the online /api/geo response is already keyed that way. Returning the
+     * original casing here made every lookup miss — the map drew zero stops and
+     * fell back to "No located bookings" even though the coordinates were cached.
+     */
+    if (hit) out.set(norm(q), hit);
   }
   return out;
 }
