@@ -8,6 +8,7 @@ import { getWeatherForDestination, WeatherForecast, getSuggestions, getHistorica
 import { formatDateRange, isValidDate } from "@/lib/dates";
 import { Trip } from "@/lib/types";
 import { fetchState } from "@/lib/storage";
+import { useCacheTripPage } from "@/lib/useCacheTripPage";
 import {
   MapPin,
   Calendar,
@@ -350,6 +351,9 @@ export default function TripDetail() {
   const router = useRouter();
   const tripId = params.id as string;
   const { state, trip, category: catActions, item: itemActions, helpers, hydrated } = useApp();
+
+  // Cache this trip page so it is reachable offline (see the hook).
+  useCacheTripPage(tripId);
 
   // State used by all hooks — must be called unconditionally
   const [editingNotes, setEditingNotes] = useState(false);

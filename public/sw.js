@@ -15,7 +15,7 @@
  * there is no other invalidation hook.
  */
 
-const VERSION = "v1";
+const VERSION = "v2";
 const SHELL_CACHE = `trip-packer-shell-${VERSION}`;
 const API_CACHE = `trip-packer-api-${VERSION}`;
 
@@ -25,6 +25,60 @@ const API_CACHE = `trip-packer-api-${VERSION}`;
  * runtime as they are first requested instead.
  */
 const SHELL_ASSETS = ["/", "/offline"];
+
+/**
+ * Warm the cache with the shell page's own build assets, at install time.
+ *
+ * Why this exists rather than relying on the runtime fetch handler: the
+ * service worker is registered from the page, so on the very first visit the
+ * page has already requested its JS and CSS before the worker takes control.
+ * clients.claim() only affects later requests, so those first-load chunks are
+ * never seen by the fetch handler and nothing is cached.
+ *
+ * The practical consequence was that offline only worked from the second visit
+ * onward. Someone who opened the app once and then lost signal — exactly the
+ * airport case — got a cached HTML shell whose scripts 404'd, rendering a
+ * blank page instead of their itinerary.
+ *
+ * So the shell is fetched here and its asset URLs pulled out of the markup.
+ * Failures are swallowed on purpose: a missing chunk must degrade offline
+ * support, never block the install.
+ */
+async function precacheShellAssets(cache) {
+  try {
+    const res = await fetch(new Request("/", { cache: "reload" }));
+    if (!res.ok) return;
+    const html = await res.clone().text();
+    await cache.put(new Request("/"), res);
+
+    const urls = new Set();
+
+    // <script src="..."> and <link href="...">
+    const attrRe = /<(?:script|link)\b[^>]*?\b(?:src|href)=["']([^"']+)["']/gi;
+    let m;
+    while ((m = attrRe.exec(html)) !== null) urls.add(m[1]);
+
+    // Next.js also streams chunk paths inside the RSC payload / inline script.
+    const pathRe = /"(\/_next\/static\/[^"]+\.(?:js|css))"/g;
+    while ((m = pathRe.exec(html)) !== null) urls.add(m[1]);
+
+    // Only same-origin build assets; anything else is not ours to cache.
+    const targets = Array.from(urls).filter(
+      (u) => u.startsWith("/_next/static/") || u.startsWith("/icons/")
+    );
+
+    await Promise.all(
+      targets.map((u) =>
+        cache
+          .add(new Request(u, { cache: "reload" }))
+          .catch(() => null) // one bad chunk must not abort the rest
+      )
+    );
+  } catch {
+    // Offline at install time, or an unexpected response shape. The runtime
+    // fetch handler still populates the cache on later visits.
+  }
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -36,6 +90,7 @@ self.addEventListener("install", (event) => {
           cache.add(new Request(url, { cache: "reload" })).catch(() => null)
         )
       );
+      await precacheShellAssets(cache);
       await self.skipWaiting();
     })()
   );
@@ -113,6 +168,14 @@ self.addEventListener("fetch", (event) => {
           return await fetch(request);
         } catch {
           const cache = await caches.open(SHELL_CACHE);
+          /*
+           * Prefer this exact page if we cached it. A trip the user has opened
+           * before has its own entry (see the CACHE_TRIP handler), and serving
+           * it is the difference between seeing the itinerary offline and
+           * being dropped on the home screen.
+           */
+          const exact = await cache.match(new URL(request.url).pathname);
+          if (exact) return exact;
           const shell = (await cache.match("/")) || (await cache.match("/offline"));
           if (shell) return shell;
           throw new Error("offline");
@@ -123,4 +186,39 @@ self.addEventListener("fetch", (event) => {
   }
 
   event.respondWith(networkFirst(request, SHELL_CACHE));
+});
+
+/**
+ * Cache a trip page for offline use.
+ *
+ * Trip pages are server-rendered per trip, so unlike the app shell they cannot
+ * be listed up front — we only know which ones matter once the user opens
+ * them. Without this, an offline navigation to /trips/<id> fell back to the
+ * home shell, which meant the one screen worth having at an airport (the
+ * itinerary with its booking references) was the one screen unavailable.
+ *
+ * The page is stored under its own URL so the navigation handler can find it
+ * on a later offline visit. Failures are ignored: this is a warm-up, and the
+ * user is by definition looking at a working page while it runs.
+ */
+self.addEventListener("message", (event) => {
+  const data = event.data;
+  if (!data || data.type !== "CACHE_TRIP" || typeof data.url !== "string") return;
+
+  event.waitUntil(
+    (async () => {
+      try {
+        // Same-origin trip pages only.
+        const url = new URL(data.url, self.location.origin);
+        if (url.origin !== self.location.origin) return;
+        if (!url.pathname.startsWith("/trips/")) return;
+
+        const cache = await caches.open(SHELL_CACHE);
+        const res = await fetch(new Request(url.pathname, { cache: "reload" }));
+        if (res.ok) await cache.put(new Request(url.pathname), res);
+      } catch {
+        // Offline, or the page could not be fetched. Nothing to do.
+      }
+    })()
+  );
 });
