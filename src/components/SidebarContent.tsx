@@ -13,7 +13,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -46,160 +45,248 @@ function UserAvatar({ user, size = "md" }: { user: User; size?: "sm" | "md" | "l
 
   return (
     <div
-      className={`${sizeClasses[size]} ${user.avatarColor} rounded-full flex items-center justify-center text-white font-semibold select-none`}
-      title={user.name}
+      className={`${sizeClasses[size]} ${user.avatarColor} flex flex-shrink-0 select-none items-center justify-center rounded-full font-semibold text-white`}
     >
       {initials}
     </div>
   );
 }
 
+/**
+ * User switcher.
+ *
+ * Sits in the sidebar header. The active user's name is rendered inline next to
+ * their avatar rather than underneath it — an absolutely-positioned label
+ * (`-bottom-4`) previously overflowed the section, whose padding-bottom is 0,
+ * and landed on top of the "Upcoming" control below.
+ *
+ * Avatars are one control each: the active one is highlighted with a ring and
+ * carries the name, inactive ones are dimmed and show their name on hover.
+ * Rename and delete live in a per-user overflow affordance so the row stays a
+ * single visual line.
+ */
 function UserSwitcher() {
   const { state, user, activeUser } = useApp();
   const [open, setOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   if (!activeUser) return null;
 
   return (
-    <div className="px-3 pt-3 border-b border-white/5">
-      <div className="flex items-center gap-2 mb-2">
-        <Users className="w-4 h-4 text-muted-foreground" />
-        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Users</span>
+    <div className="px-4 py-3 border-b border-white/5">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Users className="h-3.5 w-3.5 text-zinc-500" />
+          <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500">
+            Travelers
+          </span>
+        </div>
+        <span className="text-[10px] text-zinc-600 tnum">
+          {state.users.length}
+        </span>
       </div>
-      <div className="flex flex-wrap gap-2">
-        {state.users.map((u) => (
-          <div key={u.id} className="relative group">
-            <button
-              onClick={() => user.switch(u.id)}
-              className={`transition-all ${
-                u.id === state.activeUserId
-                  ? "ring-2 ring-white/40 scale-105"
-                  : "opacity-60 hover:opacity-100 hover:scale-105"
+
+      <div className="flex flex-col gap-0.5">
+        {state.users.map((u) => {
+          const active = u.id === state.activeUserId;
+          return (
+            <div
+              key={u.id}
+              className={`group flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors ${
+                active ? "bg-white/[0.06]" : "hover:bg-white/[0.03]"
               }`}
             >
-              <UserAvatar user={u} size="sm" />
-            </button>
-            {u.id === state.activeUserId && (
-              <span className="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[9px] text-white/60 whitespace-nowrap">
-                {u.name}
-              </span>
-            )}
-            {state.users.length > 1 && (
-              <div className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <Dialog
-                  open={editingId === u.id}
-                  onOpenChange={(o) => {
-                    if (o) {
+              <button
+                onClick={() => user.switch(u.id)}
+                className="flex min-w-0 flex-1 items-center gap-2.5 text-left focus-ring rounded-md"
+                title={active ? `${u.name} (current)` : `Switch to ${u.name}`}
+              >
+                <span className="relative flex-shrink-0">
+                  <UserAvatar user={u} size="sm" />
+                  {active && (
+                    <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--surface-1)] bg-emerald-400" />
+                  )}
+                </span>
+                <span
+                  className={`truncate text-xs ${
+                    active ? "font-medium text-zinc-100" : "text-zinc-400"
+                  }`}
+                >
+                  {u.name}
+                </span>
+              </button>
+
+              {state.users.length > 1 && (
+                <div className="flex flex-shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                  <button
+                    onClick={() => {
                       setEditingId(u.id);
                       setEditName(u.name);
-                    } else {
-                      setEditingId(null);
-                    }
-                  }}
-                >
-                  <DialogTrigger>
-                    <div className="w-3 h-3 bg-red-500/80 rounded-full text-[8px] text-white flex items-center justify-center hover:bg-red-500 cursor-pointer">
-                      <Pencil className="w-2 h-2" />
-                    </div>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-[320px] bg-[var(--surface-2)] border-zinc-700">
-                    <DialogHeader>
-                      <DialogTitle className="text-zinc-100">Rename User</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-3">
-                      <div>
-                        <Label className="text-zinc-400 text-sm">Name</Label>
-                        <Input
-                          value={editName}
-                          onChange={(e) => setEditName(e.target.value)}
-                          className="mt-1 bg-zinc-800 border-zinc-600 text-zinc-100"
-                        />
-                      </div>
-                    </div>
-                    <DialogFooter>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setEditingId(null)}
-                        className="text-zinc-400"
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={() => {
-                          if (editName.trim()) {
-                            user.update(u.id, { name: editName.trim() });
-                          }
-                          setEditingId(null);
-                        }}
-                        className="bg-emerald-600 hover:bg-emerald-700"
-                      >
-                        Save
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-              </div>
-            )}
-          </div>
-        ))}
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger>
-            <div className="w-7 h-7 border border-dashed border-zinc-600 rounded-full flex items-center justify-center text-zinc-500 hover:text-zinc-300 hover:border-zinc-400 transition-colors cursor-pointer">
-              <Plus className="w-3.5 h-3.5" />
-            </div>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-[320px] bg-[var(--surface-2)] border-zinc-700">
-            <DialogHeader>
-              <DialogTitle className="text-zinc-100">New User</DialogTitle>
-              <DialogDescription className="text-zinc-400">
-                Create a new user profile with separate trip data.
-              </DialogDescription>
-            </DialogHeader>
-            <div>
-              <Label className="text-zinc-400 text-sm">Name</Label>
-              <Input
-                autoFocus
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && newName.trim()) {
-                    user.add(newName.trim());
-                    setNewName("");
-                    setOpen(false);
-                  }
-                }}
-                placeholder="Enter user name"
-                className="mt-1 bg-zinc-800 border-zinc-600 text-zinc-100"
-              />
-            </div>
-            <DialogFooter>
-              <Button
-                size="sm"
-                onClick={() => {
-                  if (newName.trim()) {
-                    user.add(newName.trim());
-                    setNewName("");
-                    setOpen(false);
-                  }
-                }}
-                className="bg-emerald-600 hover:bg-emerald-700"
-                disabled={!newName.trim()}
+                    }}
+                    className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200 focus-ring"
+                    aria-label={`Rename ${u.name}`}
+                    title={`Rename ${u.name}`}
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                  <button
+                    onClick={() => setConfirmDeleteId(u.id)}
+                    className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-red-500/10 hover:text-red-400 focus-ring"
+                    aria-label={`Remove ${u.name}`}
+                    title={`Remove ${u.name}`}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
+
+              {/* Rename */}
+              <Dialog
+                open={editingId === u.id}
+                onOpenChange={(o) => (o ? (setEditingId(u.id), setEditName(u.name)) : setEditingId(null))}
               >
-                Create
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+                <DialogContent className="sm:max-w-[320px] bg-[var(--surface-2)] border-zinc-700">
+                  <DialogHeader>
+                    <DialogTitle className="text-zinc-100">Rename traveler</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-3">
+                    <div>
+                      <Label className="text-xs text-zinc-400">Name</Label>
+                      <Input
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && editName.trim()) {
+                            user.update(u.id, { name: editName.trim() });
+                            setEditingId(null);
+                          }
+                        }}
+                        className="mt-1.5 bg-zinc-800 border-zinc-600 text-zinc-100"
+                      />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="ghost" size="sm" onClick={() => setEditingId(null)} className="text-zinc-400">
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={!editName.trim()}
+                      onClick={() => {
+                        if (editName.trim()) user.update(u.id, { name: editName.trim() });
+                        setEditingId(null);
+                      }}
+                      className="bg-emerald-600 hover:bg-emerald-700"
+                    >
+                      Save
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
+              {/* Remove */}
+              <Dialog
+                open={confirmDeleteId === u.id}
+                onOpenChange={(o) => !o && setConfirmDeleteId(null)}
+              >
+                <DialogContent className="sm:max-w-[320px] bg-[var(--surface-2)] border-zinc-700">
+                  <DialogHeader>
+                    <DialogTitle className="text-zinc-100">Remove traveler</DialogTitle>
+                  </DialogHeader>
+                  <p className="text-sm text-zinc-400">
+                    Remove {u.name} and all of their trips? This cannot be undone.
+                  </p>
+                  <DialogFooter>
+                    <Button variant="ghost" size="sm" onClick={() => setConfirmDeleteId(null)} className="text-zinc-400">
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        user.delete(u.id);
+                        setConfirmDeleteId(null);
+                      }}
+                      className="bg-red-600 hover:bg-red-700"
+                    >
+                      Remove
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </div>
+          );
+        })}
+
+        {/* Add traveler */}
+        <button
+          onClick={() => setOpen(true)}
+          className="mt-0.5 flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-xs text-zinc-500 transition-colors hover:bg-white/[0.03] hover:text-zinc-300 focus-ring"
+          title="Add a traveler"
+        >
+          <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-dashed border-zinc-600">
+            <Plus className="h-3.5 w-3.5" />
+          </span>
+          <span>Add traveler</span>
+        </button>
       </div>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-[320px] bg-[var(--surface-2)] border-zinc-700">
+          <DialogHeader>
+            <DialogTitle className="text-zinc-100">New traveler</DialogTitle>
+            <DialogDescription className="text-zinc-400">
+              Each traveler keeps their own trips and packing lists.
+            </DialogDescription>
+          </DialogHeader>
+          <div>
+            <Label className="text-xs text-zinc-400">Name</Label>
+            <Input
+              autoFocus
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && newName.trim()) {
+                  user.add(newName.trim());
+                  setNewName("");
+                  setOpen(false);
+                }
+              }}
+              placeholder="Enter name"
+              className="mt-1.5 bg-zinc-800 border-zinc-600 text-zinc-100"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              size="sm"
+              onClick={() => {
+                if (newName.trim()) {
+                  user.add(newName.trim());
+                  setNewName("");
+                  setOpen(false);
+                }
+              }}
+              className="bg-emerald-600 hover:bg-emerald-700"
+              disabled={!newName.trim()}
+            >
+              Create
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
+/**
+ * One trip in the sidebar list.
+ *
+ * Laid out as a single column so the name, destination and meta line share a
+ * left edge across every card — the previous version put the emoji in a
+ * separate flex column, so long names wrapped against an offset edge.
+ */
 function TripCard({
   trip,
   progress,
@@ -215,40 +302,52 @@ function TripCard({
     <motion.button
       layout
       onClick={onClick}
-      whileHover={{ scale: 1.02, backgroundColor: "rgba(255,255,255,0.06)" }}
-      whileTap={{ scale: 0.98 }}
-      className="w-full text-left p-3 rounded-xl transition-colors group"
+      whileTap={{ scale: 0.99 }}
+      className="group w-full rounded-lg px-2 py-2 text-left transition-colors hover:bg-white/[0.04] focus-ring"
+      title={`Open ${trip.name}`}
     >
-      <div className="flex items-start gap-2.5">
-        <span className="text-lg mt-0.5">{trip.icon}</span>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span className="text-sm font-medium text-zinc-200 truncate">{trip.name}</span>
-            {isUpcoming && (
-              <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full flex-shrink-0" />
-            )}
-          </div>
+      <div className="flex items-center gap-2">
+        <span className="flex-shrink-0 text-sm leading-none">{trip.icon}</span>
+        <span className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-200">
+          {trip.name}
+        </span>
+        {isUpcoming && (
+          <span
+            className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-emerald-400"
+            title="Upcoming"
+          />
+        )}
+      </div>
+
+      {(trip.destination || trip.startDate || trip.endDate) && (
+        <div className="mt-1 flex items-center gap-1.5 pl-[1.375rem] text-[11px] text-zinc-500">
           {trip.destination && (
-            <div className="flex items-center gap-1 text-xs text-zinc-500 mt-0.5">
-              <MapPin className="w-3 h-3" />
+            <>
+              <MapPin className="h-3 w-3 flex-shrink-0" />
               <span className="truncate">{trip.destination}</span>
-            </div>
+            </>
           )}
-          <div className="flex items-center justify-between mt-1.5">
-            <span className="text-[10px] text-zinc-600">
+          {trip.destination && (trip.startDate || trip.endDate) && (
+            <span className="text-zinc-700">·</span>
+          )}
+          {(trip.startDate || trip.endDate) && (
+            <span className="flex-shrink-0 whitespace-nowrap">
               {formatDateRange(trip.startDate, trip.endDate)}
             </span>
-            <div className="flex items-center gap-1.5">
-              <div className="w-10 h-1 bg-zinc-800 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-emerald-500 rounded-full transition-all"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-              <span className="text-[10px] text-zinc-500 w-5 text-right">{progress}%</span>
-            </div>
-          </div>
+          )}
         </div>
+      )}
+
+      <div className="mt-1.5 flex items-center gap-2 pl-[1.375rem]">
+        <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/[0.06]">
+          <div
+            className="h-full rounded-full bg-emerald-500 transition-all"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <span className="w-7 flex-shrink-0 text-right text-[10px] tabular-nums text-zinc-500">
+          {progress}%
+        </span>
       </div>
     </motion.button>
   );
@@ -288,19 +387,21 @@ function TripList() {
   };
 
   return (
-    <div className="flex-1 overflow-y-auto px-2 pt-2 space-y-4">
+    <div className="flex-1 overflow-y-auto px-2 py-2 scrollbar-thin">
       {/* Upcoming */}
       <div>
         <button
           onClick={() => toggleSection("upcoming")}
-          className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs font-medium text-muted-foreground hover:text-zinc-300 transition-colors"
+          className="flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500 transition-colors hover:text-zinc-300 focus-ring"
+          title={expanded.upcoming ? "Collapse" : "Expand"}
         >
           {expanded.upcoming ? (
-            <ChevronDown className="w-3 h-3" />
+            <ChevronDown className="h-3 w-3" />
           ) : (
-            <ChevronRight className="w-3 h-3" />
+            <ChevronRight className="h-3 w-3" />
           )}
-          <span>Upcoming ({upcomingTrips.length})</span>
+          <span className="flex-1 text-left">Upcoming</span>
+          <span className="tabular-nums text-zinc-600">{upcomingTrips.length}</span>
         </button>
         <AnimatePresence>
           {expanded.upcoming && (
@@ -308,7 +409,7 @@ function TripList() {
               initial={mounted ? { opacity: 0, height: 0 } : false}
               animate={{ opacity: 1, height: "auto" }}
               exit={{ opacity: 0, height: 0 }}
-              className="space-y-0.5"
+              className="mt-0.5 space-y-0.5 overflow-hidden"
             >
               {upcomingTrips.map((t) => (
                 <TripCard
@@ -322,7 +423,9 @@ function TripList() {
                 />
               ))}
               {upcomingTrips.length === 0 && (
-                <div className="text-xs text-zinc-600 text-center py-4">No trips yet</div>
+                <p className="px-2 py-3 text-[11px] text-zinc-600">
+                  No trips yet — create one below.
+                </p>
               )}
             </motion.div>
           )}
@@ -331,18 +434,20 @@ function TripList() {
 
       {/* Archived */}
       {archivedTrips.length > 0 && (
-        <div>
+        <div className="mt-3 border-t border-white/5 pt-2">
           <button
             onClick={() => toggleSection("archived")}
-            className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs font-medium text-muted-foreground hover:text-zinc-300 transition-colors"
+            className="flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500 transition-colors hover:text-zinc-300 focus-ring"
+            title={expanded.archived ? "Collapse" : "Expand"}
           >
             {expanded.archived ? (
-              <ChevronDown className="w-3 h-3" />
+              <ChevronDown className="h-3 w-3" />
             ) : (
-              <ChevronRight className="w-3 h-3" />
+              <ChevronRight className="h-3 w-3" />
             )}
-            <Archive className="w-3 h-3" />
-            <span>Archived ({archivedTrips.length})</span>
+            <Archive className="h-3 w-3" />
+            <span className="flex-1 text-left">Archived</span>
+            <span className="tabular-nums text-zinc-600">{archivedTrips.length}</span>
           </button>
           <AnimatePresence>
             {expanded.archived && (
@@ -350,10 +455,10 @@ function TripList() {
                 initial={mounted ? { opacity: 0, height: 0 } : false}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
-                className="space-y-0.5"
+                className="mt-0.5 space-y-0.5 overflow-hidden"
               >
                 {archivedTrips.map((t) => (
-                  <div key={t.id} className="relative group">
+                  <div key={t.id} className="group/arch relative">
                     <TripCard
                       trip={t}
                       progress={helpers.getProgress(t.id)}
@@ -361,43 +466,39 @@ function TripList() {
                         window.location.href = `/trips/${t.id}`;
                       }}
                     />
-                    <div className="absolute right-2 top-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="w-5 h-5 text-zinc-500 hover:text-zinc-300"
+                    <div className="absolute right-1.5 top-1.5 flex gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/arch:opacity-100">
+                      <button
+                        className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200 focus-ring"
                         onClick={(e) => {
                           e.stopPropagation();
                           trip.archive(t.id, false);
                         }}
+                        aria-label={`Unarchive ${t.name}`}
                         title="Unarchive"
                       >
-                        <ArrowRight className="w-3 h-3" />
-                      </Button>
+                        <ArrowRight className="h-3 w-3" />
+                      </button>
                       <Dialog
                         open={deleteConfirm === t.id}
                         onOpenChange={(o) => !o && setDeleteConfirm(null)}
                       >
-                        <span>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="w-5 h-5 text-zinc-500 hover:text-red-400"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeleteConfirm(t.id);
-                            }}
-                            title="Delete"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </Button>
-                        </span>
+                        <button
+                          className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-red-500/10 hover:text-red-400 focus-ring"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteConfirm(t.id);
+                          }}
+                          aria-label={`Delete ${t.name}`}
+                          title="Delete"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
                         <DialogContent className="sm:max-w-[320px] bg-[var(--surface-2)] border-zinc-700">
                           <DialogHeader>
-                            <DialogTitle className="text-zinc-100">Delete Trip</DialogTitle>
+                            <DialogTitle className="text-zinc-100">Delete trip</DialogTitle>
                           </DialogHeader>
-                          <p className="text-zinc-400 text-sm">
-                            Delete "{t.name}"? This cannot be undone.
+                          <p className="text-sm text-zinc-400">
+                            Delete “{t.name}”? This cannot be undone.
                           </p>
                           <DialogFooter>
                             <Button
@@ -436,16 +537,18 @@ function TripList() {
 export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
   return (
     <>
-      {/* Logo */}
-      <div className="px-4 pt-5 pb-3 border-b border-white/5">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 bg-gradient-to-br from-emerald-400 to-cyan-500 rounded-lg flex items-center justify-center">
-            <span className="text-sm">✈️</span>
-          </div>
-          <div>
-            <h1 className="text-sm font-bold text-white tracking-tight">TripPlanner</h1>
-            <p className="text-[10px] text-zinc-500 -mt-0.5">Plan smarter, stress less</p>
-          </div>
+      {/* Brand */}
+      <div className="flex items-center gap-2.5 border-b border-white/5 px-4 py-3.5">
+        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400 to-cyan-500">
+          <span className="text-sm leading-none">✈️</span>
+        </div>
+        <div className="min-w-0">
+          <h1 className="truncate text-sm font-bold leading-tight tracking-tight text-white">
+            TripPlanner
+          </h1>
+          <p className="truncate text-[10px] leading-tight text-zinc-500">
+            Plan smarter, stress less
+          </p>
         </div>
       </div>
 
@@ -453,13 +556,14 @@ export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
 
       <TripList />
 
-      {/* New Trip Button */}
-      <div className="p-3 border-t border-white/5">
+      {/* New Trip */}
+      <div className="border-t border-white/5 p-3">
         <Button
           onClick={onNewTrip}
-          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
+          className="h-9 w-full bg-emerald-600 font-medium text-white hover:bg-emerald-700 focus-ring"
+          title="Create a new trip"
         >
-          <Plus className="w-4 h-4 mr-2" />
+          <Plus className="mr-1.5 h-4 w-4" />
           New Trip
         </Button>
       </div>

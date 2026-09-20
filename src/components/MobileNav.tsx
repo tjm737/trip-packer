@@ -24,11 +24,11 @@ export function MobileNav() {
           <Menu className="w-5 h-5" />
         </button>
 
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="w-6 h-6 bg-gradient-to-br from-emerald-400 to-cyan-500 rounded-md flex items-center justify-center flex-shrink-0">
-            <span className="text-[11px]">✈️</span>
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400 to-cyan-500">
+            <span className="text-[13px] leading-none">✈️</span>
           </div>
-          <span className="text-sm font-bold text-white tracking-tight truncate">
+          <span className="truncate text-sm font-bold tracking-tight text-white">
             TripPlanner
           </span>
         </div>
