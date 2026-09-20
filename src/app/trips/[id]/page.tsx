@@ -627,73 +627,74 @@ export default function TripDetail() {
 
       {/* Main content */}
       <main className="max-w-5xl mx-auto px-4 sm:px-8 py-4 sm:py-6">
-        {/* Notes section */}
-        <div className="mb-6 p-4 rounded-xl border border-zinc-800 surface-raised">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium text-zinc-300 flex items-center gap-1.5">
-              <Flag className="w-3.5 h-3.5 text-zinc-500" />
-              Notes
-            </span>
-            <Tooltip label={editingNotes ? "Save notes" : "Edit notes"} side="left">
-            <Button
-              size="sm"
-              variant="ghost"
-              aria-label={editingNotes ? "Save notes" : "Edit notes"}
-              className="h-6 px-2 text-zinc-500 hover:text-zinc-300 focus-ring"
-              onClick={() => {
-                if (editingNotes) {
-                  handleSaveNotes();
-                } else {
-                  setNotesText(tripInfo.notes);
-                  setEditingNotes(true);
-                }
-              }}
-            >
-              <Edit3 className="w-3 h-3" />
-            </Button>
-            </Tooltip>
+        {/* Route map built from the bookings.
+             Leads the page: it is the one-glance answer to "where is this
+             trip", where notes and tasks are reference material you scroll
+             for. Full width rather than the old 7fr column, because the
+             great-circle arcs need horizontal room to stay legible. */}
+        <TripMap tripId={tripInfo.id} />
+
+        {/* Notes and tasks sit side by side: stacked they cost 593px (351 +
+             242) of vertical space for two short blocks. `items-start` keeps
+             each card at its natural height instead of stretching the shorter
+             one to match. */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6 items-start mb-6">
+          {/* Notes section */}
+          <div className="p-4 rounded-xl border border-zinc-800 surface-raised">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-zinc-300 flex items-center gap-1.5">
+                <Flag className="w-3.5 h-3.5 text-zinc-500" />
+                Notes
+              </span>
+              <Tooltip label={editingNotes ? "Save notes" : "Edit notes"} side="left">
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label={editingNotes ? "Save notes" : "Edit notes"}
+                className="h-6 px-2 text-zinc-500 hover:text-zinc-300 focus-ring"
+                onClick={() => {
+                  if (editingNotes) {
+                    handleSaveNotes();
+                  } else {
+                    setNotesText(tripInfo.notes);
+                    setEditingNotes(true);
+                  }
+                }}
+              >
+                <Edit3 className="w-3 h-3" />
+              </Button>
+              </Tooltip>
+            </div>
+            {editingNotes ? (
+              <Textarea
+                value={notesText}
+                onChange={(e) => setNotesText(e.target.value)}
+                onBlur={handleSaveNotes}
+                autoFocus
+                className="bg-transparent border-none text-sm text-zinc-300 resize-none focus-visible:ring-0"
+                rows={Math.min(24, Math.max(3, notesText.split("\n").length + 1))}
+              />
+            ) : (
+              /* pre-line keeps the line breaks an imported itinerary relies on
+                 to separate days. Without it the whole day-by-day body collapses
+                 into a single run-on paragraph. Capped short of half the viewport
+                 and scrollable, because an imported itinerary runs to a few
+                 thousand characters and would otherwise push the packing list
+                 below the fold. */
+              <p className="text-sm text-zinc-400 whitespace-pre-line max-h-[45vh] overflow-y-auto">
+                {tripInfo.notes || "No notes yet..."}
+              </p>
+            )}
           </div>
-          {editingNotes ? (
-            <Textarea
-              value={notesText}
-              onChange={(e) => setNotesText(e.target.value)}
-              onBlur={handleSaveNotes}
-              autoFocus
-              className="bg-transparent border-none text-sm text-zinc-300 resize-none focus-visible:ring-0"
-              rows={Math.min(24, Math.max(3, notesText.split("\n").length + 1))}
-            />
-          ) : (
-            /* pre-line keeps the line breaks an imported itinerary relies on
-               to separate days. Without it the whole day-by-day body collapses
-               into a single run-on paragraph. Capped short of half the viewport
-               and scrollable, because an imported itinerary runs to a few
-               thousand characters and would otherwise push the packing list
-               below the fold. */
-            <p className="text-sm text-zinc-400 whitespace-pre-line max-h-[45vh] overflow-y-auto">
-              {tripInfo.notes || "No notes yet..."}
-            </p>
-          )}
+
+          {/* Pre-trip tasks */}
+          <TripTasks tripId={tripInfo.id} />
         </div>
 
-        {/* Pre-trip tasks */}
-        <TripTasks tripId={tripInfo.id} />
-
-        {/* Bookings and route side by side on wide screens.
-             Stacked they cost ~1330px (2.1 screens) for two narrow lists.
-             Route takes the wider share because it holds the map, which needs
-             horizontal room for the great-circle arcs to stay legible.
-             Both cards rely on the grid gap now: they previously sat flush
-             against each other with a 0px gap, doubling their shared border.
-             `items-start` keeps each card at its natural height — stretching
-             them to match left ~85px of dead space at the foot of the shorter
-             Reservations card, which reads as a rendering fault. */}
-        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] gap-4 lg:gap-6 items-start">
-          {/* Bookings: flights, lodging, cars */}
-          <TripReservations tripId={tripInfo.id} />
-
-          {/* Route map built from those bookings */}
-          <TripMap tripId={tripInfo.id} />
-        </div>
+        {/* Bookings: flights, lodging, cars. Full width now that the map has
+             moved to the top of the page; it no longer shares a row with
+             anything, so the old 5fr/7fr grid is gone. */}
+        <TripReservations tripId={tripInfo.id} />
 
         {/* Weather forecast section */}
         {tripInfo.destination && (

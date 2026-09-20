@@ -261,7 +261,7 @@ export function TripTasks({ tripId }: { tripId: string }) {
   const remaining = SUGGESTIONS.filter((s) => !usedTitles.has(s.toLowerCase()));
 
   return (
-    <div className="mb-6 p-4 rounded-xl border border-zinc-800 surface-raised">
+    <div className="p-4 rounded-xl border border-zinc-800 surface-raised">
       <div className="flex items-center justify-between mb-3">
         <span className="text-sm font-medium text-zinc-300 flex items-center gap-1.5">
           <ListTodo className="w-3.5 h-3.5 text-zinc-500" />
