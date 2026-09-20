@@ -143,3 +143,17 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* Leaflet tiles vs. Tailwind Preflight.
+   Preflight applies `img { max-width: 100% }` to every image. Leaflet sizes its
+   tiles with an inline `width: 256px`, which the max-width then clamps to the
+   width of the surrounding pane. That is harmless while the pane is measured,
+   but resolves to 0 during the first layout — and because the clamp is a
+   percentage, the tiles stay collapsed instead of recovering. Pins still render
+   (Leaflet positions them with inline styles), so the map looks like it holds
+   markers on a blank canvas. Leaflet's own stylesheet must win here. */
+.leaflet-container img.leaflet-tile,
+.leaflet-container .leaflet-tile {
+  max-width: none !important;
+}
+

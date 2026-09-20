@@ -713,15 +713,28 @@ export function TripMap({ tripId }: { tripId: string }) {
         </p>
       )}
 
-      {/* The map container stays mounted so Leaflet can attach to it; it is
-          hidden only when there is nothing to show. */}
+      {/*
+       * Two nested nodes on purpose.
+       *
+       * The outer node is React's: it owns the sizing classes. The inner node is
+       * Leaflet's, and React never sets a className on it — Leaflet adds
+       * `leaflet-container` there itself.
+       *
+       * They must be separate. Leaflet scopes its layout CSS to
+       * `.leaflet-container`, and React rewrites an element's class attribute
+       * whenever a computed className changes. When both lived on one node,
+       * re-renders stripped `leaflet-container`, every pane collapsed to zero
+       * width, and Tailwind's `img { max-width: 100% }` preflight then clamped
+       * the 256px tiles to 0 — leaving pins visible against a blank map.
+       */}
       <div
-        ref={mapEl}
         className={cn(
           "z-0 w-full overflow-hidden rounded-lg border border-white/5",
           hasStops && !loading ? "h-[280px] sm:h-[380px]" : "h-0 border-0"
         )}
-      />
+      >
+        <div ref={mapEl} className="h-full w-full" />
+      </div>
 
       {!loading && hasStops && (
         <div className="mt-3 space-y-1.5">
