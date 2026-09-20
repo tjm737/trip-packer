@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AboutButton, AboutDialog } from "@/components/AboutDialog";
 import {
   Plus,
   Users,
@@ -535,6 +536,8 @@ function TripList() {
 }
 
 export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
+  const [aboutOpen, setAboutOpen] = useState(false);
+
   return (
     <>
       {/* Brand */}
@@ -556,17 +559,20 @@ export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
 
       <TripList />
 
-      {/* New Trip */}
-      <div className="border-t border-white/8 p-3">
+      {/* New Trip, with About alongside it */}
+      <div className="flex items-center gap-2 border-t border-white/8 p-3">
         <Button
           onClick={onNewTrip}
-          className="h-9 w-full bg-primary font-medium text-white hover:bg-emerald-700 focus-ring"
+          className="h-9 flex-1 bg-primary font-medium text-white hover:bg-emerald-700 focus-ring"
           title="Create a new trip"
         >
           <Plus className="mr-1.5 h-4 w-4" />
           New Trip
         </Button>
+        <AboutButton onClick={() => setAboutOpen(true)} />
       </div>
+
+      <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
     </>
   );
 }
