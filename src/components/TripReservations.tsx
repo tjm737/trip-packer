@@ -770,7 +770,20 @@ export function TripReservations({ tripId }: { tripId: string }) {
                             // 24px without adding height to the row: the extra
                             // padding is pulled back out by the negative margin,
                             // which is why this does not shift the layout.
-                            className="-my-1 inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[11px] text-zinc-400 transition-colors hover:bg-white/5 hover:text-emerald-400"
+                            // `min-h-6` keeps that floor on mobile, where the
+                            // "Map" label is hidden and the 12px icon would
+                            // otherwise collapse the target to 20px.
+                            // sage-300 at rest, matching the Confirmed pill's text
+                            // colour so the row's two interactive elements read as
+                            // the same family. Brightens to sage-400 on hover.
+                            //
+                            // Underlined because colour alone is not an affordance:
+                            // the pill beside it is also sage, so hue cannot be the
+                            // only thing separating a status badge from a control.
+                            // This mirrors the existing sage link in TripTasks
+                            // (underline + underline-offset-2 + focus-ring) rather
+                            // than inventing a second link style.
+                            className="-my-1 inline-flex min-h-6 shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[11px] text-emerald-300 underline underline-offset-2 transition-colors hover:bg-emerald-500/10 hover:text-emerald-400 focus-ring"
                           >
                             <MapIcon className="h-3 w-3" />
                             <span className="hidden sm:inline">Map</span>
