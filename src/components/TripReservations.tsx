@@ -783,9 +783,26 @@ export function TripReservations({ tripId }: { tripId: string }) {
                             // This mirrors the existing sage link in TripTasks
                             // (underline + underline-offset-2 + focus-ring) rather
                             // than inventing a second link style.
-                            className="-my-1 inline-flex min-h-6 shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[11px] text-emerald-300 underline underline-offset-2 transition-colors hover:bg-emerald-500/10 hover:text-emerald-400 focus-ring"
+                            // Icon size steps up on mobile: every action icon in
+                            // this row (edit, delete, add, confirm) is h-3.5, and
+                            // only decorative metadata glyphs are h-3. Below the sm
+                            // breakpoint the "Map" label is hidden, so the icon is
+                            // the entire target - at 12px it read as dim metadata
+                            // rather than a sage control. h-3.5 there, h-3 from sm
+                            // up where the label carries the affordance.
+                            //
+                            // The mobile affordance is a tinted background, not the
+                            // underline. text-decoration only paints under text
+                            // runs, so with the label display:none the underline
+                            // had nothing to draw under and the icon-only link had
+                            // no affordance at all. A pill background works
+                            // regardless of content, and reads as a button at a
+                            // glance. From sm up the label returns and the
+                            // underline carries the affordance, so the background
+                            // drops back to transparent and only appears on hover.
+                            className="-my-1 inline-flex min-h-6 shrink-0 items-center gap-1 rounded bg-emerald-500/10 px-1.5 py-1 text-[11px] text-emerald-300 underline underline-offset-2 transition-colors hover:bg-emerald-500/20 hover:text-emerald-400 focus-ring sm:bg-transparent sm:hover:bg-emerald-500/10"
                           >
-                            <MapIcon className="h-3 w-3" />
+                            <MapIcon className="h-3.5 w-3.5 sm:h-3 sm:w-3" strokeWidth={2.25} />
                             <span className="hidden sm:inline">Map</span>
                           </a>
                         </Tooltip>
