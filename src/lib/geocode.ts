@@ -42,6 +42,15 @@ type CacheRow = {
 };
 
 /**
+ * Matches a 3-letter IATA code, optionally in the "(SEA)" position.
+ *
+ * Kept as a single named pattern because it now feeds two decisions — whether
+ * to build airport-aware strategies, and whether the cached answer for a query
+ * is trustworthy — and those must not drift apart.
+ */
+const AIRPORT_CODE_RE = /\b[A-Z]{3}\b/;
+
+/**
  * Normalise a location string so equivalent spellings share one cache entry.
  *
  * Case, surrounding whitespace and repeated spaces are all collapsed: the
@@ -106,9 +115,31 @@ function writeCache(query: string, point: GeoPoint | null): void {
  * Note the order matters: a plain city name is already accurate, so we must
  * not discard the user's text unless it actually failed to look like a place.
  */
-function searchStrategies(raw: string): string[] {
+function searchStrategies(raw: string, context?: string): string[] {
   const trimmed = raw.trim();
-  const strategies = [trimmed];
+  const strategies: string[] = [];
+
+  /*
+   * A context-augmented query goes first, because it is strictly the most
+   * specific thing we can ask.
+   *
+   * Ranking alone cannot separate these: Nominatim scores a nightclub and a
+   * city district alike, so whichever strategy is queried first wins a tie.
+   * "Terminal 5" on its own returns a Manhattan nightclub, and it is only by
+   * asking the disambiguated form first that the right answer is reached.
+   *
+   * The context leads the query, because Nominatim's free-text search is
+   * order-sensitive and degrades sharply with trailing words: "Sofitel London
+   * Heathrow Terminal 5" resolves to the hotel, while the reverse order
+   * "Terminal 5 Sofitel London Heathrow" matches nothing at all. Context is
+   * the more distinctive term, so it earns the leading position.
+   */
+  if (context) {
+    const hint = `${context} ${trimmed}`.replace(/\s+/g, " ").trim();
+    strategies.push(hint);
+  }
+
+  strategies.push(trimmed);
 
   // "Seattle (SEA)" / "Seattle, WA (SEA)" -> code "SEA", rest "Seattle"
   const paren = /^(.*?)\s*\(([A-Za-z]{3,4})\)\s*$/.exec(trimmed);
@@ -155,6 +186,18 @@ function scoreHit(hit: NominatimHit, wantsAirport: boolean): number {
     if (type === "aerodrome" || cls === "aeroway") return 100;
     // An airport named in the display string is nearly as good.
     if ((hit.display_name ?? "").toLowerCase().includes("airport")) return 90;
+    /*
+     * Anything that is clearly not an airport must not win by default.
+     *
+     * Nominatim answers "Terminal 5 airport" with an aerodrome, but it answers
+     * "Terminal 5" with a music venue (amenity/leisure in Manhattan). Without
+     * this guard the venue scores 10 — the same as an unlabelled candidate —
+     * and can still be selected as the best hit. A venue, shop or building is
+     * never what a travel itinerary means by "Terminal 5".
+     */
+    if (cls === "amenity" || cls === "leisure" || cls === "shop" || cls === "tourism") {
+      return 0;
+    }
   }
 
   if (cls === "place" && type === "city") return 60;
@@ -171,7 +214,10 @@ function scoreHit(hit: NominatimHit, wantsAirport: boolean): number {
  * whether the answer came from the cache, which the caller uses to decide
  * whether it needs to keep throttling.
  */
-export async function geocode(raw: string): Promise<{ point: GeoPoint | null; cached: boolean }> {
+export async function geocode(
+  raw: string,
+  context?: string
+): Promise<{ point: GeoPoint | null; cached: boolean }> {
   const query = normaliseQuery(raw);
   if (!query) return { point: null, cached: true };
 
@@ -199,12 +245,55 @@ export async function geocode(raw: string): Promise<{ point: GeoPoint | null; ca
     return { point, cached: false };
   }
 
-  const hit = readCache(query);
-  if (hit !== undefined) return { point: hit, cached: true };
+  const strategies = searchStrategies(raw, context);
+  /*
+   * Whether the query names an airport, decided from the input itself rather
+   * than from how many strategies exist.
+   *
+   * These used to be the same thing, because the only query that produced a
+   * second strategy was one carrying an airport code. Once `context` could add
+   * a strategy, "more than one strategy" no longer implies "airport" — an
+   * ordinary hotel with a title would have been scored as though it were one.
+   */
+  const wantsAirport = AIRPORT_CODE_RE.test(raw);
 
-  const strategies = searchStrategies(raw);
-  // If the input names an airport, the airport must win over a nearby building.
-  const wantsAirport = strategies.length > 1;
+  /*
+   * A context-resolved answer is cached under its own key.
+   *
+   * "Terminal 5" means Heathrow's terminal in the context of "Sofitel London
+   * Heathrow", but nothing at all on its own. Sharing one cache key between
+   * the two would let whichever ran first decide for both — the same class of
+   * poisoning that put a Manhattan nightclub on this map.
+   */
+  const cacheKey = context ? `${query}\u0000${normaliseQuery(context)}` : query;
+
+  /*
+   * When the query names an airport-related place, consult the cache only if it
+   * was resolved by one of the airport-aware strategies.
+   *
+   * A plain cache read would pin the wrong answer forever. "Terminal 5" was
+   * cached from a bare lookup as a music venue in Manhattan, and because the
+   * cache is checked before any scoring, no amount of better candidates could
+   * ever displace it. That is the same failure mode as the old "lhr" -> Lahore
+   * rows, so it takes the same shape of fix: an authoritative strategy is
+   * allowed to re-resolve and overwrite.
+   *
+   * Entries written by the airport-aware strategies are still served from
+   * cache, so this costs a lookup only for the (rare) mis-cached inputs.
+   */
+  if (!wantsAirport) {
+    const hit = readCache(cacheKey);
+    if (hit !== undefined) return { point: hit, cached: true };
+  } else {
+    const hit = readCache(cacheKey);
+    if (
+      hit !== undefined &&
+      hit !== null &&
+      (hit.label ?? "").toLowerCase().includes("airport")
+    ) {
+      return { point: hit, cached: true };
+    }
+  }
 
   let best: { hit: NominatimHit; score: number; strategy: string } | null = null;
 
@@ -257,14 +346,14 @@ export async function geocode(raw: string): Promise<{ point: GeoPoint | null; ca
         lng,
         label: best.hit.display_name ?? best.strategy,
       };
-      writeCache(query, point);
+      writeCache(cacheKey, point);
       return { point, cached: false };
     }
   }
 
   // Every strategy came back empty, so this is a genuine miss. Remember it so
   // a vague or mistyped location is not re-queried on every page load.
-  writeCache(query, null);
+  writeCache(cacheKey, null);
   return { point: null, cached: false };
 }
 
@@ -274,7 +363,15 @@ export async function geocode(raw: string): Promise<{ point: GeoPoint | null; ca
  * one lookup.
  */
 export async function geocodeMany(
-  raws: string[]
+  raws: string[],
+  /*
+   * Optional per-query disambiguating text, keyed by the raw location string.
+   *
+   * A reservation's location is often a fragment — "Terminal 5" — whose meaning
+   * only exists in the context of its title ("Sofitel London Heathrow"). The
+   * caller knows that pairing; this function does not, so it is passed in.
+   */
+  contexts?: Record<string, string>
 ): Promise<{ points: GeoPoint[]; unresolved: string[] }> {
   const points: GeoPoint[] = [];
   const unresolved: string[] = [];
@@ -283,10 +380,14 @@ export async function geocodeMany(
   for (const raw of raws) {
     const q = normaliseQuery(raw);
     if (!q) continue;
-    if (seen.has(q)) continue;
-    seen.add(q);
+    const context = contexts?.[raw.trim()];
+    // A context-resolved query is a distinct lookup, so it must not be
+    // deduplicated against the same string without one.
+    const dedupeKey = context ? `${q}\u0000${normaliseQuery(context)}` : q;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
 
-    const { point } = await geocode(raw);
+    const { point } = await geocode(raw, context);
     if (point) points.push(point);
     else unresolved.push(raw.trim());
   }
