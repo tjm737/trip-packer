@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { MapPin, Route, Loader2, AlertTriangle, Clock, ExternalLink, Plane, GripVertical, ChevronUp, ChevronDown, Pencil } from "lucide-react";
+import { MapPin, Route, Loader2, AlertTriangle, Clock, ExternalLink, Plane, GripVertical, ChevronUp, ChevronDown, Pencil, BedDouble, Car, TrainFront, Ship, Ticket, CalendarDays, RotateCcw } from "lucide-react";
 import "leaflet/dist/leaflet.css";
 
 import { useApp } from "@/lib/AppContext";
-import { Reservation } from "@/lib/types";
+import { Reservation, ReservationType } from "@/lib/types";
 import { formatDate } from "@/lib/dates";
 import { readCachedCoords, writeCachedCoords } from "@/lib/geoCache";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -36,14 +36,56 @@ import { cn } from "cn";
  *      it stays correct as bookings are added or edited.
  */
 
+/*
+ * Categories offered by the map filter, in the order they are shown.
+ *
+ * Deliberately ordered by how much a category forms the trip's skeleton —
+ * flights first, then where you sleep and drive, then the places you go. A user
+ * uncluttering the map is usually peeling off the tail of this list, so the
+ * spine stays at the front where the eye lands.
+ */
+const FILTERABLE_TYPES: ReservationType[] = [
+  "flight",
+  "lodging",
+  "car",
+  "train",
+  "ferry",
+  "activity",
+  "other",
+];
+
+/*
+ * Icon and plural label per category.
+ *
+ * The icons match those used for the same types elsewhere in the app so a
+ * "Stay" chip and a "Stay" row mean the same thing at a glance. Labels are
+ * plural here because a chip is a tally of several bookings, unlike the
+ * singular labels on an individual reservation.
+ */
+const TYPE_FILTER_META: Record<ReservationType, { icon: typeof Plane; plural: string }> = {
+  flight: { icon: Plane, plural: "Flights" },
+  lodging: { icon: BedDouble, plural: "Stays" },
+  car: { icon: Car, plural: "Cars" },
+  train: { icon: TrainFront, plural: "Trains" },
+  ferry: { icon: Ship, plural: "Ferries" },
+  activity: { icon: Ticket, plural: "Activities" },
+  other: { icon: CalendarDays, plural: "Other" },
+};
+
 type LatLng = { lat: number; lng: number };
 
 type Stop = {
   key: string;
   /** Reservation this stop came from; used to group a booking's endpoints. */
   reservationId: string;
-  /** Reservation kind, so flights can be drawn as air hops. */
-  type: string;
+  /**
+   * Reservation kind, so flights can be drawn as air hops.
+   *
+   * Typed as the union rather than `string` so the type filter cannot drift
+   * from the reservation model — a new booking type becomes a compile error
+   * here until it is given an icon and a chip.
+   */
+  type: ReservationType;
   name: string;
   detail: string;
   point: LatLng;
@@ -393,6 +435,60 @@ export function TripMap({ tripId }: { tripId: string }) {
   );
 
   /*
+   * Which booking types are currently drawn.
+   *
+   * The route is the spine of a trip — where you fly, sleep and drive — while
+   * activities and meals are places you go *from* that spine. On a trip with a
+   * dozen restaurants the pins crowd out the shape of the journey, so the
+   * filter starts with every type on and lets the user peel categories away.
+   *
+   * `null` means "everything", which is deliberately distinct from "an empty
+   * set": with `null` the count badge and pin numbering describe the whole
+   * trip, and no filtering work happens at all on the common path.
+   */
+  const [hiddenTypes, setHiddenTypes] = useState<Set<ReservationType>>(() => new Set());
+
+  const toggleType = (t: ReservationType) => {
+    setHiddenTypes((cur) => {
+      const next = new Set(cur);
+      if (next.has(t)) next.delete(t);
+      else next.add(t);
+      return next;
+    });
+  };
+
+  /*
+   * The stops actually drawn, after the type filter.
+   *
+   * Applied here rather than at each render site so that everything derived
+   * from a stop list — driving legs, air arcs, pin numbers, the itinerary rows
+   * — agrees on what is on screen. Filtering later would leave a route line
+   * jumping straight from a Philadelphia flight to a Merano restaurant, since
+   * the legs are built from consecutive entries in this array.
+   *
+   * Numbers are reassigned from the filtered sequence: the pin labelled 3 is
+   * the third stop visible, never "the third stop of the full trip", which
+   * would show gaps the moment a category was hidden.
+   */
+  const visibleStops = useMemo(() => {
+    if (hiddenTypes.size === 0) return stops;
+    return stops
+      .filter((s) => !hiddenTypes.has(s.type))
+      .map((s, i) => ({ ...s, index: i + 1 }));
+  }, [stops, hiddenTypes]);
+
+  /*
+   * Type tallies for the filter chips, counted over the *whole* trip so a chip
+   * never changes its own number as other categories are switched off — only
+   * its on/off state moves.
+   */
+  const typeCounts = useMemo(() => {
+    const counts = new Map<ReservationType, number>();
+    for (const s of stops) counts.set(s.type, (counts.get(s.type) ?? 0) + 1);
+    return counts;
+  }, [stops]);
+
+  /*
    * Air legs are derived locally — no network call — because they do not need
    * a router: a flight is a great-circle arc between its two endpoints.
    *
@@ -404,9 +500,9 @@ export function TripMap({ tripId }: { tripId: string }) {
    */
   const airLegs = useMemo<Leg[]>(() => {
     const out: Leg[] = [];
-    for (let i = 0; i < stops.length - 1; i++) {
-      const a = stops[i];
-      const b = stops[i + 1];
+    for (let i = 0; i < visibleStops.length - 1; i++) {
+      const a = visibleStops[i];
+      const b = visibleStops[i + 1];
       if (a.reservationId !== b.reservationId) continue;
       if (a.type !== "flight") continue;
       // A single-endpoint flight produces one stop, so there is nothing to join.
@@ -421,7 +517,7 @@ export function TripMap({ tripId }: { tripId: string }) {
       });
     }
     return out;
-  }, [stops]);
+  }, [visibleStops]);
 
   const airKey = airLegs.map((l) => `${l.fromIndex}-${l.toIndex}`).join(",");
 
@@ -434,7 +530,7 @@ export function TripMap({ tripId }: { tripId: string }) {
   );
 
   /* --- Step 2: driving legs between consecutive stops -------------------- */
-  const stopsKey = stops.map((s) => `${s.point.lat},${s.point.lng}`).join(";");
+  const stopsKey = visibleStops.map((s) => `${s.point.lat},${s.point.lng}`).join(";");
 
   useEffect(() => {
     let cancelled = false;
@@ -443,11 +539,12 @@ export function TripMap({ tripId }: { tripId: string }) {
     // never drivable — and OSRM does not reject one, it relocates the endpoint
     // and returns a confident wrong route (see MAX_DRIVABLE_M). Never send it.
     const roadHops: { a: number; b: number }[] = [];
-    for (let i = 0; i < stops.length - 1; i++) {
+    for (let i = 0; i < visibleStops.length - 1; i++) {
       const isAir =
-        stops[i].reservationId === stops[i + 1].reservationId && stops[i].type === "flight";
+        visibleStops[i].reservationId === visibleStops[i + 1].reservationId &&
+        visibleStops[i].type === "flight";
       if (isAir) continue;
-      if (haversineM(stops[i].point, stops[i + 1].point) > MAX_DRIVABLE_M) continue;
+      if (haversineM(visibleStops[i].point, visibleStops[i + 1].point) > MAX_DRIVABLE_M) continue;
       roadHops.push({ a: i, b: i + 1 });
     }
 
@@ -462,7 +559,7 @@ export function TripMap({ tripId }: { tripId: string }) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            hops: roadHops.map((h) => ({ from: stops[h.a].point, to: stops[h.b].point })),
+            hops: roadHops.map((h) => ({ from: visibleStops[h.a].point, to: visibleStops[h.b].point })),
           }),
         });
         if (!res.ok) return; // legs are a bonus; the map still works without them
@@ -604,10 +701,12 @@ export function TripMap({ tripId }: { tripId: string }) {
           L.polyline(
             leg.geometry.map(([la, ln]) => [la, ln] as [number, number]),
             {
-              // Flights are a distinct visual language: solid emerald rather
-              // than the dashed road style, so an air hop never reads as a
-              // drivable leg.
-              color: leg.isAir ? "#34d399" : "#10b981",
+              // Flights are a distinct visual language: solid sage rather than
+              // the dashed road style, so an air hop never reads as a drivable
+              // leg. These are the sage ramp's 400/500 (see globals.css); Leaflet
+              // needs literal colours, so they are duplicated here rather than
+              // read from CSS custom properties.
+              color: leg.isAir ? "#82ab99" : "#739e8b",
               weight: leg.isAir ? 2 : 3,
               opacity: leg.isAir ? 0.9 : 0.75,
               dashArray: leg.isAir ? undefined : "6 6",
@@ -624,13 +723,13 @@ export function TripMap({ tripId }: { tripId: string }) {
       // the dark basemap a transparent gap alone would let dark land show
       // through and swallow the pin's edge, so the ring separates the emerald
       // disc from whatever is behind it.
-      for (const stop of stops) {
+      for (const stop of visibleStops) {
         const icon = L.divIcon({
           className: "",
           html: `<div style="
               display:flex;align-items:center;justify-content:center;
               width:26px;height:26px;border-radius:9999px;
-              background:#10b981;color:#052e1a;font:700 12px/1 ui-sans-serif,system-ui;
+              background:#739e8b;color:#0b1f18;font:700 12px/1 ui-sans-serif,system-ui;
               border:2px solid #09090b;
               box-shadow:0 0 0 2px rgba(255,255,255,.28), 0 2px 6px rgba(0,0,0,.6);
             ">${stop.index}</div>`,
@@ -660,12 +759,14 @@ export function TripMap({ tripId }: { tripId: string }) {
        * whenever the size changes.
        */
       const frame = () => {
-        if (stops.length === 0) return;
-        if (stops.length === 1) {
-          map.setView([stops[0].point.lat, stops[0].point.lng], 11);
+        if (visibleStops.length === 0) return;
+        if (visibleStops.length === 1) {
+          map.setView([visibleStops[0].point.lat, visibleStops[0].point.lng], 11);
         } else {
           map.fitBounds(
-            L.latLngBounds(stops.map((s) => [s.point.lat, s.point.lng] as [number, number])),
+            L.latLngBounds(
+              visibleStops.map((s) => [s.point.lat, s.point.lng] as [number, number])
+            ),
             { padding: [40, 40], maxZoom: 12 }
           );
         }
@@ -688,11 +789,11 @@ export function TripMap({ tripId }: { tripId: string }) {
   const totalDistance = driven.reduce((sum, l) => sum + l.distanceM, 0);
   const totalDuration = driven.reduce((sum, l) => sum + l.durationS, 0);
   const flownDistance = airLegs.reduce((sum, l) => sum + l.distanceM, 0);
-  const hasStops = stops.length > 0;
+  const hasStops = visibleStops.length > 0;
   // Hops with no driving route and no flight either — ferries, or anywhere
   // OSRM has no coverage. Surfaced so a missing line reads as "not drivable"
   // rather than as a bug.
-  const skippedLegs = Math.max(0, stops.length - 1 - allLegs.length);
+  const skippedLegs = Math.max(0, visibleStops.length - 1 - allLegs.length);
 
   /*
    * --- Reordering ---------------------------------------------------------
@@ -817,14 +918,16 @@ export function TripMap({ tripId }: { tripId: string }) {
   };
 
   return (
-    <div className="surface-raised rounded-xl border border-white/5 p-4 sm:p-5">
+    <div className="surface-raised rounded-xl border border-white/8 p-4 sm:p-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Route className="h-4 w-4 text-emerald-400" />
           <h2 className="text-sm font-medium text-zinc-200">Route</h2>
           {hasStops && (
             <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-zinc-400">
-              {stops.length} {stops.length === 1 ? "stop" : "stops"}
+              {hiddenTypes.size === 0
+                ? `${visibleStops.length} ${visibleStops.length === 1 ? "stop" : "stops"}`
+                : `${visibleStops.length} of ${stops.length} stops`}
             </span>
           )}
         </div>
@@ -852,6 +955,63 @@ export function TripMap({ tripId }: { tripId: string }) {
           </div>
         )}
       </div>
+
+      {/*
+        * Type filter.
+        *
+        * Shown only once there is something to filter, so a trip with three
+        * flights does not carry a row of chips that can never do anything.
+        *
+        * Chips are plain buttons rather than a select because the point is to
+        * see the shape of the trip at a glance: which categories exist, and how
+        * many places each holds. Counts come from the whole trip, so a chip's
+        * number never shifts as its neighbours are toggled.
+        */}
+      {!loading && hasStops && typeCounts.size > 1 && (
+        <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          {FILTERABLE_TYPES.filter((t) => typeCounts.has(t)).map((t) => {
+            const Meta = TYPE_FILTER_META[t];
+            const off = hiddenTypes.has(t);
+            const count = typeCounts.get(t) ?? 0;
+            return (
+              <Tooltip
+                key={t}
+                label={off ? `Show ${Meta.plural}` : `Hide ${Meta.plural}`}
+              >
+                <button
+                  type="button"
+                  onClick={() => toggleType(t)}
+                  aria-pressed={!off}
+                  title={off ? `Show ${Meta.plural}` : `Hide ${Meta.plural}`}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] transition-colors",
+                    off
+                      ? "border-white/8 bg-transparent text-zinc-500 hover:text-zinc-300"
+                      : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:border-emerald-500/50"
+                  )}
+                >
+                  <Meta.icon className="h-3 w-3" />
+                  <span>{Meta.plural}</span>
+                  <span className={cn("tabular-nums", off ? "text-zinc-500" : "text-emerald-400/70")}>
+                    {count}
+                  </span>
+                </button>
+              </Tooltip>
+            );
+          })}
+          {hiddenTypes.size > 0 && (
+            <button
+              type="button"
+              onClick={() => setHiddenTypes(new Set())}
+              title="Show every category again"
+              className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] text-zinc-500 transition-colors hover:text-emerald-400"
+            >
+              <RotateCcw className="h-3 w-3" />
+              Reset
+            </button>
+          )}
+        </div>
+      )}
 
       {loading && (
         <div className="flex items-center gap-2 py-8 text-sm text-zinc-400">
@@ -890,7 +1050,7 @@ export function TripMap({ tripId }: { tripId: string }) {
        */}
       <div
         className={cn(
-          "z-0 w-full overflow-hidden rounded-lg border border-white/5",
+          "z-0 w-full overflow-hidden rounded-lg border border-white/8",
           hasStops && !loading ? "h-[280px] sm:h-[380px]" : "h-0 border-0"
         )}
       >
@@ -899,13 +1059,13 @@ export function TripMap({ tripId }: { tripId: string }) {
 
       {!loading && hasStops && (
         <div className="mt-3 space-y-1.5">
-          {stops.map((s, i) => {
+          {visibleStops.map((s, i) => {
             // The leg leaving this stop, of whichever kind.
             const leg = allLegs.find((l) => l.fromIndex === i);
             // A zero-distance road leg means two bookings share a location (a
             // flight landing where a car is collected). Showing "0.0 mi drive"
             // is noise, so those are rendered as a plain connection.
-            const showLeg = leg && i < stops.length - 1 && (leg.isAir || leg.distanceM > 10);
+            const showLeg = leg && i < visibleStops.length - 1 && (leg.isAir || leg.distanceM > 10);
             /*
              * A row is draggable only when its stop is the first one belonging
              * to its booking. For a flight that means the departure pin carries
@@ -913,7 +1073,8 @@ export function TripMap({ tripId }: { tripId: string }) {
              * presents one drag target instead of two that fight each other.
              */
             const resPos = resPosOfStop(i);
-            const isGroupStart = stops.findIndex((x) => x.reservationId === s.reservationId) === i;
+            const isGroupStart =
+              visibleStops.findIndex((x) => x.reservationId === s.reservationId) === i;
             const isDragging = dragIndex !== null && dragIndex === resPos && isGroupStart;
             return (
               <div
