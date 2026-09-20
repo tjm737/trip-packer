@@ -652,11 +652,22 @@ export default function TripDetail() {
         {/* Pre-trip tasks */}
         <TripTasks tripId={tripInfo.id} />
 
-        {/* Bookings: flights, lodging, cars */}
-        <TripReservations tripId={tripInfo.id} />
+        {/* Bookings and route side by side on wide screens.
+             Stacked they cost ~1330px (2.1 screens) for two narrow lists.
+             Route takes the wider share because it holds the map, which needs
+             horizontal room for the great-circle arcs to stay legible.
+             Both cards rely on the grid gap now: they previously sat flush
+             against each other with a 0px gap, doubling their shared border.
+             `items-start` keeps each card at its natural height — stretching
+             them to match left ~85px of dead space at the foot of the shorter
+             Reservations card, which reads as a rendering fault. */}
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] gap-4 lg:gap-6 items-start">
+          {/* Bookings: flights, lodging, cars */}
+          <TripReservations tripId={tripInfo.id} />
 
-        {/* Route map built from those bookings */}
-        <TripMap tripId={tripInfo.id} />
+          {/* Route map built from those bookings */}
+          <TripMap tripId={tripInfo.id} />
+        </div>
 
         {/* Weather forecast section */}
         {tripInfo.destination && (
@@ -927,7 +938,12 @@ export default function TripDetail() {
           </div>
         )}
 
-        {/* Packing list */}
+        {/* Packing list.
+             Categories flow into two columns at lg: as a single column this
+             block alone ran ~1850px (nearly 3 screens), because each category
+             stacks one item per row with a mostly-empty middle. The two-column
+             grid nearly halves the page height. `items-start` stops a short
+             category from stretching to match a tall neighbour. */}
         {categories.length === 0 ? (
           <div className="text-center py-16">
             <Cloud className="w-12 h-12 text-zinc-700 mx-auto mb-3" />
@@ -944,7 +960,7 @@ export default function TripDetail() {
             </Button>
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-4 gap-y-2 items-start">
             {categories.map((cat) => (
               <CategorySection
                 key={cat.id}
@@ -957,8 +973,9 @@ export default function TripDetail() {
 
             {/* Add Category — inline field rather than window.prompt(), which
                 looked alien against the dark UI and couldn't be styled or
-                cancelled with anything but a browser-native dialog. */}
-            <div className="py-2 px-3">
+                cancelled with anything but a browser-native dialog.
+                Spans both columns so it sits below the grid, not inside a cell. */}
+            <div className="py-2 px-3 lg:col-span-2">
               {addingCategory ? (
                 <form
                   className="flex items-center gap-2"
