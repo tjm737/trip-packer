@@ -791,18 +791,35 @@ export function TripReservations({ tripId }: { tripId: string }) {
                             // rather than a sage control. h-3.5 there, h-3 from sm
                             // up where the label carries the affordance.
                             //
-                            // The mobile affordance is a tinted background, not the
-                            // underline. text-decoration only paints under text
-                            // runs, so with the label display:none the underline
-                            // had nothing to draw under and the icon-only link had
-                            // no affordance at all. A pill background works
-                            // regardless of content, and reads as a button at a
-                            // glance. From sm up the label returns and the
-                            // underline carries the affordance, so the background
-                            // drops back to transparent and only appears on hover.
-                            className="-my-1 inline-flex min-h-6 shrink-0 items-center gap-1 rounded bg-emerald-500/10 px-1.5 py-1 text-[11px] text-emerald-300 underline underline-offset-2 transition-colors hover:bg-emerald-500/20 hover:text-emerald-400 focus-ring sm:bg-transparent sm:hover:bg-emerald-500/10"
+                            // Mobile sizing: the icon is the whole target below sm
+                            // (label hidden), so it gets a thumb-sized 32px row and
+                            // a 16px glyph. The extra height is pulled back out by
+                            // the -my-2 negative margin, so the card does not grow -
+                            // the pill simply overlaps the line's leading rather
+                            // than pushing the layout. From sm up the label returns
+                            // and carries the affordance, so it drops back to a
+                            // compact 12px icon with no vertical padding.
+                            //
+                            // The mobile affordance is a tinted background, not an
+                            // underline: text-decoration only paints under text
+                            // runs, so with the label display:none an underline had
+                            // nothing to draw under.
+                            //
+                            // The border carries the affordance and is a SOLID
+                            // token, not an alpha one. Alpha blends with whatever
+                            // card surface sits behind it, which made the measured
+                            // contrast unpredictable: emerald-400/30 measured
+                            // 1.62:1 and /50 only 2.21:1 against the card, both
+                            // under the 3:1 WCAG minimum for non-text UI. Solid
+                            // emerald-500 measures 3.73:1 and is stable across
+                            // surfaces. It is also the darker sage, so it does not
+                            // compete with the brighter emerald-300 icon
+                            // (which differs by only 1.02:1 - the icon would
+                            // vanish against an emerald-300/400 border).
+                            // The fill stays subtle; the border does the work.
+                            className="-mx-1 -my-2 inline-flex min-h-8 shrink-0 items-center justify-center gap-1 rounded-md border border-emerald-500 bg-emerald-500/20 px-1.5 py-2 text-[11px] text-emerald-300 underline underline-offset-2 transition-colors hover:border-emerald-400 hover:bg-emerald-500/30 hover:text-emerald-200 focus-ring sm:mx-0 sm:my-1 sm:min-h-6 sm:justify-start sm:rounded sm:border-0 sm:bg-transparent sm:px-1.5 sm:py-1 sm:hover:bg-emerald-500/10 sm:hover:text-emerald-400"
                           >
-                            <MapIcon className="h-3.5 w-3.5 sm:h-3 sm:w-3" strokeWidth={2.25} />
+                            <MapIcon className="h-4 w-4 sm:h-3 sm:w-3" strokeWidth={2} />
                             <span className="hidden sm:inline">Map</span>
                           </a>
                         </Tooltip>
