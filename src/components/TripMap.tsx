@@ -428,22 +428,46 @@ export function TripMap({ tripId }: { tripId: string }) {
       mapRef.current = map;
 
       /*
-       * Dark basemap (CARTO "dark_all", built on OpenStreetMap data).
+       * Dark basemap: Esri "World Dark Gray Canvas", which is two layers.
        *
-       * A CSS `invert()` filter over the standard OSM tiles would avoid the
-       * extra host, but it inverts the labels along with the land: place names
-       * and road shields come out muddy and low-contrast against the app's
-       * zinc palette. CARTO ships a basemap designed dark, so water, land and
-       * roads stay distinguishable and labels remain legible. It is free and
-       * needs no API key; attribution is required and retained below.
+       * The base layer carries land, water and terrain shaded for a dark UI;
+       * the reference layer is a 99% transparent overlay holding only labels
+       * and road lines. Leaflet draws them stacked, so the pair behaves as one
+       * labelled dark basemap.
+       *
+       * Why not CARTO's dark_all: it serves tiles without a key, but the
+       * keyless tiles are a low-detail fallback (measured 15-17 distinct grey
+       * levels per tile against 175 here, i.e. flat washes with no roads or
+       * labels) and they carry a provider watermark. Its authenticated
+       * endpoint is a separate host that does not resolve on this network.
+       * Esri's canvas tiles need no key and are genuinely detailed.
+       *
+       * A CSS `invert()` over standard OSM tiles was also rejected: it inverts
+       * labels along with the land, leaving place names muddy and low-contrast
+       * against the app's zinc palette.
+       *
+       * Esri's REST tile path is /{z}/{y}/{x} -- row before column, the
+       * reverse of the usual slippy-map convention. Leaflet's {y}/{x} tokens
+       * are ordered to match; swapping them silently serves valid PNGs of the
+       * wrong places rather than erroring, so do not "tidy" this URL.
        */
       L.tileLayer(
-        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+        "https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
         {
-          maxZoom: 19,
-          subdomains: "abcd",
+          maxZoom: 16, // Esri canvas coverage ends here
           attribution:
-            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+            "Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ, &copy; OpenStreetMap contributors",
+        }
+      ).addTo(map);
+
+      // Labels/roads overlay. Drawn above the base but below the route layers
+      // added later, so pins and legs are never occluded by place names.
+      L.tileLayer(
+        "https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
+        {
+          maxZoom: 16,
+          attribution:
+            "Labels &copy; Esri &mdash; Esri, DeLorme, NAVTEQ, &copy; OpenStreetMap contributors",
         }
       ).addTo(map);
 
@@ -890,7 +914,7 @@ export function TripMap({ tripId }: { tripId: string }) {
             ? `${skippedLegs} leg${skippedLegs === 1 ? "" : "s"} not drivable (ferry or no road) · `
             : ""}
           Drag <GripVertical className="inline h-3 w-3" /> to reorder stops · Driving
-          distances via OSRM · Maps © OpenStreetMap contributors, © CARTO
+          distances via OSRM · Maps © Esri, © OpenStreetMap contributors
         </p>
       )}
     </div>

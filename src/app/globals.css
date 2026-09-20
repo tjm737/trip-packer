@@ -159,9 +159,9 @@
 
 /* Dark basemap chrome.
    Leaflet's default controls (zoom buttons, attribution strip) are styled for
-   a light map: white surfaces with dark text and borders. Against the CARTO
-   dark basemap they read as bright, unfinished rectangles floating over the
-   map, so they are re-themed to the app's surface scale.
+   a light map: white surfaces with dark text and borders. Against the Esri
+   Dark Gray basemap they read as bright, unfinished rectangles floating over
+   the map, so they are re-themed to the app's surface scale.
 
    Specificity note: Leaflet's stylesheet is bundled as its own chunk and its
    `.leaflet-control-attribution` / `.leaflet-container` rules carry the same
