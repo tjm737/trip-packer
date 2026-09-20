@@ -115,6 +115,21 @@ export function daysUntil(startDate: string | null | undefined): number | null {
   return Math.ceil((start.getTime() - startOfToday.getTime()) / (1000 * 60 * 60 * 24));
 }
 
+/**
+ * Whole days from today until an arbitrary "YYYY-MM-DD" date; null when absent
+ * or invalid. Negative when the date is in the past.
+ *
+ * Same UTC-vs-local hazard as `daysUntil` — always routed through
+ * `parseDateOnly`, never `new Date(value)` on a date-only string.
+ */
+export function daysUntilDate(value: string | null | undefined): number | null {
+  const target = parseDateOnly(value ?? "");
+  if (!target) return null;
+  const today = new Date();
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  return Math.round((target.getTime() - startOfToday.getTime()) / 86_400_000);
+}
+
 /** Inclusive trip length in days; null when unknown. */
 export function tripDurationDays(startDate: string | null | undefined, endDate: string | null | undefined): number | null {
   const start = parseDateOnly(startDate ?? "");

@@ -9,7 +9,7 @@ import {
   useRef,
   ReactNode,
 } from "react";
-import { AppState, User, Trip, Category, PackingItem } from "@/lib/types";
+import { AppState, User, Trip, Category, PackingItem, Task } from "@/lib/types";
 import {
   fetchState,
   initializeRemoteState,
@@ -27,9 +27,16 @@ import {
   createItem,
   updateItem,
   deleteItem,
+  createTask,
+  updateTask,
+  deleteTask,
   getItemProgress,
   getCategoriesForTrip,
   getItemsForCategory,
+  getTasksForTrip,
+  getTaskProgress,
+  getTaskStatus,
+  TaskStatus,
 } from "@/lib/storage";
 
 /*
@@ -90,6 +97,14 @@ interface AppContextType {
     ) => Promise<void>;
     delete: (id: string) => Promise<void>;
   };
+  task: {
+    create: (tripId: string, title: string, dueDate?: string) => Promise<void>;
+    update: (
+      id: string,
+      data: { title?: string; done?: boolean; dueDate?: string; notes?: string }
+    ) => Promise<void>;
+    delete: (id: string) => Promise<void>;
+  };
   helpers: {
     getProgress: (tripId: string) => number;
     getCategories: (tripId: string) => Category[];
@@ -100,6 +115,14 @@ interface AppContextType {
       itemName: string
     ) => PackingItem | null;
     findOrCreateCategory: (tripId: string, name: string, icon: string) => Promise<string>;
+    getTasks: (tripId: string) => Task[];
+    getTaskProgress: (tripId: string) => {
+      done: number;
+      total: number;
+      overdue: number;
+      percent: number;
+    };
+    getTaskStatus: (dueDate: string, done: boolean) => TaskStatus;
   };
 }
 
@@ -109,6 +132,7 @@ const EMPTY: AppState = {
   trips: [],
   categories: [],
   items: [],
+  tasks: [],
 };
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -259,9 +283,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ...prev,
           trips: prev.trips.filter((t) => t.id !== id),
           // Mirror the database cascade so the UI does not briefly show
-          // categories and items belonging to a trip that no longer exists.
+          // categories, items and tasks belonging to a trip that no longer exists.
           categories: prev.categories.filter((c) => c.tripId !== id),
           items: prev.items.filter((i) => i.tripId !== id),
+          tasks: prev.tasks.filter((t) => t.tripId !== id),
         }),
         () => deleteTrip(id)
       );
@@ -330,6 +355,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
   };
 
+  const taskActions = {
+    create: async (tripId: string, title: string, dueDate = "") => {
+      await run(
+        (prev) => prev,
+        async () => (await createTask(tripId, title, dueDate)).state
+      );
+    },
+    update: async (
+      id: string,
+      data: { title?: string; done?: boolean; dueDate?: string; notes?: string }
+    ) => {
+      await run(
+        (prev) => ({
+          ...prev,
+          tasks: prev.tasks.map((t) => (t.id === id ? { ...t, ...data } : t)),
+        }),
+        () => updateTask(id, data)
+      );
+    },
+    delete: async (id: string) => {
+      await run(
+        (prev) => ({ ...prev, tasks: prev.tasks.filter((t) => t.id !== id) }),
+        () => deleteTask(id)
+      );
+    },
+  };
+
   const helpers = {
     getProgress: (tripId: string) => getItemProgress(tripId, state.items).percent,
     getCategories: (tripId: string) => getCategoriesForTrip(tripId, state.categories),
@@ -345,6 +397,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const result = await categoryActions.create(tripId, name, icon);
       return result;
     },
+    getTasks: (tripId: string) => getTasksForTrip(tripId, state.tasks),
+    getTaskProgress: (tripId: string) => getTaskProgress(tripId, state.tasks),
+    getTaskStatus,
   };
 
   return (
@@ -359,6 +414,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         trip: tripActions,
         category: categoryActions,
         item: itemActions,
+        task: taskActions,
         helpers,
       }}
     >

@@ -1,4 +1,5 @@
-import { AppState, User, Trip, Category, PackingItem } from "./types";
+import { AppState, User, Trip, Category, PackingItem, Task } from "./types";
+import { compareByDate, daysUntilDate, isValidDate } from "./dates";
 
 /*
  * Client-side API wrapper.
@@ -237,6 +238,7 @@ export async function createTrip(
     trips: [],
     categories: [],
     items: [],
+    tasks: [],
   };
 
   const state = await mutate({
@@ -322,6 +324,42 @@ export async function deleteItem(id: string): Promise<AppState> {
   return mutate({ op: "item.delete", id });
 }
 
+/* ----------------------------------------------------------------- tasks */
+
+export async function createTask(
+  tripId: string,
+  title: string,
+  dueDate: string
+): Promise<{ state: AppState; task: Task }> {
+  const current = await fetchState();
+  const order = current?.tasks.filter((t) => t.tripId === tripId).length ?? 0;
+  const task: Task = {
+    id: generateId(),
+    tripId,
+    title,
+    done: false,
+    // Optional deadline. Empty string, never a defaulted "today" — a task
+    // with no real deadline must not appear overdue the moment it is created.
+    dueDate,
+    notes: "",
+    order,
+    createdAt: new Date().toISOString(),
+  };
+  const state = await mutate({ op: "task.create", task });
+  return { state, task };
+}
+
+export async function updateTask(
+  id: string,
+  data: { title?: string; done?: boolean; dueDate?: string; notes?: string }
+): Promise<AppState> {
+  return mutate({ op: "task.update", id, updates: data });
+}
+
+export async function deleteTask(id: string): Promise<AppState> {
+  return mutate({ op: "task.delete", id });
+}
+
 /* -------------------------------------------------------------- selectors */
 
 export function getItemProgress(tripId: string, items: PackingItem[]) {
@@ -345,4 +383,85 @@ export function getItemsForCategory(categoryId: string, items: PackingItem[]): P
   return items
     .filter((i) => i.categoryId === categoryId)
     .sort((a, b) => a.order - b.order);
+}
+
+/* ------------------------------------------------------------ tasks */
+
+export type TaskStatus = "overdue" | "due-soon" | "upcoming" | "no-date";
+
+/** Within this many days of the deadline, a task counts as "due soon". */
+const DUE_SOON_DAYS = 7;
+
+/**
+ * Classify a task's deadline relative to today.
+ *
+ * Delegates the arithmetic to `daysUntilDate` so the date-only string is parsed
+ * as a local date. `new Date("2026-09-17")` is UTC midnight and would report an
+ * overdue task a day early for anyone west of UTC.
+ */
+export function getTaskStatus(dueDate: string, done: boolean): TaskStatus {
+  if (done) return "upcoming";
+
+  const days = daysUntilDate(dueDate);
+  if (days === null) return "no-date";
+
+  if (days < 0) return "overdue";
+  if (days <= DUE_SOON_DAYS) return "due-soon";
+  return "upcoming";
+}
+
+/** Whole days until a deadline; null when there is no valid deadline. */
+export { daysUntilDate as daysUntilDue };
+
+/**
+ * Tasks for a trip in display order: open tasks first, and within those the
+ * soonest deadline first (undated last). Done tasks sink to the bottom so the
+ * list reads as a checklist of what is still outstanding.
+ */
+export function getTasksForTrip(tripId: string, tasks: Task[]): Task[] {
+  // Rank by urgency, with completion as the LAST tiebreak rather than the
+  // first sort key. Sorting done-first would sink a completed-but-late task
+  // below tasks that are not yet due, hiding exactly the deadlines this
+  // feature exists to surface. Within the active buckets, a whole bucket of
+  // finished work still clusters below unfinished work because `done` breaks
+  // ties before the date comparison.
+  const rank: Record<TaskStatus, number> = {
+    overdue: 0,
+    "due-soon": 1,
+    upcoming: 2,
+    "no-date": 3,
+  };
+
+  return tasks
+    .filter((t) => t.tripId === tripId)
+    .sort((a, b) => {
+      const ra = rank[getTaskStatus(a.dueDate, a.done)];
+      const rb = rank[getTaskStatus(b.dueDate, b.done)];
+      if (ra !== rb) return ra - rb;
+
+      // Same urgency bucket: unfinished before finished.
+      if (a.done !== b.done) return a.done ? 1 : -1;
+
+      // Same bucket and both dated: earliest deadline first.
+      if (isValidDate(a.dueDate) && isValidDate(b.dueDate)) {
+        const cmp = compareByDate(a.dueDate, b.dueDate);
+        if (cmp !== 0) return cmp;
+      }
+      // Stable fallback for undated or identical-date tasks.
+      if (a.order !== b.order) return a.order - b.order;
+      return a.createdAt.localeCompare(b.createdAt);
+    });
+}
+
+export function getTaskProgress(tripId: string, tasks: Task[]) {
+  const tripTasks = tasks.filter((t) => t.tripId === tripId);
+  const done = tripTasks.filter((t) => t.done).length;
+  const total = tripTasks.length;
+  const overdue = tripTasks.filter((t) => getTaskStatus(t.dueDate, t.done) === "overdue").length;
+  return {
+    done,
+    total,
+    overdue,
+    percent: total === 0 ? 0 : Math.round((done / total) * 100),
+  };
 }

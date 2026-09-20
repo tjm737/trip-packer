@@ -46,6 +46,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { TripTasks } from "@/components/TripTasks";
 import {
   Select,
   SelectContent,
@@ -645,6 +646,9 @@ export default function TripDetail() {
             </p>
           )}
         </div>
+
+        {/* Pre-trip tasks */}
+        <TripTasks tripId={tripInfo.id} />
 
         {/* Weather forecast section */}
         {tripInfo.destination && (

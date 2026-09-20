@@ -4,7 +4,7 @@ import Database from "better-sqlite3";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import type { AppState, Category, PackingItem, Trip, User } from "../lib/types";
+import type { AppState, Category, PackingItem, Task, Trip, User } from "../lib/types";
 
 /*
  * SQLite persistence layer.
@@ -79,15 +79,37 @@ function migrate(db: SqliteDb): void {
       value TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS tasks (
+      id        TEXT PRIMARY KEY,
+      tripId    TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+      title     TEXT NOT NULL,
+      done      INTEGER NOT NULL DEFAULT 0,
+      dueDate   TEXT NOT NULL DEFAULT '',
+      notes     TEXT NOT NULL DEFAULT '',
+      "order"   INTEGER NOT NULL DEFAULT 0,
+      createdAt TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_trips_user      ON trips(userId);
     CREATE INDEX IF NOT EXISTS idx_categories_trip ON categories(tripId);
     CREATE INDEX IF NOT EXISTS idx_items_category  ON items(categoryId);
     CREATE INDEX IF NOT EXISTS idx_items_trip      ON items(tripId);
+    CREATE INDEX IF NOT EXISTS idx_tasks_trip      ON tasks(tripId);
   `);
 }
 
 export function getDb(): SqliteDb {
-  if (globalForDb.__tripPackerDb) return globalForDb.__tripPackerDb;
+  const cached = globalForDb.__tripPackerDb;
+  if (cached) {
+    // Re-run the migration on every access. It is written to be idempotent
+    // (CREATE ... IF NOT EXISTS), and dev-mode HMR re-evaluates this module
+    // while the cached connection — and therefore the previous schema — lives
+    // on in globalThis. Without this, adding a table in code produces
+    // "no such table" until the process is restarted, which looks like a
+    // stale-cache bug but is really a skipped migration.
+    migrate(cached);
+    return cached;
+  }
 
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
   const db = new Database(DB_PATH);
@@ -133,6 +155,17 @@ type ItemRow = {
   order: number;
 };
 
+type TaskRow = {
+  id: string;
+  tripId: string;
+  title: string;
+  done: number;
+  dueDate: string;
+  notes: string;
+  order: number;
+  createdAt: string;
+};
+
 const toUser = (r: UserRow): User => ({
   id: r.id,
   name: r.name,
@@ -173,6 +206,17 @@ const toItem = (r: ItemRow): PackingItem => ({
   order: r.order,
 });
 
+const toTask = (r: TaskRow): Task => ({
+  id: r.id,
+  tripId: r.tripId,
+  title: r.title,
+  done: r.done === 1,
+  dueDate: r.dueDate,
+  notes: r.notes,
+  order: r.order,
+  createdAt: r.createdAt,
+});
+
 /* ------------------------------------------------------------------ reads */
 
 const ACTIVE_USER_KEY = "activeUserId";
@@ -192,6 +236,9 @@ export function readState(): AppState | null {
   const items = (db.prepare('SELECT * FROM items ORDER BY "order", rowid').all() as ItemRow[]).map(
     toItem
   );
+  const tasks = (db.prepare('SELECT * FROM tasks ORDER BY "order", rowid').all() as TaskRow[]).map(
+    toTask
+  );
 
   const activeRow = db.prepare("SELECT value FROM settings WHERE key = ?").get(ACTIVE_USER_KEY) as
     | { value: string }
@@ -202,7 +249,7 @@ export function readState(): AppState | null {
   const activeUserId =
     activeRow && users.some((u) => u.id === activeRow.value) ? activeRow.value : users[0].id;
 
-  return { users, activeUserId, trips, categories, items };
+  return { users, activeUserId, trips, categories, items, tasks };
 }
 
 /* ----------------------------------------------------------------- writes */
@@ -320,15 +367,45 @@ export const tx = {
     getDb().prepare("DELETE FROM items WHERE id = ?").run(id);
   },
 
+  insertTask(t: Task): void {
+    getDb()
+      .prepare(
+        `INSERT INTO tasks (id, tripId, title, done, dueDate, notes, "order", createdAt)
+         VALUES (@id, @tripId, @title, @done, @dueDate, @notes, @order, @createdAt)`
+      )
+      .run({ ...t, done: t.done ? 1 : 0 });
+  },
+
+  updateTask(id: string, updates: Partial<Task>): void {
+    // `title` is included because tasks are renamed inline; `tripId` is not,
+    // since a task belongs to the trip it was created under.
+    const allowed = ["title", "done", "dueDate", "notes", "order"] as const;
+    const keys = allowed.filter((k) => updates[k] !== undefined);
+    if (keys.length === 0) return;
+    const set = keys.map((k) => (k === "order" ? `"order" = @order` : `${k} = @${k}`)).join(", ");
+    const payload: Record<string, unknown> = { id };
+    for (const k of keys) {
+      payload[k] = k === "done" ? (updates.done ? 1 : 0) : updates[k];
+    }
+    getDb()
+      .prepare(`UPDATE tasks SET ${set} WHERE id = @id`)
+      .run(payload);
+  },
+
+  deleteTask(id: string): void {
+    getDb().prepare("DELETE FROM tasks WHERE id = ?").run(id);
+  },
+
   /** Replace the whole tree in one transaction — used for import/seed. */
   replaceAll(state: AppState): void {
     const db = getDb();
     const run = db.transaction((s: AppState) => {
-      db.exec("DELETE FROM items; DELETE FROM categories; DELETE FROM trips; DELETE FROM users;");
+      db.exec("DELETE FROM items; DELETE FROM tasks; DELETE FROM categories; DELETE FROM trips; DELETE FROM users;");
       for (const u of s.users) tx.insertUser(u);
       for (const t of s.trips) tx.insertTrip(t);
       for (const c of s.categories) tx.insertCategory(c);
       for (const i of s.items) tx.insertItem(i);
+      for (const t of s.tasks) tx.insertTask(t);
       tx.setActiveUser(s.activeUserId);
     });
     run(state);
