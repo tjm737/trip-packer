@@ -427,10 +427,25 @@ export function TripMap({ tripId }: { tripId: string }) {
       });
       mapRef.current = map;
 
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-        attribution: "© OpenStreetMap contributors",
-      }).addTo(map);
+      /*
+       * Dark basemap (CARTO "dark_all", built on OpenStreetMap data).
+       *
+       * A CSS `invert()` filter over the standard OSM tiles would avoid the
+       * extra host, but it inverts the labels along with the land: place names
+       * and road shields come out muddy and low-contrast against the app's
+       * zinc palette. CARTO ships a basemap designed dark, so water, land and
+       * roads stay distinguishable and labels remain legible. It is free and
+       * needs no API key; attribution is required and retained below.
+       */
+      L.tileLayer(
+        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+        {
+          maxZoom: 19,
+          subdomains: "abcd",
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+        }
+      ).addTo(map);
 
       /*
        * Leaflet measures its container when the map is created. This component
@@ -504,14 +519,20 @@ export function TripMap({ tripId }: { tripId: string }) {
       // Pin markers. A numbered divIcon is used instead of Leaflet's default
       // image marker: the default png paths break under bundlers, and numbers
       // make the itinerary order readable at a glance.
+      //
+      // The border is near-black and the halo is a translucent white ring. On
+      // the dark basemap a transparent gap alone would let dark land show
+      // through and swallow the pin's edge, so the ring separates the emerald
+      // disc from whatever is behind it.
       for (const stop of stops) {
         const icon = L.divIcon({
           className: "",
           html: `<div style="
               display:flex;align-items:center;justify-content:center;
               width:26px;height:26px;border-radius:9999px;
-              background:#059669;color:#fff;font:600 12px/1 ui-sans-serif,system-ui;
-              border:2px solid #064e3b;box-shadow:0 1px 4px rgba(0,0,0,.5);
+              background:#10b981;color:#052e1a;font:700 12px/1 ui-sans-serif,system-ui;
+              border:2px solid #09090b;
+              box-shadow:0 0 0 2px rgba(255,255,255,.28), 0 2px 6px rgba(0,0,0,.6);
             ">${stop.index}</div>`,
           iconSize: [26, 26],
           iconAnchor: [13, 13],
@@ -869,7 +890,7 @@ export function TripMap({ tripId }: { tripId: string }) {
             ? `${skippedLegs} leg${skippedLegs === 1 ? "" : "s"} not drivable (ferry or no road) · `
             : ""}
           Drag <GripVertical className="inline h-3 w-3" /> to reorder stops · Driving
-          distances via OSRM · Maps © OpenStreetMap contributors
+          distances via OSRM · Maps © OpenStreetMap contributors, © CARTO
         </p>
       )}
     </div>

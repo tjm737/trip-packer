@@ -157,3 +157,94 @@
   max-width: none !important;
 }
 
+/* Dark basemap chrome.
+   Leaflet's default controls (zoom buttons, attribution strip) are styled for
+   a light map: white surfaces with dark text and borders. Against the CARTO
+   dark basemap they read as bright, unfinished rectangles floating over the
+   map, so they are re-themed to the app's surface scale.
+
+   Specificity note: Leaflet's stylesheet is bundled as its own chunk and its
+   `.leaflet-control-attribution` / `.leaflet-container` rules carry the same
+   specificity as a bare selector here, so cascade order alone cannot win.
+   These rules are deliberately doubled up on `.leaflet-container` to outrank
+   the library rather than depending on load order. */
+.leaflet-container.leaflet-container {
+  background: var(--surface-1);
+  /* Leaflet draws a light 1px frame around its panes; the sidebar card already
+     provides the border, so this only shows as a pale seam at the edges. */
+  outline: none;
+}
+
+.leaflet-container .leaflet-control-zoom a {
+  background-color: var(--surface-2);
+  color: #a1a1aa;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.leaflet-container .leaflet-control-zoom a:hover,
+.leaflet-container .leaflet-control-zoom a:focus {
+  background-color: var(--surface-3);
+  color: #34d399;
+}
+
+.leaflet-container .leaflet-control-zoom a.leaflet-disabled {
+  background-color: var(--surface-1);
+  color: #52525b;
+}
+
+.leaflet-container.leaflet-container .leaflet-control-attribution {
+  background: rgba(24, 24, 27, 0.82);
+  color: #71717a;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-top-left-radius: 6px;
+}
+
+.leaflet-container .leaflet-control-attribution a {
+  color: #34d399;
+  text-decoration: none;
+}
+
+.leaflet-container .leaflet-control-attribution a:hover {
+  text-decoration: underline;
+}
+
+/* The zoom control sits flush against the rounded card corner otherwise. */
+.leaflet-container .leaflet-top .leaflet-control {
+  margin-top: 10px;
+}
+.leaflet-container .leaflet-left .leaflet-control {
+  margin-left: 10px;
+}
+
+/* Popups.
+   Leaflet's default popup is a white card with a pale arrow. Against a dark
+   basemap that reads as a bright hole punched in the map, so the card, its
+   border and both arrow orientations (the tip is drawn as a rotated square,
+   once per side) are re-themed to the surface palette. */
+.leaflet-container .leaflet-popup-content-wrapper {
+  background: var(--surface-2);
+  color: #e4e4e7;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+
+.leaflet-container .leaflet-popup-content {
+  margin: 10px 12px;
+}
+
+.leaflet-container .leaflet-popup-tip {
+  background: var(--surface-2);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+}
+
+.leaflet-container a.leaflet-popup-close-button {
+  color: #71717a;
+}
+
+.leaflet-container a.leaflet-popup-close-button:hover {
+  color: #e4e4e7;
+}
+
