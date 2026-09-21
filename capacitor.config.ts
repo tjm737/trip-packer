@@ -14,9 +14,15 @@ import type { CapacitorConfig } from "@capacitor/cli";
  * a laptop during development and the deployed host afterwards, with no edit
  * to this file.
  *
- * The default is loopback, which is right for the simulator: it shares the
- * host's network stack, so 127.0.0.1 resolves to the Mac running `next dev`.
- * A physical device is a different story — loopback there means the phone
+ * The default is localhost, which is right for the simulator: it shares the
+ * host's network stack, so localhost resolves to the Mac running `next dev`.
+ * Do not change this to 127.0.0.1. The dev server binds a dual-stack socket
+ * that is IPv6-first, and the WebView's IPv4 resolution of 127.0.0.1 lands
+ * nowhere — the app then renders its empty state with no error and no
+ * connection to the server, which reads exactly like a data bug. localhost
+ * resolves through to the listener and works.
+ *
+ * A physical device is a different story — localhost there means the phone
  * itself, so set TRIP_PACKER_URL to the Mac's LAN address before running on
  * hardware.
  *
