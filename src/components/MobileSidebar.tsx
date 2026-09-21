@@ -55,11 +55,18 @@ export function MobileSidebar({ onNewTrip }: { onNewTrip?: () => void }) {
               <X className="w-5 h-5" />
             </button>
           </div>
-          {/* Tapping a trip closes the drawer so the new page is visible. */}
+          {/*
+            Tapping a trip closes the drawer so the new page is visible. Controls
+            that open something in place opt out with `data-keep-drawer-open` —
+            otherwise this handler would close the drawer underneath the thing
+            they just opened, unmounting it along with the sidebar body.
+          */}
           <div
             className="flex-1 min-h-0 flex flex-col pb-[env(safe-area-inset-bottom)]"
             onClick={(e) => {
-              if ((e.target as HTMLElement).closest("button")) setOpen(false);
+              const el = e.target as HTMLElement;
+              if (el.closest("[data-keep-drawer-open]")) return;
+              if (el.closest("button")) setOpen(false);
             }}
           >
             <SidebarBody onNewTrip={onNewTrip} />

@@ -124,7 +124,7 @@ export function AboutDialog({
                           {release.tag}
                         </span>
                       )}
-                      <span className="text-[11px] text-zinc-500 tnum">
+                      <span className="text-[11px] text-zinc-400 tnum">
                         {formatReleaseDate(release.date)}
                       </span>
                     </div>
@@ -184,11 +184,20 @@ export function AboutDialog({
   );
 }
 
-/** The sidebar entry that opens AboutDialog. */
+/**
+ * The sidebar entry that opens AboutDialog.
+ *
+ * `data-keep-drawer-open` opts this control out of MobileSidebar's
+ * close-on-any-button handler. Without it, tapping About on a phone opened the
+ * dialog and closed the drawer in the same tick, and since the dialog is
+ * rendered inside SidebarBody the close unmounted it — the panel appeared and
+ * vanished instantly.
+ */
 export function AboutButton({ onClick }: { onClick: () => void }) {
   return (
     <button
       onClick={onClick}
+      data-keep-drawer-open
       title="Version and release notes"
       aria-label="About TripPlanner"
       className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200 focus-ring"
