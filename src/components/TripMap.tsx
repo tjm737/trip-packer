@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { MapPin, Route, Loader2, AlertTriangle, Clock, ExternalLink, Plane, GripVertical, ChevronUp, ChevronDown, Pencil, BedDouble, Car, TrainFront, Ship, Ticket, CalendarDays, RotateCcw } from "lucide-react";
+import { MapPin, Route, Loader2, AlertTriangle, Clock, ExternalLink, Plane, GripVertical, ChevronUp, ChevronDown, Pencil, BedDouble, Car, TrainFront, Ship, Ticket, CalendarDays, RotateCcw, CircleDashed } from "lucide-react";
 import "leaflet/dist/leaflet.css";
 
 import { useApp } from "@/lib/AppContext";
@@ -92,6 +92,15 @@ type Stop = {
   /** Index into the ordered itinerary, 1-based, for the pin label. */
   index: number;
   date: string;
+  /**
+   * Whether the reservation behind this stop is confirmed.
+   *
+   * Carried onto the stop rather than looked up from the reservation list at
+   * render time because a stop is the only thing the map has to work with once
+   * a reservation has been resolved to coordinates, and the draft filter needs
+   * to run over the same collection the markers are built from.
+   */
+  confirmed: boolean;
 };
 
 type Leg = {
@@ -236,6 +245,7 @@ function buildStops(
         point: from,
         index: stops.length + 1,
         date: r.startDate,
+        confirmed: r.confirmed,
       });
     }
     if (to) {
@@ -248,6 +258,7 @@ function buildStops(
         point: to,
         index: stops.length + 1,
         date: r.endDate || r.startDate,
+        confirmed: r.confirmed,
       });
     }
   }
@@ -514,7 +525,23 @@ export function TripMap({ tripId }: { tripId: string }) {
   };
 
   /*
-   * The stops actually drawn, after the type filter.
+   * Whether unconfirmed bookings are hidden from the map.
+   *
+   * A separate axis from the type filter rather than another entry in
+   * `hiddenTypes`, because "draft" is not a kind of booking — it is the state
+   * of one. Folding it into the same set would mean a chip that reads like its
+   * neighbours but behaves differently, and would make "show me only the
+   * confirmed skeleton" inexpressible alongside a type selection.
+   *
+   * Defaults to showing drafts: a draft is still a place you plan to be, and
+   * silently dropping it from the route would understate the trip on first
+   * look. Hiding them is the deliberate act, and is not persisted, so a reload
+   * returns to the full picture.
+   */
+  const [hiddenDrafts, setHiddenDrafts] = useState(false);
+
+  /*
+   * The stops actually drawn, after the type filter and the draft filter.
    *
    * Applied here rather than at each render site so that everything derived
    * from a stop list — driving legs, air arcs, pin numbers, the itinerary rows
@@ -525,13 +552,21 @@ export function TripMap({ tripId }: { tripId: string }) {
    * Numbers are reassigned from the filtered sequence: the pin labelled 3 is
    * the third stop visible, never "the third stop of the full trip", which
    * would show gaps the moment a category was hidden.
+   *
+   * Both filters run through the same pass. An early return for the common
+   * "nothing hidden" case would be faster but wrong: with two independent
+   * filters, the cheap path is only valid when *both* are off, so the guard
+   * would have to be a compound condition that is easy to get wrong the next
+   * time a filter is added. The reindex below is a no-op when nothing is
+   * filtered, so the general path costs nothing to keep correct.
    */
   const visibleStops = useMemo(() => {
-    if (hiddenTypes.size === 0) return stops;
-    return stops
-      .filter((s) => !hiddenTypes.has(s.type))
-      .map((s, i) => ({ ...s, index: i + 1 }));
-  }, [stops, hiddenTypes]);
+    const filtered = stops.filter(
+      (s) => !hiddenTypes.has(s.type) && !(hiddenDrafts && !s.confirmed)
+    );
+    if (filtered.length === stops.length) return stops;
+    return filtered.map((s, i) => ({ ...s, index: i + 1 }));
+  }, [stops, hiddenTypes, hiddenDrafts]);
 
   /*
    * Type tallies for the filter chips, counted over the *whole* trip so a chip
@@ -543,6 +578,16 @@ export function TripMap({ tripId }: { tripId: string }) {
     for (const s of stops) counts.set(s.type, (counts.get(s.type) ?? 0) + 1);
     return counts;
   }, [stops]);
+
+  /*
+   * How many stops are unconfirmed, counted over the whole trip for the same
+   * reason as the type tallies: the chip's number describes the trip, not the
+   * current view, so it does not move when its own filter is applied.
+   */
+  const draftCount = useMemo(
+    () => stops.filter((s) => !s.confirmed).length,
+    [stops]
+  );
 
   /*
    * Air legs are derived locally — no network call — because they do not need
@@ -779,14 +824,24 @@ export function TripMap({ tripId }: { tripId: string }) {
       // the dark basemap a transparent gap alone would let dark land show
       // through and swallow the pin's edge, so the ring separates the emerald
       // disc from whatever is behind it.
+      //
+      // A draft pin is amber with a dashed edge rather than the solid emerald of
+      // a confirmed one. The colour alone would not carry it: amber and emerald
+      // are close in luminance, so on a small disc in poor light they read as
+      // the same "coloured dot". The dashed border is the shape cue that
+      // survives that, and it matches how the status pill and the draft chip
+      // already signal the same state.
       for (const stop of visibleStops) {
+        const disc = stop.confirmed ? "#739e8b" : "#d08700";
+        const ink = stop.confirmed ? "#0b1f18" : "#221503";
+        const edge = stop.confirmed ? "solid" : "dashed";
         const icon = L.divIcon({
           className: "",
           html: `<div style="
               display:flex;align-items:center;justify-content:center;
               width:26px;height:26px;border-radius:9999px;
-              background:#739e8b;color:#0b1f18;font:700 12px/1 ui-sans-serif,system-ui;
-              border:2px solid #09090b;
+              background:${disc};color:${ink};font:700 12px/1 ui-sans-serif,system-ui;
+              border:2px ${edge} #09090b;
               box-shadow:0 0 0 2px rgba(255,255,255,.28), 0 2px 6px rgba(0,0,0,.6);
             ">${stop.index}</div>`,
           iconSize: [26, 26],
@@ -794,12 +849,16 @@ export function TripMap({ tripId }: { tripId: string }) {
         });
 
         const when = stop.date ? formatDate(stop.date) : "";
+        // The draft note is not folded into the date line because an undated
+        // draft would then carry no status at all — and an undated booking is
+        // exactly the kind most likely to still be a draft.
+        const meta = `${when}${stop.confirmed ? "" : `${when ? " · " : ""}<span style="color:#d08700">draft</span>`}`;
         L.marker([stop.point.lat, stop.point.lng], { icon })
           .bindPopup(
             `<div style="font:13px/1.45 ui-sans-serif,system-ui;color:#e4e4e7;min-width:150px">
                <div style="font-weight:600;margin-bottom:2px">${stop.index}. ${stop.name}</div>
                <div style="color:#a1a1aa;font-size:12px">${stop.detail}</div>
-               ${when ? `<div style="color:#a1a1aa;font-size:12px;margin-top:2px">${when}</div>` : ""}
+               ${meta ? `<div style="color:#a1a1aa;font-size:12px;margin-top:2px">${meta}</div>` : ""}
              </div>`
           )
           .addTo(group);
@@ -992,7 +1051,7 @@ export function TripMap({ tripId }: { tripId: string }) {
           <h2 className="text-sm font-medium text-zinc-200">Route</h2>
           {hasStops && (
             <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-zinc-400">
-              {hiddenTypes.size === 0
+              {hiddenTypes.size === 0 && !hiddenDrafts
                 ? `${visibleStops.length} ${visibleStops.length === 1 ? "stop" : "stops"}`
                 : `${visibleStops.length} of ${stops.length} stops`}
             </span>
@@ -1024,53 +1083,109 @@ export function TripMap({ tripId }: { tripId: string }) {
       </div>
 
       {/*
-        * Type filter.
+        * Type filter, then the draft filter.
         *
         * Shown only once there is something to filter, so a trip with three
-        * flights does not carry a row of chips that can never do anything.
+        * flights does not carry a row of chips that can never do anything. The
+        * two halves have different thresholds: the type chips need more than one
+        * category to be worth showing, while the draft toggle is worth showing
+        * whenever any unconfirmed booking exists, even if it is the only kind on
+        * the trip.
         *
         * Chips are plain buttons rather than a select because the point is to
         * see the shape of the trip at a glance: which categories exist, and how
         * many places each holds. Counts come from the whole trip, so a chip's
         * number never shifts as its neighbours are toggled.
         */}
-      {!loading && hasStops && typeCounts.size > 1 && (
+      {!loading && hasStops && (typeCounts.size > 1 || draftCount > 0) && (
         <div className="mb-3 flex flex-wrap items-center gap-1.5">
-          {FILTERABLE_TYPES.filter((t) => typeCounts.has(t)).map((t) => {
-            const Meta = TYPE_FILTER_META[t];
-            const off = hiddenTypes.has(t);
-            const count = typeCounts.get(t) ?? 0;
-            return (
-              <Tooltip
-                key={t}
-                label={off ? `Show ${Meta.plural}` : `Hide ${Meta.plural}`}
-              >
-                <button
-                  type="button"
-                  onClick={() => toggleType(t)}
-                  aria-pressed={!off}
-                  title={off ? `Show ${Meta.plural}` : `Hide ${Meta.plural}`}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] transition-colors",
-                    off
-                      ? "border-white/8 bg-transparent text-zinc-500 hover:text-zinc-300"
-                      : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:border-emerald-500/50"
-                  )}
+          {typeCounts.size > 1 &&
+            FILTERABLE_TYPES.filter((t) => typeCounts.has(t)).map((t) => {
+              const Meta = TYPE_FILTER_META[t];
+              const off = hiddenTypes.has(t);
+              const count = typeCounts.get(t) ?? 0;
+              return (
+                <Tooltip
+                  key={t}
+                  label={off ? `Show ${Meta.plural}` : `Hide ${Meta.plural}`}
                 >
-                  <Meta.icon className="h-3 w-3" />
-                  <span>{Meta.plural}</span>
-                  <span className={cn("tabular-nums", off ? "text-zinc-500" : "text-emerald-400/70")}>
-                    {count}
-                  </span>
-                </button>
-              </Tooltip>
-            );
-          })}
-          {hiddenTypes.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => toggleType(t)}
+                    aria-pressed={!off}
+                    title={off ? `Show ${Meta.plural}` : `Hide ${Meta.plural}`}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] transition-colors",
+                      off
+                        ? "border-white/8 bg-transparent text-zinc-500 hover:text-zinc-300"
+                        : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:border-emerald-500/50"
+                    )}
+                  >
+                    <Meta.icon className="h-3 w-3" />
+                    <span>{Meta.plural}</span>
+                    <span className={cn("tabular-nums", off ? "text-zinc-500" : "text-emerald-400/70")}>
+                      {count}
+                    </span>
+                  </button>
+                </Tooltip>
+              );
+            })}
+
+          {/*
+            * The draft toggle sits apart from the type chips, behind a divider,
+            * because it answers a different question: the chips choose which
+            * kinds of stop to draw, this chooses whether to draw the ones you
+            * have not booked yet. Running them together would read as a fourth
+            * category.
+            *
+            * The divider is desktop-only. The row wraps on a phone, and a
+            * vertical rule that lands at the start of a wrapped line reads as a
+            * stray tick rather than a separator. Below `sm` the gap alone is
+            * doing the separating, which is enough once the line has broken.
+            *
+            * Amber is the draft colour everywhere else in the app — the status
+            * pill, the form toggle — so the chip is amber when drafts are shown
+            * and neutral when they are hidden. That inverts the type chips, where
+            * the lit state is the "on" one; here the lit state is "drafts
+            * visible", which is the default, so the colour tracks what is on
+            * screen rather than what is enabled.
+            */}
+          {draftCount > 0 && typeCounts.size > 1 && (
+            <span aria-hidden className="mx-0.5 hidden h-4 w-px bg-white/10 sm:block" />
+          )}
+          {draftCount > 0 && (
+            <Tooltip
+              label={hiddenDrafts ? "Show draft stops" : "Hide draft stops"}
+            >
+              <button
+                type="button"
+                onClick={() => setHiddenDrafts((v) => !v)}
+                aria-pressed={!hiddenDrafts}
+                title={hiddenDrafts ? "Show draft stops" : "Hide draft stops"}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] transition-colors",
+                  hiddenDrafts
+                    ? "border-white/8 bg-transparent text-zinc-500 hover:text-zinc-300"
+                    : "border-amber-500/30 bg-amber-500/10 text-amber-300 hover:border-amber-500/50"
+                )}
+              >
+                <CircleDashed className="h-3 w-3" />
+                <span>Drafts</span>
+                <span className={cn("tabular-nums", hiddenDrafts ? "text-zinc-500" : "text-amber-400/70")}>
+                  {draftCount}
+                </span>
+              </button>
+            </Tooltip>
+          )}
+
+          {(hiddenTypes.size > 0 || hiddenDrafts) && (
             <button
               type="button"
-              onClick={() => setHiddenTypes(new Set())}
-              title="Show every category again"
+              onClick={() => {
+                setHiddenTypes(new Set());
+                setHiddenDrafts(false);
+              }}
+              title="Show every stop again"
               className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] text-zinc-500 transition-colors hover:text-emerald-400"
             >
               <RotateCcw className="h-3 w-3" />
