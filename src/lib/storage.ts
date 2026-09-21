@@ -38,7 +38,12 @@ function generateId(): string {
   return Math.random().toString(36).slice(2, 11) + Date.now().toString(36);
 }
 
-const AVATAR_COLORS = [
+/*
+ * The avatar palette. Exported so the profile editor's colour picker offers
+ * exactly the colours the auto-assignment can produce - a picker with its own
+ * hardcoded list would drift the moment either side changed.
+ */
+export const AVATAR_COLORS = [
   "bg-blue-500",
   "bg-emerald-500",
   "bg-violet-500",

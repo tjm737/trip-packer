@@ -6,6 +6,7 @@ import { useApp } from "@/lib/AppContext";
 import { User, Trip } from "@/lib/types";
 import { formatDateRange, isUpcoming as isUpcomingTrip, compareByDate } from "@/lib/dates";
 import { Button } from "@/components/ui/button";
+import { AVATAR_COLORS } from "@/lib/storage";
 import {
   Dialog,
   DialogContent,
@@ -26,6 +27,7 @@ import {
   ChevronRight,
   Trash2,
   Pencil,
+  Check,
   X,
   ArrowRight,
 } from "lucide-react";
@@ -72,6 +74,7 @@ function UserSwitcher() {
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [editColor, setEditColor] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   if (!activeUser) return null;
@@ -120,20 +123,37 @@ function UserSwitcher() {
                 </span>
               </button>
 
-              {state.users.length > 1 && (
-                <div className="flex flex-shrink-0 items-center gap-0.5 transition-opacity md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100">
+              {/*
+                * The edit (pencil) button is always rendered, including for the
+                * sole traveler - the profile editor is the only way to change
+                * your own name and avatar colour, so hiding it behind
+                * `users.length > 1` made a single-traveler setup uneditable.
+                * Delete stays guarded: removing the last traveler is refused by
+                * the API anyway (there is no user-less state), so offering the
+                * button would only ever produce an error.
+                * `data-keep-drawer-open` is required on both controls for the
+                * same reason AboutButton needs it: MobileSidebar closes on any
+                * button tap, which unmounts SidebarBody and takes the dialog
+                * with it. Without this the editor flashed open and vanished on
+                * a phone.
+                */}
+              <div className="flex flex-shrink-0 items-center gap-0.5 transition-opacity md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100">
+                <button
+                  data-keep-drawer-open
+                  onClick={() => {
+                    setEditingId(u.id);
+                    setEditName(u.name);
+                    setEditColor(u.avatarColor);
+                  }}
+                  className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200 focus-ring"
+                  aria-label={`Edit ${u.name} profile`}
+                  title={`Edit ${u.name} profile`}
+                >
+                  <Pencil className="h-3 w-3" />
+                </button>
+                {state.users.length > 1 && (
                   <button
-                    onClick={() => {
-                      setEditingId(u.id);
-                      setEditName(u.name);
-                    }}
-                    className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200 focus-ring"
-                    aria-label={`Rename ${u.name}`}
-                    title={`Rename ${u.name}`}
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </button>
-                  <button
+                    data-keep-drawer-open
                     onClick={() => setConfirmDeleteId(u.id)}
                     className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-red-500/10 hover:text-red-400 focus-ring"
                     aria-label={`Remove ${u.name}`}
@@ -141,32 +161,105 @@ function UserSwitcher() {
                   >
                     <Trash2 className="h-3 w-3" />
                   </button>
-                </div>
-              )}
+                )}
+              </div>
 
-              {/* Rename */}
+              {/* Edit profile */}
               <Dialog
                 open={editingId === u.id}
-                onOpenChange={(o) => (o ? (setEditingId(u.id), setEditName(u.name)) : setEditingId(null))}
+                onOpenChange={(o) =>
+                  o
+                    ? (setEditingId(u.id), setEditName(u.name), setEditColor(u.avatarColor))
+                    : setEditingId(null)
+                }
               >
-                <DialogContent className="sm:max-w-[320px] bg-[var(--surface-2)] border-zinc-700">
+                <DialogContent className="sm:max-w-[360px] bg-[var(--surface-2)] border-zinc-700">
                   <DialogHeader>
-                    <DialogTitle className="text-zinc-100">Rename traveler</DialogTitle>
+                    <DialogTitle className="text-zinc-100">Edit traveler</DialogTitle>
+                    <DialogDescription className="text-xs text-zinc-500">
+                      Your name and avatar colour appear throughout the app.
+                    </DialogDescription>
                   </DialogHeader>
-                  <div className="space-y-3">
+                  <div className="space-y-4">
+                    {/* Live preview so the colour choice is made against the
+                        real avatar rather than a bare swatch. */}
+                    <div className="flex items-center gap-3">
+                      <UserAvatar
+                        user={{ ...u, name: editName || u.name, avatarColor: editColor || u.avatarColor }}
+                        size="lg"
+                      />
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-zinc-100">
+                          {editName.trim() || u.name}
+                        </p>
+                        <p className="text-[11px] text-zinc-500">
+                          {state.users.length > 1
+                            ? "Traveler"
+                            : "You · only traveler"}
+                        </p>
+                      </div>
+                    </div>
+
                     <div>
-                      <Label className="text-xs text-zinc-400">Name</Label>
+                      <Label
+                        htmlFor={`name-${u.id}`}
+                        className="text-xs text-zinc-400"
+                      >
+                        Name
+                      </Label>
                       <Input
+                        id={`name-${u.id}`}
                         value={editName}
                         onChange={(e) => setEditName(e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter" && editName.trim()) {
-                            user.update(u.id, { name: editName.trim() });
+                            user.update(u.id, {
+                              name: editName.trim(),
+                              avatarColor: editColor || u.avatarColor,
+                            });
                             setEditingId(null);
                           }
                         }}
                         className="mt-1.5 bg-zinc-800 border-zinc-600 text-zinc-100"
                       />
+                    </div>
+
+                    <div>
+                      <Label className="text-xs text-zinc-400">Avatar color</Label>
+                      {/*
+                        * `role="radiogroup"` + `aria-checked` so the selection is
+                        * announced, not just coloured - the previous version of
+                        * this dialog had no colour control at all, and a row of
+                        * plain buttons with a ring would be invisible to a
+                        * screen reader.
+                        */}
+                      <div
+                        role="radiogroup"
+                        aria-label="Avatar color"
+                        className="mt-2 flex flex-wrap gap-2"
+                      >
+                        {AVATAR_COLORS.map((c) => {
+                          const selected = (editColor || u.avatarColor) === c;
+                          return (
+                            <button
+                              key={c}
+                              type="button"
+                              role="radio"
+                              aria-checked={selected}
+                              aria-label={c.replace(/^bg-|-\d+$/g, "")}
+                              title={c.replace(/^bg-|-\d+$/g, "")}
+                              onClick={() => setEditColor(c)}
+                              className={`flex h-7 w-7 items-center justify-center rounded-full ${c} transition-transform hover:scale-110 focus-ring ${
+                                selected
+                                  ? "ring-2 ring-white ring-offset-2 ring-offset-[var(--surface-2)]"
+                                  : "ring-1 ring-white/15"
+                              }`}
+                            >
+                              {selected && <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} />}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                   <DialogFooter>
@@ -177,7 +270,12 @@ function UserSwitcher() {
                       size="sm"
                       disabled={!editName.trim()}
                       onClick={() => {
-                        if (editName.trim()) user.update(u.id, { name: editName.trim() });
+                        if (editName.trim()) {
+                          user.update(u.id, {
+                            name: editName.trim(),
+                            avatarColor: editColor || u.avatarColor,
+                          });
+                        }
                         setEditingId(null);
                       }}
                       className="bg-primary hover:bg-emerald-700"
@@ -223,6 +321,7 @@ function UserSwitcher() {
 
         {/* Add traveler */}
         <button
+          data-keep-drawer-open
           onClick={() => setOpen(true)}
           className="mt-0.5 flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-xs text-zinc-500 transition-colors hover:bg-white/[0.03] hover:text-zinc-300 focus-ring"
           title="Add a traveler"
