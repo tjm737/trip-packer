@@ -44,6 +44,7 @@ import {
   ReservationDraft,
   TaskStatus,
   ApiError,
+  reconcilePending,
 } from "@/lib/storage";
 import { readCachedState, writeCachedState } from "@/lib/offlineCache";
 import { importItinerary } from "@/lib/importItinerary";
@@ -227,15 +228,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setState(optimistic);
       try {
         const authoritative = await write();
+        // Replay anything still queued on top of the server response before it
+        // is published or cached: a write can succeed while an *earlier*
+        // offline edit is still waiting in the queue, and this server state
+        // would not contain it.
+        const reconciled = reconcilePending(authoritative);
         // Ignore stale responses; a newer action already owns the state.
         if (ticket === seq.current) {
-          setState(authoritative);
+          setState(reconciled);
           setError(null);
         }
         // Keep the offline copy current even for a superseded response: the
         // server state is authoritative regardless of which render wins.
-        writeCachedState(authoritative);
-        return authoritative;
+        writeCachedState(reconciled);
+        return reconciled;
       } catch (err) {
         if (ticket === seq.current) {
           // A queued-for-later write is not a failure — the optimistic state

@@ -13,7 +13,7 @@ import { Tooltip } from "@/components/ui/tooltip";
  * itinerary — the one thing the user needs to read offline.
  */
 export function OfflineBanner() {
-  const { online, pending, syncing, sync, discard } = useOfflineStatus();
+  const { online, pending, labels, syncing, sync, discard } = useOfflineStatus();
 
   const showOffline = !online || pending > 0;
   if (!showOffline) return null;
@@ -25,6 +25,13 @@ export function OfflineBanner() {
     : syncing
       ? `Syncing ${pending} change${pending === 1 ? "" : "s"}…`
       : `${pending} change${pending === 1 ? "" : "s"} waiting to sync`;
+
+  // Name what is actually waiting. A count alone does not tell the user whether
+  // the edit they just made is the one still unsent.
+  const detail =
+    pending > 0
+      ? `Pending: ${labels.slice(0, 5).join(", ")}${labels.length > 5 ? ` +${labels.length - 5} more` : ""}`
+      : "";
 
   return (
     <div
@@ -40,7 +47,12 @@ export function OfflineBanner() {
         <Check className="h-3.5 w-3.5 shrink-0" />
       )}
 
-      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span className="min-w-0 flex-1 truncate" title={detail || undefined}>
+        {label}
+        {detail && !syncing && (
+          <span className="ml-1 text-amber-200/60">· {detail}</span>
+        )}
+      </span>
 
       {online && pending > 0 && !syncing && (
         <>

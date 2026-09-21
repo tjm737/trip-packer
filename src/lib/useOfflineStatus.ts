@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { flushOfflineQueue, discardOfflineQueue } from "@/lib/storage";
-import { queuedOpCount } from "@/lib/offlineQueue";
+import { listQueuedOps, queuedOpCount } from "@/lib/offlineQueue";
 
 /*
  * Tracks connectivity and the offline write queue.
@@ -12,14 +12,22 @@ import { queuedOpCount } from "@/lib/offlineQueue";
  * case). So the queue length is the real signal that something is stuck, and it
  * is what the banner reports; `online` alone would claim success on hotel wifi
  * that silently drops every request.
+ *
+ * We also expose the queued op labels so the banner can name what is pending
+ * rather than only counting it. A bare "2 changes" is not actionable when the
+ * user is trying to work out whether the edit they just made is the one that
+ * did not save.
  */
 export function useOfflineStatus() {
   const [online, setOnline] = useState(true);
   const [pending, setPending] = useState(0);
+  const [labels, setLabels] = useState<string[]>([]);
   const [syncing, setSyncing] = useState(false);
 
   const refreshPending = useCallback(() => {
-    setPending(queuedOpCount());
+    const ops = listQueuedOps();
+    setPending(ops.length);
+    setLabels(ops.map((op) => op.label));
   }, []);
 
   const sync = useCallback(async () => {
@@ -69,5 +77,5 @@ export function useOfflineStatus() {
     refreshPending();
   }, [refreshPending]);
 
-  return { online, pending, syncing, sync, discard, refreshPending };
+  return { online, pending, labels, syncing, sync, discard, refreshPending };
 }

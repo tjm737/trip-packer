@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useApp } from "@/lib/AppContext";
 import type { ParsedItinerary } from "@/lib/itineraryImport";
+import { apiUrl } from "@/lib/apiUrl";
 
 type Preview = ParsedItinerary & { filename: string };
 
@@ -79,7 +80,7 @@ export function ImportTripModal({
     try {
       const body = new FormData();
       body.append("file", file);
-      const res = await fetch("/api/import", { method: "POST", body });
+      const res = await fetch(apiUrl("/api/import"), { method: "POST", body });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error ?? "Could not read that file.");

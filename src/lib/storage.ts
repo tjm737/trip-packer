@@ -11,6 +11,8 @@ import {
 import { compareByDate, daysUntilDate, isValidDate } from "./dates";
 import { readCachedState, writeCachedState } from "./offlineCache";
 import { clearQueue, enqueueOp, listQueuedOps, removeQueuedOp } from "./offlineQueue";
+import { apiUrl } from "./apiUrl";
+import { reconcile } from "./reconcile";
 
 /*
  * Client-side API wrapper.
@@ -75,6 +77,8 @@ export function createDefaultUser(): User {
 
 /* ------------------------------------------------------------- transport */
 
+export { apiUrl };
+
 /**
  * Mutations that fail to reach the server are retried once, because a dev
  * server restart (or a brief HMR blip) would otherwise silently drop a change
@@ -87,7 +91,7 @@ export function createDefaultUser(): User {
 async function post<T>(body: unknown, attempt = 0, label = "Change"): Promise<T> {
   let res: Response;
   try {
-    res = await fetch("/api/mutate", {
+    res = await fetch(apiUrl("/api/mutate"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -149,6 +153,20 @@ export async function flushOfflineQueue(): Promise<AppState | null> {
     }
   }
 
+  if (!latest) return null;
+
+  // Ops still queued after an early stop are absent from `latest`. Replay them
+  // so the caller publishes a state that still contains the un-sent edits
+  // rather than the server snapshot from before them.
+  const remaining = listQueuedOps();
+  if (remaining.length > 0) {
+    latest = reconcile(
+      latest,
+      remaining.map((op) => op.body)
+    );
+  }
+
+  writeCachedState(latest);
   return latest;
 }
 
@@ -172,11 +190,19 @@ async function mutate(body: unknown, label?: string): Promise<AppState> {
  * throwing, so a cold start offline still renders the itinerary. A genuine
  * server error (5xx) is not masked by the cache — that is a real fault the
  * user should see, not a connectivity problem.
+ *
+ * RECONCILIATION (the fix for "an offline edit is silently lost"):
+ * a successful read used to overwrite both the rendered state and the cache
+ * with the server snapshot. When the offline queue is non-empty that snapshot
+ * is stale by definition — it predates the queued edits — so applying it threw
+ * those edits away. We now replay the pending queue on top of the server state
+ * before returning or caching it, so what the user did offline survives the
+ * arrival of a server copy that has not seen it yet.
  */
 export async function fetchState(): Promise<AppState | null> {
   let res: Response;
   try {
-    res = await fetch("/api/state", { cache: "no-store" });
+    res = await fetch(apiUrl("/api/state"), { cache: "no-store" });
   } catch {
     const cached = readCachedState();
     if (cached) return cached.state;
@@ -186,8 +212,28 @@ export async function fetchState(): Promise<AppState | null> {
   if (!res.ok) throw new ApiError("Could not load your data", res.status);
 
   const { state } = (await res.json()) as { state: AppState | null };
-  if (state) writeCachedState(state);
-  return state;
+  if (!state) return state;
+
+  // Never let an un-flushed local edit be clobbered by a server snapshot that
+  // has not accepted it yet.
+  const reconciled = reconcilePending(state);
+  writeCachedState(reconciled);
+  return reconciled;
+}
+
+/**
+ * Replays the offline queue over a server state.
+ *
+ * Kept separate so every call site that adopts a server snapshot — fetchState
+ * here, and the optimistic `run()` path in AppContext — applies the same rule.
+ */
+export function reconcilePending(serverState: AppState): AppState {
+  const pending = listQueuedOps();
+  if (pending.length === 0) return serverState;
+  return reconcile(
+    serverState,
+    pending.map((op) => op.body)
+  );
 }
 
 /**

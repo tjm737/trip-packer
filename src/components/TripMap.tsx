@@ -9,6 +9,7 @@ import { useApp } from "@/lib/AppContext";
 import { Reservation, ReservationType } from "@/lib/types";
 import { formatDate } from "@/lib/dates";
 import { readCachedCoords, writeCachedCoords } from "@/lib/geoCache";
+import { apiUrl } from "@/lib/apiUrl";
 import { Tooltip } from "@/components/ui/tooltip";
 import { StopEditor } from "@/components/StopEditor";
 import { cn } from "cn";
@@ -441,7 +442,7 @@ export function TripMap({ tripId }: { tripId: string }) {
       if (cached.size > 0 && !cancelled) setCoords(cached);
 
       try {
-        const res = await fetch("/api/geo", {
+        const res = await fetch(apiUrl("/api/geo"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ locations, contexts }),
@@ -656,7 +657,7 @@ export function TripMap({ tripId }: { tripId: string }) {
 
     (async () => {
       try {
-        const res = await fetch("/api/route", {
+        const res = await fetch(apiUrl("/api/route"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
