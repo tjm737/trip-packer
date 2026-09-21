@@ -105,72 +105,103 @@ type Leg = {
 };
 
 /**
- * Order reservations for the map: by date, then by the manual order.
+ * Order reservations for the map: date order, adjusted by any manual drags.
  *
- * Date is authoritative. A reservation with a date always precedes one without,
- * because an undated booking is a record still being filled in - it must never
- * push a confirmed flight down the route. `order` only breaks ties within the
- * same date (or between two undated bookings).
+ * The base sequence is by date (undated last), because a booking's date is the
+ * whole point and a record still missing one should never push a confirmed
+ * flight down the route. On top of that base, a ranking says where the user has
+ * dragged each booking.
  *
- * This used to hand the whole sequence to `order` whenever any single booking's
- * `order` disagreed with its date rank. That made the map disagree with the
- * Itinerary list - which sorts dated-first - and, because a stored sequence
- * almost never matches date rank exactly, it latched on permanently. The
- * visible symptom was every undated activity being drawn ahead of the outbound
- * flight, so the route appeared to start in the Dolomites before departure.
+ * The ranking is applied as a stable adjustment over the date-sorted list, not
+ * as a wholesale re-sort. That distinction is what makes a drag do what it looks
+ * like it does: dragging the 9th row to the top gives that row rank 0 while
+ * everyone else keeps their existing value, so the dragged booking moves and the
+ * rest stay put relative to each other.
  *
- * `order` is still read as the tiebreaker, so a drag between two same-day
- * bookings is honoured.
+ * The consequence is deliberate: a dragged booking can sit above one that is
+ * chronologically earlier, so the list and the route may not read in date order.
+ * That is the price of "grab a row, drop it, it stays there", and the drag is
+ * the only way to express a position the dates disagree with.
+ *
+ * `ranks` lets a drag supply live positions before they are persisted; omitted,
+ * each reservation's stored `order` is used.
  */
 function inItineraryOrder(
   res: Reservation[],
-  opts: { includeUnmapped?: boolean } = {}
+  opts: { includeUnmapped?: boolean; ranks?: Map<string, number> } = {}
 ): Reservation[] {
-  const rank = (r: Reservation, i: number) =>
-    Number.isFinite(r.order) ? (r.order as number) : i;
+  const rankOf = (r: Reservation, i: number) => {
+    const live = opts.ranks?.get(r.id);
+    if (Number.isFinite(live)) return live as number;
+    return Number.isFinite(r.order) ? (r.order as number) : i;
+  };
 
-  return res
-    .map((r, i) => ({ r, rank: rank(r, i) }))
-    /*
-     * Stops need a location to be plotted, so the map drops bookings without
-     * one. The reorder list must NOT: the `order` column is a single sequence
-     * per trip, so omitting rows from a renumber leaves them holding stale
-     * values that collide with the rewritten ones.
-     */
-    .filter(({ r }) => opts.includeUnmapped || r.startDate || r.location)
-    .sort((a, b) => {
-      const aD = a.r.startDate || "";
-      const bD = b.r.startDate || "";
-      // Dated bookings first, in date order.
-      if (aD && bD && aD !== bD) return aD.localeCompare(bD);
-      if (aD && !bD) return -1;
-      if (!aD && bD) return 1;
-      // Same date (or both undated): clock time, then the manual order.
-      const aT = a.r.startTime || "";
-      const bT = b.r.startTime || "";
-      if (aT !== bT) return aT.localeCompare(bT);
-      if (a.rank !== b.rank) return a.rank - b.rank;
-      return a.r.id.localeCompare(b.r.id);
-    })
-    .map(({ r }) => r);
+  /*
+   * `unranked` marks reservations with no manual position at all. They must not
+   * compete with dragged rows, or a booking that has never been touched could
+   * jump the queue purely because its `order` happens to be a small number.
+   */
+  const items = res
+    .map((r, i) => ({ r, rank: rankOf(r, i), touched: opts.ranks?.has(r.id) ?? true }))
+    .filter(({ r }) => opts.includeUnmapped || r.startDate || r.location);
+
+  /*
+   * Two passes. The first sorts by date alone, which is the arrangement a user
+   * who has never dragged anything should see. The second lifts out the rows
+   * carrying a manual position and re-inserts them at it.
+   */
+  const byDate = [...items].sort((a, b) => {
+    const aD = a.r.startDate || "";
+    const bD = b.r.startDate || "";
+    if (aD && bD && aD !== bD) return aD.localeCompare(bD);
+    if (aD && !bD) return -1;
+    if (!aD && bD) return 1;
+    const aT = a.r.startTime || "";
+    const bT = b.r.startTime || "";
+    if (aT !== bT) return aT.localeCompare(bT);
+    return a.r.id.localeCompare(b.r.id);
+  });
+
+  /*
+   * Rows are keyed by reservation id throughout. Holding position by object
+   * identity would silently fail: the entries below are built with object
+   * spreads, so a later `indexOf` on one of them matches nothing and the row is
+   * inserted a second time instead of moved. That produced a list with every
+   * booking duplicated.
+   */
+  const ranked = byDate
+    .map((it, i) => ({ id: it.r.id, rank: it.rank, dateIdx: i }))
+    .filter((it) => byDate.find((x) => x.r.id === it.id)!.touched)
+    .sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.dateIdx - b.dateIdx));
+
+  const lifted = new Set(ranked.map((it) => it.id));
+  const ordered = byDate.filter((it) => !lifted.has(it.r.id));
+
+  /*
+   * Insert in rank order, each at its rank clamped to the list it is entering.
+   * A plain comparison sort cannot express this: a dragged row has to move past
+   * rows whose dates it does not precede, while those rows keep their relative
+   * positions rather than shuffling among themselves.
+   */
+  for (const it of ranked) {
+    const at = Math.max(0, Math.min(ordered.length, it.rank));
+    const item = byDate.find((x) => x.r.id === it.id)!;
+    ordered.splice(at, 0, item);
+  }
+
+  return ordered.map(({ r }) => r);
 }
 
 /**
  * Order reservations for the map and the draggable list.
  *
- * Date order wins; the stored `order` column breaks ties. See `inItineraryOrder`
- * for why the sequencing is not handed wholesale to `order`.
- *
- * This function previously detected a "manual" order whenever any booking's
- * `order` differed from its date rank, and then sorted by `order` alone. Since a
- * stored sequence practically never matches date rank exactly, that check was
- * true on essentially every trip, so the manual branch was not an exception but
- * the norm. It is kept as a named step because the drag-reorder code below
- * depends on this being the single place that decides sequence.
+ * A thin alias for `inItineraryOrder`, kept because the drag code reads better
+ * against a name that says what it returns. All sequencing decisions live in
+ * `inItineraryOrder`.
  */
 function orderReservations(
   res: Reservation[],
-  opts: { includeUnmapped?: boolean } = {}
+  opts: { includeUnmapped?: boolean; ranks?: Map<string, number> } = {}
 ): Reservation[] {
   return inItineraryOrder(res, opts);
 }
@@ -182,17 +213,16 @@ function orderReservations(
  * everything else yields one. Only bookings whose location actually geocoded
  * are included, so an unresolved place silently drops out rather than
  * producing a pin at 0,0 in the Atlantic.
- *
- * `orderById` carries a user's manual drag order. When a reservation has an
- * entry there it is placed by that value and dated sorting is skipped for it —
- * otherwise a drag would visibly do nothing on any trip whose bookings fall on
- * different dates.
  */
-function buildStops(res: Reservation[], coords: Map<string, LatLng>): Stop[] {
+function buildStops(
+  res: Reservation[],
+  coords: Map<string, LatLng>,
+  ranks?: Map<string, number>
+): Stop[] {
   const stops: Stop[] = [];
   const norm = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
 
-  for (const r of orderReservations(res)) {
+  for (const r of orderReservations(res, { ranks })) {
     const from = r.location ? coords.get(norm(r.location)) : undefined;
     const to = r.locationTo ? coords.get(norm(r.locationTo)) : undefined;
 
@@ -444,20 +474,20 @@ export function TripMap({ tripId }: { tripId: string }) {
   }, [locationKey, contextKey]);
 
   /*
-   * The list renders from `reservations`, with any active drag preview applied
-   * on top. Persisted order comes along in each reservation's `order` field, so
-   * there is nothing else to keep in sync.
+   * Stops are built straight from `reservations`, with any in-flight drag
+   * preview passed through as ranks.
+   *
+   * The preview used to be applied by overwriting each reservation's `order`
+   * field before building stops. That stopped being enough once the base order
+   * became date-first: `order` is a rank layered onto the date sort, so writing
+   * it onto a copy of the reservation changed nothing about where the row sat.
+   * The drag looked inert while still writing a scrambled sequence to the
+   * database. Passing the preview as explicit ranks keeps the dragged row's
+   * position live without pretending it is a persisted value.
    */
-  const orderedReservations = useMemo(() => {
-    if (!previewOrder) return reservations;
-    return reservations.map((r) =>
-      previewOrder.has(r.id) ? { ...r, order: previewOrder.get(r.id) as number } : r
-    );
-  }, [reservations, previewOrder]);
-
   const stops = useMemo(
-    () => buildStops(orderedReservations, coords),
-    [orderedReservations, coords]
+    () => buildStops(reservations, coords, previewOrder ?? undefined),
+    [reservations, coords, previewOrder]
   );
 
   /*
@@ -861,11 +891,6 @@ export function TripMap({ tripId }: { tripId: string }) {
      * This list must contain all ids, because `setReservationOrder` renumbers
      * exactly the ids it receives: omitting rows leaves their old values in
      * place and they collide with the rewritten ones.
-     *
-     * It is deliberately NOT the rendered order. The rendered order is by date
-     * (see `orderReservations`), and writing date order into `order` would make
-     * the tiebreaker record something the dates already say. Drags are resolved
-     * against the rendered list in `moveReservation` instead.
      */
     return reservations.map((r) => r.id);
   }, [reservations]);
@@ -875,37 +900,27 @@ export function TripMap({ tripId }: { tripId: string }) {
    * order for the trip.
    *
    * `from`/`to` are positions in the mapped subset (the draggable rows), so they
-   * are translated into the full list before splicing — otherwise the splice
-   * would move the wrong booking whenever an unmapped one is interleaved.
+   * are resolved against the on-screen order, which is the date order with any
+   * earlier drags already applied.
+   *
+   * The returned sequence is the new manual ranking and is what gets persisted.
+   * It covers every reservation on the trip, including ones with no map stop:
+   * `setReservationOrder` renumbers exactly the ids it is given, so omitting a
+   * row would leave its stale value in place to collide with the rewritten ones.
    */
   const moveReservation = (from: number, to: number): string[] => {
     const movedId = reservationIds[from];
     const targetId = reservationIds[to];
     if (!movedId || !targetId) return [...allReservationIds];
 
-    /*
-     * Resolve the move against the ORDER ON SCREEN, then re-emit a dense
-     * sequence over every reservation on the trip.
-     *
-     * The screen order is the date order, so a drag moves a booking within it;
-     * the emitted sequence is what gets stored. Returning the screen order
-     * directly is not an option — it drops the ids of bookings that have no map
-     * stop (the filter in `orderReservations`), which is what previously left
-     * the stored column with gaps and duplicate values.
-     */
-    const onScreen = orderReservations([...reservations]);
-    const screenIds = onScreen.map((r) => r.id);
+    const screenIds = orderReservations([...reservations], { ranks: previewOrder ?? undefined })
+      .map((r) => r.id);
     const fromIdx = screenIds.indexOf(movedId);
     if (fromIdx < 0) return [...allReservationIds];
     const [moved] = screenIds.splice(fromIdx, 1);
     const targetIdx = screenIds.indexOf(targetId);
     screenIds.splice(targetIdx < 0 ? screenIds.length : targetIdx, 0, moved);
 
-    /*
-     * Rank by the position the user just chose, and let anything the drag did
-     * not touch keep its relative spot behind it. Bookings absent from the
-     * screen order (no date and no location) are appended, so no id is lost.
-     */
     const seen = new Set(screenIds);
     const rest = allReservationIds.filter((id) => !seen.has(id));
     return [...screenIds, ...rest];
