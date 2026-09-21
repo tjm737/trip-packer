@@ -903,7 +903,22 @@ export function TripReservations({ tripId }: { tripId: string }) {
                             // (which differs by only 1.02:1 - the icon would
                             // vanish against an emerald-300/400 border).
                             // The fill stays subtle; the border does the work.
-                            className="-mx-1 -my-2 inline-flex min-h-8 shrink-0 items-center justify-center gap-1 rounded-md border border-emerald-500 bg-emerald-500/20 px-1.5 py-2 text-[11px] text-emerald-300 underline underline-offset-2 transition-colors hover:border-emerald-400 hover:bg-emerald-500/30 hover:text-emerald-200 focus-ring sm:mx-0 sm:my-1 sm:min-h-6 sm:justify-start sm:rounded sm:border-0 sm:bg-transparent sm:px-1.5 sm:py-1 sm:hover:bg-emerald-500/10 sm:hover:text-emerald-400"
+                            // Pushed to the right edge on mobile with `ml-auto`.
+                            // Without it the link sat immediately after the
+                            // location text, so its x position moved with the
+                            // length of the destination - measured anywhere
+                            // between x=167 and x=216 on the same screen, with
+                            // up to 187px of dead space to its right. Pinning it
+                            // right puts every row's Map control in one column.
+                            //
+                            // The right side of the negative margin is dropped on
+                            // mobile: `-mx-1` widens the tap target, but `ml-auto`
+                            // resolves against the margin box, so the visible box
+                            // landed 4px past the row's right edge. `-ml-1` keeps
+                            // the extra left hit area, `mr-0` keeps the visible
+                            // edge flush. From sm up the link is inline again, so
+                            // the original `-mx-1 sm:mx-0` behaviour is restored.
+                            className="-ml-1 mr-0 -my-2 ml-auto inline-flex min-h-8 shrink-0 items-center justify-center gap-1 rounded-md border border-emerald-500 bg-emerald-500/20 px-1.5 py-2 text-[11px] text-emerald-300 underline underline-offset-2 transition-colors hover:border-emerald-400 hover:bg-emerald-500/30 hover:text-emerald-200 focus-ring sm:mx-0 sm:my-1 sm:ml-0 sm:min-h-6 sm:justify-start sm:rounded sm:border-0 sm:bg-transparent sm:px-1.5 sm:py-1 sm:hover:bg-emerald-500/10 sm:hover:text-emerald-400"
                           >
                             <MapIcon className="h-4 w-4 sm:h-3 sm:w-3" strokeWidth={2} />
                             <span className="hidden sm:inline">Map</span>
