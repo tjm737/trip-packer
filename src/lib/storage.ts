@@ -486,7 +486,22 @@ export async function createReservation(
   draft: ReservationDraft
 ): Promise<{ state: AppState; reservation: Reservation }> {
   const current = await fetchState();
-  const order = current?.reservations.filter((r) => r.tripId === tripId).length ?? 0;
+  /*
+   * Append past the current maximum rather than using the booking count.
+   *
+   * The count is wrong whenever the stored orders are not already a dense
+   * 0..n-1 run, which happens as soon as a row is deleted: three bookings
+   * ordered [0,1,2] become a count of 2 after one is removed, colliding with
+   * the booking already holding 2. Two rows sharing an order makes the sequence
+   * ambiguous, and the tie then resolves by id rather than by anything the user
+   * chose. Taking max+1 keeps each new booking strictly after the existing ones.
+   */
+  const existing = current?.reservations.filter((r) => r.tripId === tripId) ?? [];
+  const order =
+    existing.reduce(
+      (max, r) => (Number.isFinite(r.order) ? Math.max(max, r.order) : max),
+      -1
+    ) + 1;
   const reservation: Reservation = {
     id: generateId(),
     tripId,
