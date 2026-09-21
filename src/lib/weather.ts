@@ -112,18 +112,52 @@ interface PackingSuggestion {
 
 function getSuggestions(weather: WeatherForecast): PackingSuggestion[] {
   const suggestions: PackingSuggestion[] = [];
-  const avgTemp = weather.daily.reduce((sum, d) => sum + (d.tempMax + d.tempMin) / 2, 0) / weather.daily.length;
 
-  // Thresholds are in °F, matching the unit requested from Open-Meteo
-  // (~86°F / ~68°F / ~50°F). These were originally Celsius; if the unit above
-  // is ever changed back, these must change with it or every trip reports as
-  // freezing.
-  const HOT_F = 86;
-  const MILD_F = 68;
-  const COOL_F = 50;
+  /*
+   * Temperature is judged from the highs and the lows SEPARATELY, not from a
+   * single average of them.
+   *
+   * Averaging a trip into one number is what produced "thermal underwear" for a
+   * 53F October trip: Munich's typical mid-October is a 62F afternoon and a 45F
+   * morning, which averages to 53F and used to land in the cold band. The trip
+   * is really mild days with cold mornings - two different packing problems - so
+   * daywear is chosen from the highs and the extra layers from the lows.
+   *
+   * Thresholds are in °F, matching the unit requested from Open-Meteo. These
+   * were originally Celsius; if the unit above is ever changed back, these must
+   * change with it or every trip reports as freezing.
+   */
+  const days = weather.daily;
+  if (days.length === 0) return suggestions;
 
-  // Temperature-based suggestions
-  if (avgTemp > HOT_F) {
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  const highAvg = mean(days.map((d) => d.tempMax));
+  const lowAvg = mean(days.map((d) => d.tempMin));
+  const coldestLow = Math.min(...days.map((d) => d.tempMin));
+  const warmestHigh = Math.max(...days.map((d) => d.tempMax));
+
+  /*
+   * Daytime band: what the average high supports for daytime clothing.
+   * HOT  - summer heat, sun protection matters
+   * WARM - t-shirts, no jacket needed in the day
+   * MILD - a light layer is enough during the day
+   * COOL - a real jacket is needed even at the warmest hour
+   */
+  const HOT_HIGH_F = 86;
+  const WARM_HIGH_F = 72;
+  const MILD_HIGH_F = 58;
+  const COLD_LOW_F = 50; // below this, evenings need real insulation
+  const FREEZING_F = 32; // below this, ice and genuine winter gear
+
+  /*
+   * Daytime base clothing: what the average high supports.
+   *
+   * The OUTER LAYER is deliberately not part of this cascade - it is chosen
+   * once below. Deciding it in here meant a below-freezing trip needed a fifth
+   * branch to override the fourth, and doing that by appending produced two
+   * coats ("Warm coat" + "Heavy winter coat") on a 25F trip.
+   */
+  if (highAvg >= HOT_HIGH_F) {
     suggestions.push(
       { name: "Sunscreen SPF 50+", icon: "☀️", quantity: 1, category: "Toiletries" },
       { name: "Lightweight breathable clothing", icon: "👕", quantity: 4, category: "Clothing" },
@@ -131,27 +165,83 @@ function getSuggestions(weather: WeatherForecast): PackingSuggestion[] {
       { name: "Sunglasses", icon: "🕶️", quantity: 1, category: "Clothing" },
       { name: "Extra water bottle", icon: "🍶", quantity: 1, category: "Miscellaneous" }
     );
-  } else if (avgTemp > MILD_F) {
+  } else if (highAvg >= WARM_HIGH_F) {
     suggestions.push(
-      { name: "Light jacket", icon: "🧥", quantity: 1, category: "Clothing" },
-      { name: "Long-sleeve shirt", icon: "👕", quantity: 2, category: "Clothing" },
-      { name: "Sunscreen", icon: "☀️", quantity: 1, category: "Toiletries" }
+      { name: "Short-sleeve shirts", icon: "👕", quantity: 4, category: "Clothing" },
+      { name: "Shorts", icon: "🩳", quantity: 2, category: "Clothing" },
+      { name: "Sunscreen", icon: "☀️", quantity: 1, category: "Toiletries" },
+      { name: "Sunglasses", icon: "🕶️", quantity: 1, category: "Clothing" }
     );
-  } else if (avgTemp > COOL_F) {
+  } else if (highAvg >= MILD_HIGH_F) {
     suggestions.push(
-      { name: "Warm jacket/coat", icon: "🧥", quantity: 1, category: "Clothing" },
-      { name: "Scarf", icon: "🧣", quantity: 1, category: "Clothing" },
-      { name: "Warm layers", icon: "👕", quantity: 3, category: "Clothing" },
-      { name: "Thermal underwear", icon: "👕", quantity: 2, category: "Clothing" }
+      { name: "Long-sleeve shirts", icon: "👕", quantity: 3, category: "Clothing" },
+      { name: "Trousers/jeans", icon: "👖", quantity: 2, category: "Clothing" }
     );
   } else {
     suggestions.push(
+      { name: "Long-sleeve shirts", icon: "👕", quantity: 3, category: "Clothing" },
+      { name: "Warm sweaters", icon: "🧶", quantity: 2, category: "Clothing" }
+    );
+  }
+
+  /*
+   * The single outer layer, chosen from the warmest part of the day.
+   *
+   * Below freezing the whole trip is a winter trip, so the heavy coat applies.
+   * Otherwise a cool day still needs a real coat; only a genuinely warm one
+   * needs no outer layer at all.
+   */
+  if (highAvg < FREEZING_F) {
+    suggestions.push(
       { name: "Heavy winter coat", icon: "🧥", quantity: 1, category: "Clothing" },
-      { name: "Thermal base layers", icon: "👕", quantity: 3, category: "Clothing" },
-      { name: "Warm hat/beanie", icon: "🧢", quantity: 1, category: "Clothing" },
-      { name: "Gloves", icon: "🧤", quantity: 1, category: "Clothing" },
+      { name: "Insulated boots", icon: "👢", quantity: 1, category: "Clothing" },
       { name: "Hand warmers", icon: "🔥", quantity: 1, category: "Miscellaneous" },
       { name: "Insulated water bottle", icon: "🍶", quantity: 1, category: "Miscellaneous" }
+    );
+  } else if (highAvg >= MILD_HIGH_F && highAvg < WARM_HIGH_F) {
+    suggestions.push({ name: "Light jacket", icon: "🧥", quantity: 1, category: "Clothing" });
+  } else if (highAvg < MILD_HIGH_F) {
+    suggestions.push({ name: "Warm jacket/coat", icon: "🧥", quantity: 1, category: "Clothing" });
+  }
+
+  /*
+   * Evening band: driven by the LOWS, which is where a trip's cold actually
+   * lives. These stack on top of the daytime items rather than replacing them -
+   * the point is "you have warm afternoons, but pack for the evenings".
+   *
+   * A single cold night is treated as a real risk (coldestLow), because one 38F
+   * night still needs an extra layer even if the average low is comfortable.
+   */
+  if (lowAvg < COLD_LOW_F) {
+    suggestions.push(
+      { name: "Warm layers for evenings", icon: "🧶", quantity: 2, category: "Clothing" },
+      { name: "Scarf", icon: "🧣", quantity: 1, category: "Clothing" }
+    );
+  }
+
+  /*
+   * Thermal base layers and true winter kit are reserved for nights that
+   * actually approach or drop below freezing. This is the specific fix: they
+   * used to appear for any trip averaging under 68F.
+   *
+   * Keyed off the coldest single night rather than the average low, so a mild
+   * trip with one cold snap still gets the warning.
+   */
+  if (coldestLow < FREEZING_F) {
+    suggestions.push(
+      { name: "Thermal base layers", icon: "👕", quantity: 2, category: "Clothing" },
+      { name: "Warm hat/beanie", icon: "🧢", quantity: 1, category: "Clothing" },
+      { name: "Gloves", icon: "🧤", quantity: 1, category: "Clothing" }
+    );
+  }
+
+  /*
+   * Big swings between day and night need layers rather than a single heavy
+   * coat - you shed the outer layer at 1pm and need it again by 8pm.
+   */
+  if (warmestHigh - coldestLow >= 25) {
+    suggestions.push(
+      { name: "Zip-up mid-layer", icon: "🧥", quantity: 1, category: "Clothing" }
     );
   }
 
@@ -187,6 +277,70 @@ function getSuggestions(weather: WeatherForecast): PackingSuggestion[] {
       { name: "Lip balm with SPF", icon: "💋", quantity: 1, category: "Toiletries" }
     );
   }
+
+  return suggestions;
+}
+
+/**
+ * Packing suggestions for a trip too far out for the forecast, derived from
+ * historical climate instead.
+ *
+ * This exists because suggestions used to be produced ONLY from the 16-day
+ * forecast. For a trip further out than that - which is most trips, since
+ * they're planned months ahead - the forecast is null, so no suggestions were
+ * ever generated and the packing tab silently showed nothing.
+ *
+ * `avgHigh` / `avgLow` are already averaged across the sampled years, so they
+ * stand in for the forecast's per-day highs and lows. The spread between the
+ * warmest and coldest sampled year is used as the day/night swing, which is
+ * what drives the "pack layers" advice.
+ */
+export function getClimateSuggestions(climate: ClimateSummary): PackingSuggestion[] {
+  /*
+   * Build a synthetic day list: one "day" per sampled year, using that year's
+   * average high/low. The shared temperature logic then sees a realistic spread
+   * across years rather than one flat pair of numbers.
+   *
+   * `tempMaxPeak` / `tempMinFloor` are the single warmest and coldest readings
+   * in the window, so using them as that year's max/min preserves the extremes
+   * that drive the "thermal layers" and "pack layers" rules.
+   */
+  const years = climate.years;
+  const daily: DailyWeather[] = years.length
+    ? years.map((y) => ({
+        date: "",
+        tempMax: y.tempMaxPeak,
+        tempMin: y.tempMinFloor,
+        condition: y.condition,
+        icon: "🌡️",
+        precipitation: y.precipitationTotal,
+      }))
+    : [
+        {
+          date: "",
+          tempMax: climate.avgHigh,
+          tempMin: climate.avgLow,
+          condition: "typical",
+          icon: "🌡️",
+          precipitation: climate.avgPrecipitation,
+        },
+      ];
+
+  const suggestions = getSuggestions({
+    temperature: climate.avgHigh,
+    condition: "typical",
+    icon: "🌡️",
+    /*
+     * The existing rain logic keys off `precipitation`, so a typical wet
+     * window produces rain gear through that path. An earlier version of this
+     * function added its own umbrella/waterproof block on top, which produced
+     * two umbrellas and two waterproof jackets.
+     */
+    precipitation: climate.avgPrecipitation,
+    windSpeed: 0,
+    humidity: 0,
+    daily,
+  });
 
   return suggestions;
 }

@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useApp } from "@/lib/AppContext";
-import { getWeatherForDestination, WeatherForecast, getSuggestions, getHistoricalClimate, ClimateSummary, isWithinForecastRange } from "@/lib/weather";
+import { getWeatherForDestination, WeatherForecast, getSuggestions, getClimateSuggestions, getHistoricalClimate, ClimateSummary, isWithinForecastRange } from "@/lib/weather";
 import { formatDateRange, isValidDate } from "@/lib/dates";
 import { Trip } from "@/lib/types";
 import { fetchState } from "@/lib/storage";
@@ -504,7 +504,19 @@ export default function TripDetail() {
           tripInfo.startDate,
           tripInfo.endDate
         );
-        if (!cancelled) setClimate(summary);
+        if (!cancelled) {
+          setClimate(summary);
+          /*
+           * Suggestions come from the forecast when there is one, and from
+           * typical climate when there isn't. Without this, any trip further
+           * out than the 16-day forecast window showed no packing suggestions
+           * at all - which is most trips, since they get planned months ahead.
+           */
+          if (summary && !isWithinForecastRange(tripInfo.startDate, tripInfo.endDate)) {
+            setSuggestions(getClimateSuggestions(summary));
+            setShowSuggestions(false);
+          }
+        }
       } catch {
         if (!cancelled) setClimate(null);
       } finally {
