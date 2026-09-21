@@ -19,6 +19,7 @@ import {
   MapPin,
   ArrowRight,
   Map as MapIcon,
+  ExternalLink,
   CheckCheck,
   CircleDashed,
   Hash,
@@ -207,6 +208,125 @@ export function isMappableLocation(value: string | undefined | null): boolean {
  */
 export function googleMapsUrl(query: string): string {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query.trim())}`;
+}
+
+/*
+ * The first http(s) link in a booking's notes, if there is one.
+ *
+ * Notes are free text and the field was never meant to carry links, but the
+ * itinerary importer already writes one in: it stores
+ * `"<note> · <listing url>"`, so every Airbnb/VRBO import lands here with the
+ * listing URL sitting in the notes string. Rather than migrate the schema for
+ * data users can equally well type by hand, the URL is read back out at render
+ * time.
+ *
+ * Only http/https is matched. Deliberately NOT matched:
+ *
+ *   - `javascript:` and `data:` — rendering user text as a clickable link is
+ *     exactly where those become an XSS vector, and this string comes from an
+ *     imported file. Rejecting them by only accepting http(s) is safer than
+ *     escaping them.
+ *   - bare `www.foo.com` / `foo.com/x` — without a scheme the "is this a link"
+ *     guess gets ambiguous (in "Arrive 8.30am, email john.co" the domain-shaped
+ *     tail is not a link), and guessing wrong turns note text into a button.
+ *     A pasted link has a scheme; that is the signal used here.
+ *
+ * The match stops at whitespace, then trailing punctuation is trimmed, because
+ * a URL at the end of a sentence swallows the full stop: "see https://x.com/a."
+ * must not produce a link to `a.`.
+ */
+const NOTE_URL = /\bhttps?:\/\/[^\s<>"')\]]+/i;
+
+export function noteUrl(notes: string): string {
+  const match = NOTE_URL.exec(notes || "");
+  if (!match) return "";
+  // Trailing sentence punctuation, and a closing paren only when unbalanced
+  // (Wikipedia-style URLs legitimately end in ")").
+  let url = match[0].replace(/[.,;:!?]+$/, "");
+  const opens = (url.match(/\(/g) || []).length;
+  const closes = (url.match(/\)/g) || []).length;
+  if (closes > opens) url = url.replace(/\)+$/, "");
+  return url;
+}
+
+/*
+ * What to call the link button.
+ *
+ * The host, minus "www." and the public suffix, title-cased: airbnb.com →
+ * "Airbnb", booking.com → "Booking.com" is not achievable this way, so known
+ * brands are mapped explicitly. The label matters more than it looks — several
+ * bookings in one list will each show a button, and "Open listing" repeated six
+ * times tells the user nothing about which is which, which is the same failure
+ * already fixed for the Maps links.
+ */
+const LINK_LABELS: Record<string, string> = {
+  "airbnb.com": "Airbnb",
+  "booking.com": "Booking.com",
+  "vrbo.com": "VRBO",
+  "expedia.com": "Expedia",
+  "hotels.com": "Hotels.com",
+  "tripadvisor.com": "Tripadvisor",
+  "agoda.com": "Agoda",
+  "hostelworld.com": "Hostelworld",
+  "rentalcars.com": "Rentalcars",
+  "hertz.com": "Hertz",
+  "avis.com": "Avis",
+  "sixt.com": "Sixt",
+  "lufthansa.com": "Lufthansa",
+  "united.com": "United",
+  "delta.com": "Delta",
+  "aa.com": "American",
+  "ba.com": "British Airways",
+};
+
+/*
+ * Second-level labels that are part of the public suffix, not the site name.
+ * Needed so "tickets.example.co.uk" resolves to "Example" rather than "Co".
+ * A full Public Suffix List is overkill here - these are the ones that actually
+ * appear in travel booking URLs - and the cost of a miss is only a slightly
+ * off button caption, never a broken link.
+ */
+const MULTI_PART_SUFFIX = new Set([
+  "co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au",
+  "co.nz", "co.jp", "co.kr", "com.br", "com.mx", "co.za", "co.in",
+]);
+
+/*
+ * What to call the link button.
+ *
+ * Known brands are mapped explicitly. Everything else falls back to the booking
+ * title, then to a host fragment.
+ *
+ * The title is preferred over the host because the host is often not a name at
+ * all: the real list produced "Open Michelin listing" three times for three
+ * different restaurants (all on guide.michelin.com), "Bz" for a hotel on
+ * spitalerhof.bz.it, and "Wurzer-alm". Three buttons with identical captions in
+ * one list is the same "which one is which" failure already fixed for the Maps
+ * links - the title is the name the user themselves gave the booking, so it
+ * always disambiguates. The host is kept only for the case where the title is
+ * missing or is not a name.
+ */
+export function noteLinkLabel(url: string | null, title = ""): string {
+  if (!url) return "";
+  try {
+    const host = new URL(url).hostname.replace(/^www\./i, "").toLowerCase();
+    if (LINK_LABELS[host]) return LINK_LABELS[host];
+    const cleanTitle = (title || "").trim();
+    if (cleanTitle) return cleanTitle;
+    const parts = host.split(".");
+    if (parts.length < 2) return host || "Link";
+    // Walk back past the suffix, then take the label before it:
+    //   airbnb.com            -> airbnb
+    //   tickets.example.co.uk -> example
+    let i = parts.length - 2;
+    const tail2 = parts.slice(-2).join(".");
+    if (MULTI_PART_SUFFIX.has(tail2) && parts.length >= 3) i = parts.length - 3;
+    const core = parts[i];
+    if (!core) return "Link";
+    return core.charAt(0).toUpperCase() + core.slice(1);
+  } catch {
+    return "Link";
+  }
 }
 
 /*
@@ -768,6 +888,11 @@ export function TripReservations({ tripId }: { tripId: string }) {
           // resolvable place. Computed per row rather than per render so the
           // link either exists or does not, with no half-state.
           const mapsQuery = mappableLocation(r);
+          // A listing URL living in the notes, if any. Computed alongside
+          // mapsQuery for the same reason: the button either exists or does
+          // not, never half-present.
+          const linkHref = noteUrl(r.notes);
+          const linkLabel = noteLinkLabel(linkHref, r.title);
 
           return (
             <div
@@ -844,6 +969,25 @@ export function TripReservations({ tripId }: { tripId: string }) {
                         * reader hearing a list of identical "Open in Maps" links
                         * still knows which booking each one belongs to.
                         */}
+                      {/*
+                        * The row's outbound actions, grouped so they stay
+                        * adjacent and together at the right edge.
+                        *
+                        * `ml-auto` belongs on this wrapper, NOT on each link.
+                        * With an auto margin on both, the free space is split
+                        * between them and the first action floats in the middle
+                        * of the row: Map measured at x=245 with the Airbnb link
+                        * at x=354, 79px apart, on the Erding row. One auto
+                        * margin on the container right-aligns the pair and
+                        * leaves them touching.
+                        *
+                        * `gap-2` not `gap-1.5`: each pill carries `-ml-1` to
+                        * widen its left hit area, and that negative margin eats
+                        * into the gap. At `gap-1.5` the two visible boxes sat
+                        * 2px apart - close enough to read as a rendering error
+                        * rather than as two separate controls.
+                        */}
+                      <div className="ml-auto flex shrink-0 items-center gap-2">
                       {mapsQuery && (
                         <Tooltip label={`Open ${mapsQuery} in Google Maps`}>
                           <a
@@ -903,8 +1047,10 @@ export function TripReservations({ tripId }: { tripId: string }) {
                             // (which differs by only 1.02:1 - the icon would
                             // vanish against an emerald-300/400 border).
                             // The fill stays subtle; the border does the work.
-                            // Pushed to the right edge on mobile with `ml-auto`.
-                            // Without it the link sat immediately after the
+                            // Pushed to the right edge on mobile by the wrapper's
+                            // `ml-auto` (see the group comment above), which is
+                            // why this element does not carry one itself.
+                            // Without the push the link sat immediately after the
                             // location text, so its x position moved with the
                             // length of the destination - measured anywhere
                             // between x=167 and x=216 on the same screen, with
@@ -912,19 +1058,60 @@ export function TripReservations({ tripId }: { tripId: string }) {
                             // right puts every row's Map control in one column.
                             //
                             // The right side of the negative margin is dropped on
-                            // mobile: `-mx-1` widens the tap target, but `ml-auto`
-                            // resolves against the margin box, so the visible box
-                            // landed 4px past the row's right edge. `-ml-1` keeps
-                            // the extra left hit area, `mr-0` keeps the visible
-                            // edge flush. From sm up the link is inline again, so
-                            // the original `-mx-1 sm:mx-0` behaviour is restored.
-                            className="-ml-1 mr-0 -my-2 ml-auto inline-flex min-h-8 shrink-0 items-center justify-center gap-1 rounded-md border border-emerald-500 bg-emerald-500/20 px-1.5 py-2 text-[11px] text-emerald-300 underline underline-offset-2 transition-colors hover:border-emerald-400 hover:bg-emerald-500/30 hover:text-emerald-200 focus-ring sm:mx-0 sm:my-1 sm:ml-0 sm:min-h-6 sm:justify-start sm:rounded sm:border-0 sm:bg-transparent sm:px-1.5 sm:py-1 sm:hover:bg-emerald-500/10 sm:hover:text-emerald-400"
+                            // mobile: `-mx-1` widens the tap target, but the
+                            // wrapper's `ml-auto` resolves against the margin
+                            // box, so the visible box landed 4px past the row's
+                            // right edge. `-ml-1` keeps the extra left hit area,
+                            // `mr-0` keeps the visible edge flush. From sm up the
+                            // link is inline again, so the original
+                            // `-mx-1 sm:mx-0` behaviour is restored.
+                            className="-ml-1 mr-0 -my-2 inline-flex min-h-8 shrink-0 items-center justify-center gap-1 rounded-md border border-emerald-500 bg-emerald-500/20 px-1.5 py-2 text-[11px] text-emerald-300 underline underline-offset-2 transition-colors hover:border-emerald-400 hover:bg-emerald-500/30 hover:text-emerald-200 focus-ring sm:mx-0 sm:my-1 sm:min-h-6 sm:justify-start sm:rounded sm:border-0 sm:bg-transparent sm:px-1.5 sm:py-1 sm:hover:bg-emerald-500/10 sm:hover:text-emerald-400"
                           >
                             <MapIcon className="h-4 w-4 sm:h-3 sm:w-3" strokeWidth={2} />
                             <span className="hidden sm:inline">Map</span>
                           </a>
                         </Tooltip>
                       )}
+
+                      {/*
+                        * Link button, shown when the notes contain an http(s)
+                        * URL - which the itinerary importer already produces,
+                        * storing `<note> · <listing url>`.
+                        *
+                        * Same construction as the Map link beside it, on
+                        * purpose: both are "go somewhere else" actions in the
+                        * same row, so they share the sage pill, the solid
+                        * emerald border (alpha borders measured unpredictably
+                        * against the card), the 32px mobile tap target and the
+                        * ml-auto right alignment. A second, differently-styled
+                        * button here would read as a different kind of thing.
+                        *
+                        * The label names the destination host ("Airbnb") rather
+                        * than saying "Link", because a list of bookings will
+                        * show several of these and identical captions tell the
+                        * user nothing.
+                        *
+                        * An anchor, not a button: it navigates, so middle-click,
+                        * cmd-click, "copy link" and long-press-to-open-in-app
+                        * come for free. `noopener noreferrer` on an external
+                        * target, and the accessible name includes the host.
+                        */}
+                      {linkHref && (
+                        <Tooltip label={`Open ${linkLabel} listing`}>
+                          <a
+                            href={linkHref}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={`Open ${linkLabel} listing`}
+                            title={`Open ${linkLabel} listing`}
+                            className="-ml-1 mr-0 -my-2 inline-flex min-h-8 shrink-0 items-center justify-center gap-1 rounded-md border border-emerald-500 bg-emerald-500/20 px-1.5 py-2 text-[11px] text-emerald-300 underline underline-offset-2 transition-colors hover:border-emerald-400 hover:bg-emerald-500/30 hover:text-emerald-200 focus-ring sm:mx-0 sm:my-1 sm:min-h-6 sm:justify-start sm:rounded sm:border-0 sm:bg-transparent sm:px-1.5 sm:py-1 sm:hover:bg-emerald-500/10 sm:hover:text-emerald-400"
+                          >
+                            <ExternalLink className="h-4 w-4 sm:h-3 sm:w-3" strokeWidth={2} />
+                            <span className="hidden sm:inline">{linkLabel}</span>
+                          </a>
+                        </Tooltip>
+                      )}
+                      </div>
                     </div>
                   )}
 
