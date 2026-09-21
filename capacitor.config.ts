@@ -30,7 +30,7 @@ import type { CapacitorConfig } from "@capacitor/cli";
  * deployed host is HTTPS and does not need it — see the ATS note in
  * ios/App/App/Info.plist.
  */
-const serverUrl = process.env.TRIP_PACKER_URL ?? "http://127.0.0.1:4000";
+const serverUrl = process.env.TRIP_PACKER_URL ?? "http://localhost:4000";
 
 const config: CapacitorConfig = {
   appId: "com.tylermorgan.tripplanner",
