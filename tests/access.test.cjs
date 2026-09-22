@@ -210,6 +210,151 @@ function makeState() {
     h.assert(!ids.includes("trip-bob-secret"), "Bob's unshared trip must stay hidden");
   });
 
+  /* ------------------------------------------------------------------ */
+  /* Server-side resolution: bare entity id, no caller-supplied claim     */
+  /* ------------------------------------------------------------------ */
+
+  await h.test("owningTripId resolves the owner without any claim", () => {
+    const s = makeState();
+    // The caller states nothing but the entity id. This is the primitive the
+    // update/delete guards are built on.
+    h.assertEqual(access.owningTripId(s, "item", "item-bob"), BOB_TRIP);
+    h.assertEqual(access.owningTripId(s, "category", "cat-bob"), BOB_TRIP);
+    h.assertEqual(access.owningTripId(s, "reservation", "res-bob"), BOB_TRIP);
+    h.assertEqual(access.owningTripId(s, "trip", BOB_TRIP), BOB_TRIP);
+  });
+
+  await h.test("owningTripId returns null for unknown or empty ids", () => {
+    const s = makeState();
+    h.assertEqual(access.owningTripId(s, "item", "does-not-exist"), null);
+    h.assertEqual(access.owningTripId(s, "item", ""), null);
+    h.assertEqual(access.owningTripId(s, "trip", "nope"), null);
+  });
+
+  await h.test("owningTripId resolves an item via its parent category", () => {
+    // Legacy shape: no tripId on the item, ownership only via categoryId.
+    const s = makeState();
+    delete s.items[1].tripId;
+    h.assertEqual(
+      access.owningTripId(s, "item", "item-bob"),
+      BOB_TRIP,
+      "must fall back to the parent category"
+    );
+  });
+
+  /*
+   * The confused-deputy attack this pair of functions exists to prevent.
+   *
+   * canWriteEntityOfTrip starts from a trip id the CALLER supplied. If it were
+   * used for updates, an attacker could pass their OWN trip id alongside a
+   * victim's item id, and the trip-level check would pass. Whether the request
+   * was refused would then depend on whether they also bothered to be
+   * consistent about the entity — a fragile place to put the only real check.
+   */
+  await h.test("canWriteEntityOfTrip is satisfied by own trip + foreign entity", () => {
+    const s = makeState();
+    // Alice's own trip, Bob's item id. The trip check passes; the entity check
+    // is the only thing refusing it.
+    h.assertEqual(
+      access.canWriteEntityOfTrip(s, ALICE, ALICE_TRIP, "item", "item-bob"),
+      false,
+      "entity/parent mismatch must be refused by the entity check"
+    );
+  });
+
+  await h.test("canMutateEntityById ignores the caller entirely", () => {
+    const s = makeState();
+    // No trip id is accepted as a parameter at all, so the attack above is not
+    // expressible: the trip is resolved from the entity.
+    h.assertEqual(
+      access.canMutateEntityById(s, ALICE, "item", "item-bob"),
+      false,
+      "Alice must not write Bob's item"
+    );
+    h.assertEqual(
+      access.canMutateEntityById(s, BOB, "item", "item-bob"),
+      true,
+      "Bob may write his own item"
+    );
+    h.assertEqual(
+      access.canMutateEntityById(s, ALICE, "item", "item-alice"),
+      true,
+      "Alice may write her own item"
+    );
+  });
+
+  await h.test("canMutateEntityById refuses unknown entities and bad identities", () => {
+    const s = makeState();
+    h.assertEqual(
+      access.canMutateEntityById(s, ALICE, "item", "no-such-item"),
+      false,
+      "a non-existent entity is a refusal, never a pass"
+    );
+    h.assertEqual(
+      access.canMutateEntityById(s, null, "item", "item-alice"),
+      false,
+      "null identity cannot write"
+    );
+    h.assertEqual(
+      access.canMutateEntityById(s, "", "item", "item-alice"),
+      false,
+      "empty-string identity cannot write"
+    );
+    h.assertEqual(
+      access.canMutateEntityById(s, ALICE, "item", ""),
+      false,
+      "empty entity id cannot write"
+    );
+  });
+
+  await h.test("a viewer may read but not mutate an entity by id", () => {
+    const s = makeState();
+    s.tripMembers = [
+      { id: "m1", tripId: BOB_TRIP, userId: ALICE, role: "viewer" },
+    ];
+    h.assertEqual(
+      access.canReadEntityById(s, ALICE, "item", "item-bob"),
+      true,
+      "viewer may read"
+    );
+    h.assertEqual(
+      access.canMutateEntityById(s, ALICE, "item", "item-bob"),
+      false,
+      "viewer must not write"
+    );
+  });
+
+  await h.test("an editor may mutate an entity by id on a shared trip", () => {
+    const s = makeState();
+    s.tripMembers = [
+      { id: "m2", tripId: BOB_TRIP, userId: ALICE, role: "editor" },
+    ];
+    h.assertEqual(
+      access.canMutateEntityById(s, ALICE, "item", "item-bob"),
+      true,
+      "editor may write on a shared trip"
+    );
+  });
+
+  await h.test("canReadEntityById refuses a foreign entity", () => {
+    const s = makeState();
+    h.assertEqual(
+      access.canReadEntityById(s, ALICE, "item", "item-bob"),
+      false,
+      "Alice must not read Bob's item when not a member"
+    );
+    h.assertEqual(
+      access.canReadEntityById(s, ALICE, "reservation", "res-bob"),
+      false,
+      "reservation too"
+    );
+    h.assertEqual(
+      access.canReadEntityById(s, null, "item", "item-alice"),
+      false,
+      "no identity, no read"
+    );
+  });
+
   h.summary();
 
 })();

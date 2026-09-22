@@ -125,25 +125,31 @@ export function assertCanWriteTrip(
 /* ------------------------------------------------------------------ */
 
 /**
- * Resolve an entity id to the trip that owns it.
+ * Which trip owns this entity — resolved WITHOUT a caller-supplied claim.
  *
- * Returns null when the entity does not exist OR does not belong to `tripId`.
- * Those two cases are deliberately conflated: distinguishing them would let a
- * caller probe which ids exist in other accounts' data.
+ * This is the server-side-resolution primitive. The route layer never passes a
+ * trip id for updates and deletes; it hands over a bare entity id and this
+ * function answers "whose is it?" from the database alone. That ordering is the
+ * whole point of the design: the caller cannot lie about the parent because the
+ * caller never states it.
+ *
+ * Returns null when the entity does not exist. Callers must treat null as a
+ * refusal, never as "no restriction".
  */
-export function resolveEntityTripId(
+export function owningTripId(
   state: AccessState,
   kind: EntityKind,
-  entityId: string,
-  tripId: string
+  entityId: string
 ): string | null {
+  if (typeof entityId !== "string" || entityId.length === 0) return null;
+
   if (kind === "trip") {
     return state.trips.some((t) => t.id === entityId) ? entityId : null;
   }
 
   if (kind === "category") {
     const cat = (state.categories ?? []).find((c) => c.id === entityId);
-    return cat && cat.tripId === tripId ? tripId : null;
+    return cat ? cat.tripId : null;
   }
 
   if (kind === "item") {
@@ -151,21 +157,41 @@ export function resolveEntityTripId(
     if (!item) return null;
     // Items carry a tripId directly in the normalised shape; fall back to the
     // parent category when the field is absent so both shapes are covered.
-    const owning = item.tripId ?? owningTripIdViaCategory(state, item.categoryId);
-    return owning === tripId ? tripId : null;
+    return item.tripId ?? owningTripIdViaCategory(state, item.categoryId);
   }
 
   if (kind === "task") {
     const task = (state.tasks ?? []).find((t) => t.id === entityId);
-    return task && task.tripId === tripId ? tripId : null;
+    return task ? task.tripId : null;
   }
 
   if (kind === "reservation") {
     const res = (state.reservations ?? []).find((r) => r.id === entityId);
-    return res && res.tripId === tripId ? tripId : null;
+    return res ? res.tripId : null;
   }
 
   return null;
+}
+
+/**
+ * Resolve an entity id to the trip that owns it, confirming a claimed trip id.
+ *
+ * Returns null when the entity does not exist OR does not belong to `tripId`.
+ * Those two cases are deliberately conflated: distinguishing them would let a
+ * caller probe which ids exist in other accounts' data.
+ *
+ * Used for CREATE operations, where the parent trip legitimately arrives in the
+ * payload because the entity does not exist yet. For updates and deletes use
+ * `owningTripId`, which does not trust a claim.
+ */
+export function resolveEntityTripId(
+  state: AccessState,
+  kind: EntityKind,
+  entityId: string,
+  tripId: string
+): string | null {
+  const owning = owningTripId(state, kind, entityId);
+  return owning !== null && owning === tripId ? tripId : null;
 }
 
 function owningTripIdViaCategory(
@@ -195,6 +221,63 @@ export function canWriteEntityOfTrip(
 ): boolean {
   if (!assertCanWriteTrip(state, userId, tripId)) return false;
   return resolveEntityTripId(state, kind, entityId, tripId) !== null;
+}
+
+/**
+ * Whether a user may write an entity identified by a BARE id, with the owning
+ * trip resolved server-side.
+ *
+ * This is the guard for update and delete operations. The distinction from
+ * `canWriteEntityOfTrip` is the whole security story:
+ *
+ *   canWriteEntityOfTrip(state, u, tripId, kind, id)
+ *       "may you write this trip, and does this entity belong to it?"
+ *       -- starts from a trip id the CALLER supplied.
+ *
+ *   canMutateEntityById(state, u, kind, id)
+ *       "whose is this entity, and may you write it?"
+ *       -- starts from the entity and trusts nothing from the caller.
+ *
+ * The first is only safe when the parent genuinely must come from the client,
+ * i.e. creates. Using it for updates reintroduces the confused-deputy bug where
+ * a caller pairs their own trip id with someone else's entity id: the trip check
+ * passes, and whether the entity check passes depends on whether the caller
+ * bothered to be consistent. This function removes the caller's input entirely.
+ *
+ * A null resolution means the entity does not exist, which is a refusal.
+ */
+export function canMutateEntityById(
+  state: AccessState,
+  userId: string | null | undefined,
+  kind: EntityKind,
+  entityId: string
+): boolean {
+  if (!isRealUserId(userId)) return false;
+
+  const tripId = owningTripId(state, kind, entityId);
+  if (tripId === null) return false;
+
+  return assertCanWriteTrip(state, userId, tripId);
+}
+
+/**
+ * Whether a user may read an entity identified by a bare id.
+ *
+ * The read-side counterpart to `canMutateEntityById`, for the same reason: a
+ * bare id must be resolved rather than trusted.
+ */
+export function canReadEntityById(
+  state: AccessState,
+  userId: string | null | undefined,
+  kind: EntityKind,
+  entityId: string
+): boolean {
+  if (!isRealUserId(userId)) return false;
+
+  const tripId = owningTripId(state, kind, entityId);
+  if (tripId === null) return false;
+
+  return canReadTrip(state, userId, tripId);
 }
 
 /* ------------------------------------------------------------------ */
