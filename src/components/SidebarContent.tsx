@@ -65,33 +65,6 @@ function UserAvatar({ user, size = "md" }: { user: User; size?: "sm" | "md" | "l
 }
 
 /**
- * Sidebar entry that opens the create-account dialog.
- *
- * Same square icon-button shape as SignInButton and ProfileButton so the footer
- * row stays visually even. `data-keep-drawer-open` IS set, for the same reason
- * AboutButton needs it: MobileSidebar closes on any button click, and since the
- * dialog renders inside the drawer body, that close would unmount the dialog in
- * the same tick and it would flash and disappear on a phone.
- *
- * Only rendered for an owner (see SidebarBody). That is presentation: the
- * permission lives in /api/accounts, which refuses any non-owner regardless of
- * what the client chooses to draw.
- */
-function CreateAccountButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      data-keep-drawer-open
-      title="Create an account for someone else"
-      aria-label="Create an account"
-      className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200 focus-ring"
-    >
-      <UserPlus className="h-4 w-4" />
-    </button>
-  );
-}
-
-/**
  * Sidebar entry that ends the session.
  *
  * Same square icon-button shape as SignInButton and ProfileButton so the footer
@@ -193,6 +166,12 @@ function UserSwitcher() {
   const [editName, setEditName] = useState("");
   const [editColor, setEditColor] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  /*
+   * The create-account dialog belongs to THIS component rather than SidebarBody
+   * because the Accounts section is rendered here. SidebarBody has its own
+   * footer entry point and its own copy of the dialog.
+   */
+  const [createOpen, setCreateOpen] = useState(false);
 
   if (!activeUser) return null;
 
@@ -459,28 +438,48 @@ function UserSwitcher() {
 
         {isOwner ? (
           /*
-           * There is deliberately NO in-app "add account" button. `user.add`
-           * inserts a profile row with no credentials (see
-           * api/mutate/route.ts, case "user.add"), so an account created that
-           * way could never sign in — a button labelled "Add account" would lie
-           * about what it does. Real logins are minted on the server by
-           * scripts/create-account.cjs (`npm run create-account`), so the UI
-           * states that instead of offering a control that cannot work. Not a
-           * button: nothing to tap, nothing to trick the drawer into closing.
+           * An owner gets a real control here, not a note. This paragraph used
+           * to say accounts could only be minted on the server with
+           * `npm run create-account`, which was true when `user.add` was the
+           * only path and it inserts a profile row with no credentials. The
+           * owner-gated POST /api/accounts changes that: it hashes a password
+           * server-side, so an in-app button now does exactly what it says.
+           *
+           * The server enforces this independently — a non-owner posting to
+           * /api/accounts is refused — so this branch is a convenience, not the
+           * security boundary.
            */
-          <p className="mt-1 rounded-lg border border-dashed border-zinc-700/60 px-2 py-1.5 text-[11px] leading-relaxed text-zinc-600">
-            New sign-in accounts are created on the server with{" "}
-            <code className="rounded bg-white/5 px-1 py-0.5 text-[10px] text-zinc-400">
-              npm run create-account
-            </code>
-            .
-          </p>
+          <button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            data-keep-drawer-open
+            title="Create a sign-in account"
+            className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-zinc-700/60 px-2 py-1.5 text-[11px] text-zinc-400 transition-colors hover:border-zinc-600 hover:bg-white/5 hover:text-zinc-200 focus-ring"
+          >
+            <UserPlus className="h-3 w-3" aria-hidden="true" />
+            Create account
+          </button>
         ) : (
           <p className="mt-1 px-2 py-1.5 text-[11px] text-zinc-600">
             Only the owner can manage accounts.
           </p>
         )}
       </div>
+
+      <CreateAccountDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={(user) => {
+          /*
+           * The account list is driven by the shared users state, which the
+           * dialog refreshes, so there is nothing to append here. Closing is the
+           * whole job: leaving the dialog open over a list that has already
+           * changed reads as a failure.
+           */
+          setCreateOpen(false);
+          void user;
+        }}
+      />
 
       {/* ---------------------------------------------------------- */}
       {/* Companions                                                  */}
@@ -1039,7 +1038,6 @@ export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
   const { activeUser, hydrated } = useApp();
   const [aboutOpen, setAboutOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
-  const [createOpen, setCreateOpen] = useState(false);
 
   /*
    * "Signed in" here is the SESSION (the authenticated user this browser's
@@ -1099,16 +1097,6 @@ export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
             control the user can only be confused by. It stays for the case
             where the shell rendered but the client has no session data. */}
         {!signedIn && <SignInButton onClick={() => setLoginOpen(true)} />}
-        {/*
-          Owner-only. The gate is `hydrated` AND the acting user being an owner,
-          which mirrors the server's own check rather than replacing it: a
-          non-owner who unhides this button still gets a 403 from /api/accounts.
-          Hydration is required so the server does not paint an admin control
-          into the page for a non-owner and only remove it on hydrate.
-        */}
-        {hydrated && activeUser?.isOwner ? (
-          <CreateAccountButton onClick={() => setCreateOpen(true)} />
-        ) : null}
         <ThemeToggle />
         <ProfileButton />
         <SignOutButton />
@@ -1116,16 +1104,6 @@ export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
       </div>
 
       <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
-      <CreateAccountDialog
-        open={createOpen}
-        onOpenChange={setCreateOpen}
-        onCreated={(user) => {
-          toast.add({
-            title: `Account created for ${user.name}`,
-            type: "success",
-          });
-        }}
-      />
       <LoginDialog
         open={loginOpen}
         onOpenChange={setLoginOpen}
