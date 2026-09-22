@@ -15,7 +15,7 @@
  * there is no other invalidation hook.
  */
 
-const VERSION = "v4";
+const VERSION = "v5";
 const SHELL_CACHE = `trip-packer-shell-${VERSION}`;
 const API_CACHE = `trip-packer-api-${VERSION}`;
 const TILE_CACHE = `trip-packer-tiles-${VERSION}`;
@@ -354,7 +354,22 @@ self.addEventListener("fetch", (event) => {
            */
           const exact = await cache.match(new URL(request.url).pathname);
           if (exact) return exact;
-          const shell = (await cache.match("/")) || (await cache.match("/offline"));
+          /*
+           * Fall back to the OFFLINE NOTICE, not the landing page.
+           *
+           * This used to try "/" first, which meant an uncached trip deep link
+           * opened in airplane mode rendered the marketing landing page —
+           * complete with "Sign in" buttons that cannot work and no hint that
+           * anything was wrong. The user's takeaway was that the app had
+           * forgotten their trip, not that it was offline.
+           *
+           * "/" is still precached (it is the app shell and other routes need
+           * it) but it must never be the answer to "I cannot reach the network".
+           * /offline exists precisely to say so, and is now reachable.
+           */
+          const offline = await cache.match("/offline");
+          if (offline) return offline;
+          const shell = await cache.match("/");
           if (shell) return shell;
           throw new Error("offline");
         }
@@ -410,10 +425,43 @@ self.addEventListener("message", (event) => {
 
         const cache = await caches.open(SHELL_CACHE);
         const res = await fetch(new Request(url.pathname, { cache: "reload" }));
-        if (res.ok) await cache.put(new Request(url.pathname), res);
+        if (res.ok)
+          await cache.put(
+            new Request(url.pathname),
+            await stampSavedAt(res)
+          );
       } catch {
         // Offline, or the page could not be fetched. Nothing to do.
       }
     })()
   );
 });
+
+/**
+ * Tag a cached response with the moment it was stored.
+ *
+ * This is what makes a stale itinerary visibly stale. Offline, a cached trip
+ * page is byte-identical to a live one, so a user reading a departure time has
+ * no way to know whether it is current or three days old — and on a travel app
+ * a confidently wrong departure time is worse than an obvious error.
+ *
+ * Stored as a header rather than rewriting the HTML: the body is cached as the
+ * server sent it, and a header survives without an HTML parser in the worker.
+ * A response with immutable headers (an opaque or redirected response) cannot
+ * be re-wrapped, so the failure is swallowed and the page is cached unstamped —
+ * losing the timestamp must never cost the user the page itself.
+ */
+async function stampSavedAt(res) {
+  try {
+    const headers = new Headers(res.headers);
+    headers.set("X-Trip-Saved-At", new Date().toISOString());
+    const body = await res.blob();
+    return new Response(body, {
+      status: res.status,
+      statusText: res.statusText,
+      headers,
+    });
+  } catch {
+    return res;
+  }
+}
