@@ -194,13 +194,134 @@
   --surface-3: #383838; /* popovers, hover states */
 }
 
+/*
+ * Light theme.
+ *
+ * Structure, and why it looks like this.
+ *
+ * The app is dark-first: every colour decision was made against a dark page, and
+ * two things follow from that. First, the chrome that "lifts" a surface on dark
+ * — a white top-highlight, a heavy black drop shadow, a white 6%-alpha overlay —
+ * becomes invisible or wrong on light, so those have to be re-pointed rather
+ * than merely inverted. Second, `:root` must stay the DARK values: dark is the
+ * unmarked default, `.dark` is applied by the bootstrap script for anyone who
+ * has not chosen light. If the light ramp lived on `:root`, then a user with JS
+ * disabled (or any pre-hydration paint) would get light, and the existing
+ * `dark:` rules in the shadcn primitives — which all expect `.dark` to be
+ * present — would still be dormant. So: dark tokens on `:root` AND on `.dark`;
+ * light overrides under `.light`.
+ *
+ * Only the tokens the app actually consumes are redefined. The zinc and emerald
+ * scales are deliberately NOT touched: they are already re-pointed for the dark
+ * design, and inverting them would flip every semantic use (a "bright" tone
+ * meaning "important" would become dark). Light-theme legibility is instead
+ * handled at the surface/text tokens below, plus the explicit `.light` fixes
+ * further down for the handful of literal whites in components.
+ */
+.light {
+  /* Surfaces invert in *role*, not in value. On dark, higher number = lighter =
+     closer to the viewer. On light, a raised card is still lighter than the page
+     but the page itself is the lightest thing, so the ladder runs the other way:
+     page is near-white, and each step down gets slightly greyer. Getting this
+     backwards is what makes a light theme look like a dark theme with the
+     colours flipped — everything reverses its depth cues and the layout
+     flattens. */
+  --surface-0: #fbfbfa; /* page background        */
+  --surface-1: #ffffff; /* cards, sidebar panels  */
+  --surface-2: #f4f4f3; /* nested cards, inputs   */
+  --surface-3: #ebebe9; /* popovers, hover states */
+
+  --color-background: #fbfbfa;
+  --color-foreground: #18181b;
+  --color-card: #ffffff;
+  --color-card-foreground: #18181b;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #18181b;
+  /* The sage primary is kept. It was chosen for its contrast against dark text
+     and it still carries white text at 6.5:1, so it works unchanged as a light
+     theme CTA — no second accent colour to maintain. */
+  --color-primary: #406655;
+  --color-primary-foreground: #f8faf9;
+  --color-secondary: #f4f4f3;
+  --color-secondary-foreground: #18181b;
+  --color-muted: #f4f4f3;
+  --color-muted-foreground: #6b6b70;
+  --color-accent: #f0f0ee;
+  --color-accent-foreground: #18181b;
+  --color-destructive: #dc2626;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #e4e4e2;
+  --color-input: #e4e4e2;
+  /* Ring darkened against a light page: the sage #6ba991 that reads clearly on
+     near-black is far too pale to see as a focus outline on white. */
+  --color-ring: #406655;
+  --color-sidebar: #ffffff;
+  --color-sidebar-foreground: #18181b;
+  --color-sidebar-primary: #406655;
+  --color-sidebar-primary-foreground: #f8faf9;
+  --color-sidebar-accent: #f0f0ee;
+  --color-sidebar-accent-foreground: #18181b;
+  --color-sidebar-border: #e4e4e2;
+  --color-sidebar-ring: #406655;
+
+  color-scheme: light;
+}
+
+/*
+ * Theme-aware elevation.
+ *
+ * Both the highlight and the shadow are inverted, not scaled. On dark, a raised
+ * card is sold by a faint white line along its top edge plus a deep black
+ * shadow. On light, a white highlight on a white card is a no-op, and the same
+ * black shadow reads as a grubby smear — so the highlight becomes a subtle
+ * darkening of the top edge and the shadow becomes much shallower, which is
+ * what "elevated" looks like on a light UI. The values are defined as tokens so
+ * the two `surface-*` utilities below stay single-source.
+ */
+:root {
+  --surface-highlight: rgb(255 255 255 / 0.055);
+  --surface-shadow: rgb(0 0 0 / 0.4);
+  --surface-shadow-soft: rgb(0 0 0 / 0.3);
+  --surface-stat-tint: rgb(255 255 255 / 0.035);
+  --hover-overlay: rgb(255 255 255 / 0.05);
+  --border-overlay: rgb(255 255 255 / 0.08);
+  --border-overlay-strong: rgb(255 255 255 / 0.1);
+  /* Chrome hexes used by the Leaflet overrides below. */
+  --map-control-fg: #a8a8a8;
+  --map-control-fg-disabled: #575757;
+  --map-popup-fg: #e8e8e8;
+  --map-attribution-bg: rgb(20 20 20 / 0.82);
+  --map-scrollbar-thumb: #262626;
+  --map-scrollbar-thumb-hover: #454545;
+}
+
+.light {
+  --surface-highlight: rgb(0 0 0 / 0.04);
+  --surface-shadow: rgb(0 0 0 / 0.08);
+  --surface-shadow-soft: rgb(0 0 0 / 0.06);
+  --surface-stat-tint: rgb(0 0 0 / 0.02);
+  /* Overlays drawn *over* a surface (hover fills, hairline borders). These were
+     white-on-dark; on light they must be black-on-light or they simply vanish. */
+  --hover-overlay: rgb(0 0 0 / 0.045);
+  --border-overlay: rgb(0 0 0 / 0.09);
+  --border-overlay-strong: rgb(0 0 0 / 0.12);
+  --map-control-fg: #3f3f46;
+  --map-control-fg-disabled: #b4b4b8;
+  --map-popup-fg: #27272a;
+  --map-attribution-bg: rgb(255 255 255 / 0.85);
+  --map-scrollbar-thumb: #d4d4d2;
+  --map-scrollbar-thumb-hover: #b8b8b5;
+}
+
 @layer utilities {
-  /* Raised surface: fill + hairline top highlight + soft ambient shadow. */
+  /* Raised surface: fill + hairline top highlight + soft ambient shadow.
+     Highlight and shadow come from the theme tokens above, so this one rule
+     produces the correct elevation cue on both themes. */
   .surface-raised {
     background-color: var(--surface-1);
     box-shadow:
-      inset 0 1px 0 0 rgb(255 255 255 / 0.055),
-      0 1px 2px 0 rgb(0 0 0 / 0.4);
+      inset 0 1px 0 0 var(--surface-highlight),
+      0 1px 2px 0 var(--surface-shadow);
   }
 
   /* Nested surface: sits inside a raised surface, so it stays flat. */
@@ -217,13 +338,13 @@
   .surface-stat {
     background-image: linear-gradient(
       to bottom,
-      rgb(255 255 255 / 0.035),
-      rgb(255 255 255 / 0)
+      var(--surface-stat-tint),
+      transparent
     );
     background-color: var(--surface-2);
     box-shadow:
-      inset 0 1px 0 0 rgb(255 255 255 / 0.06),
-      0 1px 2px 0 rgb(0 0 0 / 0.3);
+      inset 0 1px 0 0 var(--surface-highlight),
+      0 1px 2px 0 var(--surface-shadow-soft);
   }
 
   /* Focus ring that reads clearly on dark surfaces without a heavy glow. */
@@ -249,11 +370,11 @@
     background: transparent;
   }
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    background: #262626;
+    background: var(--map-scrollbar-thumb);
     border-radius: 4px;
   }
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    background: #454545;
+    background: var(--map-scrollbar-thumb-hover);
   }
 }
 
@@ -303,8 +424,8 @@
 
 .leaflet-container .leaflet-control-zoom a {
   background-color: var(--surface-2);
-  color: #a8a8a8;
-  border-color: rgba(255, 255, 255, 0.1);
+  color: var(--map-control-fg);
+  border-color: var(--border-overlay-strong);
 }
 
 .leaflet-container .leaflet-control-zoom a:hover,
@@ -315,11 +436,11 @@
 
 .leaflet-container .leaflet-control-zoom a.leaflet-disabled {
   background-color: var(--surface-1);
-  color: #575757;
+  color: var(--map-control-fg-disabled);
 }
 
 .leaflet-container.leaflet-container .leaflet-control-attribution {
-  background: rgba(20, 20, 20, 0.82);
+  background: var(--map-attribution-bg);
   color: #7c7c7c;
   font-size: 10px;
   padding: 1px 6px;
@@ -350,10 +471,10 @@
    once per side) are re-themed to the surface palette. */
 .leaflet-container .leaflet-popup-content-wrapper {
   background: var(--surface-2);
-  color: #e8e8e8;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--map-popup-fg);
+  border: 1px solid var(--border-overlay);
   border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 8px 24px var(--surface-shadow);
 }
 
 .leaflet-container .leaflet-popup-content {
@@ -362,7 +483,7 @@
 
 .leaflet-container .leaflet-popup-tip {
   background: var(--surface-2);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-overlay);
   box-shadow: none;
 }
 
@@ -371,6 +492,345 @@
 }
 
 .leaflet-container a.leaflet-popup-close-button:hover {
-  color: #e8e8e8;
+  color: var(--map-popup-fg);
 }
+
+/* ==========================================================================
+   Printable itinerary
+   ==========================================================================
+
+   The print route is the one light surface in the app. These rules are written
+   with literal greys rather than the theme tokens on purpose: a sheet of paper
+   has no theme, and a token that resolves to `#09090b` under the dark theme
+   would flood the page with toner (or, if the browser strips backgrounds, leave
+   near-black text on white at the edge of legibility).
+
+   `.print-toolbar` is hidden for print, so the on-screen Back/Print controls
+   never reach paper.
+   ========================================================================== */
+
+.print-sheet {
+  max-width: 52rem;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 3rem;
+  background: #ffffff;
+  color: #111111;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.print-header {
+  border-bottom: 2px solid #111111;
+  padding-bottom: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.print-header h1 {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0 0 0.35rem;
+}
+
+.print-header-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  color: #555555;
+  font-size: 11px;
+}
+
+.print-section {
+  margin-bottom: 1.5rem;
+}
+
+.print-section h2 {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid #cccccc;
+  padding-bottom: 0.25rem;
+  margin: 0 0 0.6rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.print-count {
+  font-size: 10px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #666666;
+}
+
+.print-day {
+  margin-bottom: 0.9rem;
+}
+
+.print-day-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 0 0 0.3rem;
+}
+
+.print-day-date {
+  color: #111111;
+}
+
+.print-day-dow {
+  color: #777777;
+  font-weight: 400;
+  font-size: 11px;
+}
+
+.print-item {
+  border-left: 2px solid #dddddd;
+  padding: 0.3rem 0 0.3rem 0.6rem;
+  margin-bottom: 0.35rem;
+}
+
+.print-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.print-item-title {
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.print-item-type {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #666666;
+  border: 1px solid #dddddd;
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
+.print-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.75rem;
+  color: #444444;
+  font-size: 11px;
+}
+
+.print-item-conf {
+  font-size: 11px;
+  margin-top: 0.15rem;
+}
+
+.print-item-notes {
+  font-size: 11px;
+  color: #555555;
+  font-style: italic;
+  margin-top: 0.15rem;
+  white-space: pre-wrap;
+}
+
+.print-checklist {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.print-checklist li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.12rem 0;
+  font-size: 11.5px;
+  /* A checklist line never splits across pages. */
+  break-inside: avoid;
+}
+
+.print-box {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  flex: 0 0 11px;
+  border: 1px solid #888888;
+  border-radius: 2px;
+  font-size: 9px;
+  line-height: 11px;
+  text-align: center;
+  /* The tick appears in the box when the item is done. */
+  color: #111111;
+}
+
+.print-done {
+  text-decoration: line-through;
+  color: #999999;
+}
+
+.print-due {
+  margin-left: auto;
+  color: #777777;
+  font-size: 10px;
+}
+
+.print-pack-group {
+  margin-bottom: 0.6rem;
+}
+
+.print-pack-head {
+  font-size: 11.5px;
+  font-weight: 600;
+  margin: 0 0 0.2rem;
+  color: #333333;
+}
+
+/* Packing is long; two columns keeps it to a page. */
+.print-cols {
+  column-count: 2;
+  column-gap: 1.5rem;
+}
+
+.print-footer {
+  margin-top: 2rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #dddddd;
+  color: #888888;
+  font-size: 10px;
+}
+
+.print-empty {
+  color: #666666;
+  font-style: italic;
+  font-size: 11.5px;
+}
+
+/* On-screen toolbar: not part of the document. */
+.print-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: 52rem;
+  margin: 0 auto;
+  padding: 0.6rem 1.5rem;
+  background: #f4f4f5;
+  border-bottom: 1px solid #e4e4e7;
+}
+
+.print-toolbar-title {
+  flex: 1;
+  font-size: 12px;
+  color: #52525b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.print-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 32px;
+  padding: 0 0.7rem;
+  border: 1px solid #d4d4d8;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #18181b;
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.print-toolbar-btn:hover {
+  background: #fafafa;
+}
+
+.print-toolbar-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.print-toolbar-primary {
+  background: #406655;
+  border-color: #406655;
+  color: #ffffff;
+}
+
+.print-toolbar-primary:hover {
+  background: #35564a;
+}
+
+/* Prevent an entry being orphaned from its day heading. */
+.print-avoid-break {
+  break-inside: avoid;
+}
+
+.print-item,
+.print-day-head {
+  break-inside: avoid;
+}
+
+@media print {
+  /*
+   * Hide everything that is app chrome rather than document. `print:hidden` on
+   * individual elements is avoided because this route shares the global
+   * stylesheet with the rest of the app, which does have a sidebar.
+   */
+  .print-toolbar {
+    display: none !important;
+  }
+
+  /*
+   * Force the page to light regardless of the viewer's chosen theme.
+   *
+   * The app sets `.dark` on <html> for dark-theme users, and the root layout
+   * paints a dark background from it. Left alone, a dark-theme user would print
+   * a black page. `color-scheme: light` also stops the browser's own UI (form
+   * controls, scrollbars) from rendering dark in the printed output.
+   */
+  html,
+  html.dark {
+    background: #ffffff !important;
+    color-scheme: light !important;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #111111 !important;
+  }
+
+  /*
+   * Print at a real page size rather than the viewport width, and give the
+   * printer a sensible margin. Only A4 is declared: browsers ignore unknown or
+   * multiple size keywords inconsistently, and listing both would risk the
+   * printer falling back to its own default. A4 is the safer single choice for
+   * a travel document, which is typically printed abroad.
+   */
+  @page {
+    size: A4 portrait;
+    margin: 14mm 12mm;
+  }
+
+  .print-sheet {
+    max-width: none;
+    /* @page owns the margin now; padding would double it up. */
+    padding: 0;
+    font-size: 11pt;
+  }
+
+  a[href]::after {
+    /* Never expose URL text after link labels on paper; the itinerary is a
+       document, not a bibliography. */
+    content: none !important;
+  }
+}
+
 

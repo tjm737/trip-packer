@@ -11,7 +11,24 @@ import {
 import { Button } from "@/components/ui/button";
 import { apiUrl } from "@/lib/apiUrl";
 import { ApiError } from "@/lib/storage";
-import { AlertCircle, Check, Copy, Loader2, Link2, Plus, Share2, Trash2 } from "lucide-react";
+import {
+  SHAREABLE_SECTIONS,
+  SHARE_SECTION_LABELS,
+  normalizeVisibility,
+  type ShareSection,
+  type ShareVisibility,
+} from "@/lib/shareVisibility";
+import {
+  AlertCircle,
+  Check,
+  Copy,
+  EyeOff,
+  Loader2,
+  Link2,
+  Plus,
+  Share2,
+  Trash2,
+} from "lucide-react";
 
 /*
  * Share-link manager for one trip.
@@ -34,8 +51,12 @@ import { AlertCircle, Check, Copy, Loader2, Link2, Plus, Share2, Trash2 } from "
  * answers 403 and we show that message instead of a broken button.
  */
 
-/** A link row as returned by tx.listShareTokens — `token` + ISO `createdAt`. */
-type ShareToken = { token: string; createdAt: string };
+/**
+ * A link row as returned by tx.listShareTokens — `token`, ISO `createdAt`, and
+ * the parsed `visibility` record. Always normalised server-side, so the toggles
+ * below never have to cope with a null.
+ */
+type ShareToken = { token: string; createdAt: string; visibility: ShareVisibility };
 
 /** The route's error body, narrowed at the boundary. */
 type ApiErrorBody = { error?: string };
@@ -92,6 +113,8 @@ export function ShareDialog({
   const [revoking, setRevoking] = useState<string | null>(null);
   /** Token just copied, driving the Copy -> Check swap. */
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  /** "token:section" currently saving, so only that toggle shows a pending state. */
+  const [savingSection, setSavingSection] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   /**
@@ -199,6 +222,58 @@ export function ShareDialog({
       );
     } finally {
       setRevoking(null);
+    }
+  }
+
+  /**
+   * Change one section on one link.
+   *
+   * Optimistic: the checkbox flips immediately because waiting on a round trip
+   * per tick feels broken. The previous record is kept so a failed save can put
+   * the toggle back — a checkbox that stays ticked after the server rejected the
+   * change is the one outcome worth extra code to avoid, since the owner would
+   * otherwise believe a section is hidden when it is not.
+   *
+   * The request is not debounced. Toggling four sections quickly sends four
+   * small PATCHes, each of which is idempotent and sets the whole visibility
+   * record, so the last one to land wins with a complete, correct value. A
+   * debounce would add a window where the dialog and the server disagree.
+   */
+  async function setSection(token: string, section: ShareSection, next: boolean) {
+    const before = tokens.find((t) => t.token === token);
+    if (!before) return;
+
+    const updated = normalizeVisibility({ ...before.visibility, [section]: next });
+    setTokens((prev) =>
+      prev.map((t) => (t.token === token ? { ...t, visibility: updated } : t))
+    );
+    setSavingSection(`${token}:${section}`);
+    setError(null);
+
+    try {
+      const res = await fetch(apiUrl("/api/share"), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tripId, token, visibility: updated }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as ApiErrorBody;
+        throw new ApiError(
+          body.error ?? `Could not update what this link shows (${res.status})`,
+          res.status
+        );
+      }
+      const body = (await res.json()) as { tokens: ShareToken[] };
+      setTokens(body.tokens ?? []);
+    } catch (err) {
+      // Roll back to what the server still holds, so the dialog never shows a
+      // setting that was not saved.
+      setTokens((prev) => prev.map((t) => (t.token === token ? before : t)));
+      setError(
+        err instanceof ApiError ? err.message : "Could not reach the server to update the link."
+      );
+    } finally {
+      setSavingSection(null);
     }
   }
 
@@ -376,7 +451,7 @@ export function ShareDialog({
                               {url || `/share/${t.token}`}
                             </span>
                           </div>
-                          <div className="mt-2 flex items-center justify-between gap-2">
+                          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                             <span className="truncate text-[10px] text-zinc-500">
                               {formatCreated(t.createdAt)
                                 ? `Created ${formatCreated(t.createdAt)}`
@@ -418,6 +493,64 @@ export function ShareDialog({
                                 <span>Revoke</span>
                               </button>
                             </div>
+                          </div>
+
+                          {/*
+                            Per-link visibility. Each link can show a different
+                            subset, which is the reason the setting lives on the
+                            token row: a companion gets the packing list, a
+                            housesitter gets only the dates.
+                          */}
+                          <div className="mt-2.5 border-t border-white/8 pt-2.5">
+                            <h4 className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500">
+                              <EyeOff className="h-3 w-3" />
+                              This link shows
+                            </h4>
+                            <ul className="space-y-1">
+                              {SHAREABLE_SECTIONS.map((section) => {
+                                const on = t.visibility[section] !== false;
+                                const isSaving = savingSection === `${t.token}:${section}`;
+                                return (
+                                  <li key={section}>
+                                    <label
+                                      title={
+                                        on
+                                          ? `Hide the ${SHARE_SECTION_LABELS[section].toLowerCase()} from this link`
+                                          : `Show the ${SHARE_SECTION_LABELS[section].toLowerCase()} on this link`
+                                      }
+                                      className="flex min-h-[32px] cursor-pointer items-center gap-2 rounded px-1 text-[11px] text-zinc-300 transition-colors hover:bg-white/5"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={on}
+                                        disabled={isSaving}
+                                        onChange={(e) =>
+                                          void setSection(t.token, section, e.target.checked)
+                                        }
+                                        className="h-3.5 w-3.5 flex-shrink-0 accent-emerald-500 focus-ring disabled:opacity-50"
+                                      />
+                                      <span className={on ? "" : "text-zinc-500"}>
+                                        {SHARE_SECTION_LABELS[section]}
+                                      </span>
+                                      {isSaving && (
+                                        <Loader2 className="h-3 w-3 animate-spin text-zinc-500" />
+                                      )}
+                                    </label>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                            {/*
+                              Stated because it is not guessable from the
+                              checkboxes: the itinerary itself has no toggle, and
+                              the confirmation-number toggle blanks a field
+                              within each booking rather than removing bookings.
+                            */}
+                            <p className="mt-1.5 text-[10px] leading-relaxed text-zinc-500">
+                              The itinerary itself always shows. Booking
+                              confirmation numbers can be added or hidden
+                              separately.
+                            </p>
                           </div>
                         </li>
                       );

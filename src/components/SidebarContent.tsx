@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AboutButton, AboutDialog } from "@/components/AboutDialog";
 import { SignInButton, LoginDialog } from "@/components/LoginDialog";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { toast } from "@/components/ui/toast";
 import {
   Plus,
@@ -1041,6 +1042,7 @@ export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
           New Trip
         </Button>
         <SignInButton onClick={() => setLoginOpen(true)} />
+        <ThemeToggle />
         <ProfileButton />
         <SignOutButton />
         <AboutButton onClick={() => setAboutOpen(true)} />

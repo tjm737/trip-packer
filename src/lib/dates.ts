@@ -137,3 +137,26 @@ export function tripDurationDays(startDate: string | null | undefined, endDate: 
   if (!start || !end) return null;
   return Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1);
 }
+
+/**
+ * Number of nights between two dates: a check-in on the 3rd and a check-out on
+ * the 8th is five nights.
+ *
+ * Distinct from `tripDurationDays`, which counts days inclusively and floors at
+ * one — a trip of a single day is one day but zero nights. Conflating them would
+ * print "1 night" on a day trip and be off by one on every stay, which is the
+ * kind of error someone notices at a hotel desk at 11pm.
+ *
+ * Returns 0 when the dates are missing, unparseable, or the same day, so
+ * callers can treat 0 as "do not show a night count".
+ */
+export function nightsBetween(
+  startDate: string | null | undefined,
+  endDate: string | null | undefined
+): number {
+  const start = parseDateOnly(startDate ?? "");
+  const end = parseDateOnly(endDate ?? "");
+  if (!start || !end) return 0;
+  const diff = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+  return diff > 0 ? diff : 0;
+}

@@ -1,3 +1,11 @@
+/*
+ * Type-only import, so this shared data-shape module does not gain a runtime
+ * dependency on the theme helpers (which touch `document` and are meant for the
+ * browser). `import type` is erased at compile time, so the shape stays pure
+ * while both sides still agree on what a valid theme is.
+ */
+import type { Theme } from "./theme";
+
 export type User = {
   id: string;
   name: string;
@@ -17,6 +25,13 @@ export type User = {
    * that nothing enforces.
    */
   isOwner?: boolean;
+  /*
+   * Display preference. Required (not optional) because `toUser` always resolves
+   * it — a NULL column becomes the default — so every client-side `User` carries
+   * a usable value and no consumer needs a fallback of its own. Optional here
+   * would push the same `?? "dark"` into every component that reads it.
+   */
+  theme: Theme;
 };
 
 export type Trip = {
@@ -143,7 +158,16 @@ export type Reservation = {
    *  splitting into amount+currency buys nothing at this stage. */
   cost: string;
   notes: string;
+  /** Drag position. Only meaningful when `orderManual` is non-null. */
   order: number;
+  /**
+   * Whether the user has ever dragged this trip's itinerary.
+   *
+   * `null` means they have not, so the map and list sequence by date and treat
+   * `order` as meaningless. A number means they have, and `order` wins — which
+   * is what preserves a deliberate drag across dates.
+   */
+  orderManual: number | null;
   createdAt: string;
 };
 

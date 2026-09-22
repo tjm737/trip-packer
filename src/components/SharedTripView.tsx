@@ -15,9 +15,13 @@ import {
   Check,
   ListChecks,
   Backpack,
+  ExternalLink,
 } from "lucide-react";
-import type { Trip, Reservation, Task, Category, PackingItem, ReservationType } from "@/lib/types";
+import type { Reservation, Task, Category, PackingItem, ReservationType } from "@/lib/types";
 import { formatDateRange, formatDate } from "@/lib/dates";
+import { noteUrl, noteLinkLabel } from "@/components/TripReservations";
+import { Tooltip } from "@/components/ui/tooltip";
+import type { ShareVisibility, SharedTripPayload } from "@/lib/shareVisibility";
 
 /*
  * Read-only rendering of a shared trip.
@@ -53,14 +57,42 @@ export function SharedTripView({
   tasks,
   categories,
   items,
+  visibility,
 }: {
-  trip: Trip;
+  /*
+   * The subset of a trip a share link may render — NOT the full `Trip`.
+   *
+   * Deliberately narrower than the database row: `userId` (who owns the trip) and
+   * `archived`/timestamps are not the viewer's business, and typing this prop as
+   * a full Trip is what would tempt a future change into spreading the row. The
+   * shape mirrors `SharedTripPayload["trip"]`, so the page cannot pass a field
+   * the payload does not carry.
+   */
+  trip: SharedTripPayload["trip"];
   reservations: Reservation[];
   tasks: Task[];
   categories: Category[];
   items: PackingItem[];
+  /*
+   * What this link is allowed to reveal.
+   *
+   * Optional and defaulted so the component still renders for callers that have
+   * not been updated, and so a missing value can never mean "hide everything".
+   *
+   * NOTE: this is presentation only. The rows for a hidden section have already
+   * been removed from the payload by filterForShare on the server, so hiding a
+   * section here is a second line of defence, not the control itself. Gating on
+   * visibility in the view while still shipping the data would be a cosmetic
+   * fix; that is why the filtering is done in one place server-side and the
+   * empty arrays simply render as nothing.
+   */
+  visibility?: ShareVisibility;
 }) {
   const [showPacking, setShowPacking] = useState(false);
+
+  // Fail open on a missing record: `undefined` means "not told to hide anything",
+  // which preserves the pre-feature behaviour for any older caller.
+  const canSee = (section: keyof ShareVisibility): boolean => visibility?.[section] !== false;
 
   const sorted = useMemo(
     () => [...reservations].sort(byWhen),
@@ -127,6 +159,18 @@ export function SharedTripView({
               const meta = TYPE_META[r.type] ?? TYPE_META.other;
               const Icon = meta.icon;
               const when = formatDate(r.startDate);
+              /*
+               * Link button for a URL in the notes.
+               *
+               * Derived from the notes text itself, so it inherits whatever
+               * happens to the notes: no separate field to keep in sync, and no
+               * URL to leak if the notes are ever emptied. The only visibility
+               * rule that applies is the confirmation-number toggle, which does
+               * not touch notes — a link in the notes is information the owner
+               * typed into a field the viewer can already read in full.
+               */
+              const linkHref = noteUrl(r.notes);
+              const linkLabel = noteLinkLabel(linkHref, r.title);
               return (
                 <li
                   key={r.id}
@@ -160,7 +204,7 @@ export function SharedTripView({
                             {r.endTime && ` ${r.endTime}`}
                           </span>
                         )}
-                        {r.confirmation && (
+                        {canSee("confirmations") && r.confirmation && (
                           <span className="inline-flex items-center gap-1 font-mono">
                             <Hash className="h-3.5 w-3.5" />
                             {r.confirmation}
@@ -184,8 +228,39 @@ export function SharedTripView({
                         </div>
                       )}
 
+                      {/* Notes, with a link button when they contain a URL. */}
                       {r.notes && (
-                        <p className="mt-2 whitespace-pre-line text-xs text-zinc-500">{r.notes}</p>
+                        <div className="mt-2 flex flex-wrap items-start gap-2">
+                          <p className="min-w-0 flex-1 whitespace-pre-line text-xs text-zinc-500">
+                            {r.notes}
+                          </p>
+                          {/*
+                            * The same noteUrl/noteLinkLabel helpers the owner's
+                            * itinerary uses, imported rather than reimplemented:
+                            * the two views must agree on what counts as a link
+                            * and on what to call it, and a copy here would drift
+                            * the moment either side changed.
+                            *
+                            * The parent is flex-wrap so a long note pushes the
+                            * button onto its own line on a phone instead of
+                            * squeezing both into one row.
+                            */}
+                          {linkHref && (
+                            <Tooltip label={`Open ${linkLabel} listing`}>
+                              <a
+                                href={linkHref}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                aria-label={`Open ${linkLabel} listing`}
+                                title={`Open ${linkLabel} listing`}
+                                className="inline-flex min-h-8 shrink-0 items-center justify-center gap-1 rounded-md border border-emerald-500 bg-emerald-500/20 px-2 py-1 text-[11px] text-emerald-300 underline underline-offset-2 transition-colors hover:border-emerald-400 hover:bg-emerald-500/30 hover:text-emerald-200 focus-ring"
+                              >
+                                <ExternalLink className="h-3.5 w-3.5" strokeWidth={2} />
+                                <span>{linkLabel}</span>
+                              </a>
+                            </Tooltip>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -197,7 +272,7 @@ export function SharedTripView({
       </section>
 
       {/* Tasks */}
-      {sortedTasks.length > 0 && (
+      {canSee("tasks") && sortedTasks.length > 0 && (
         <section className="mb-6">
           <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-zinc-400">
             <ListChecks className="h-4 w-4" />
@@ -235,7 +310,7 @@ export function SharedTripView({
       )}
 
       {/* Packing — collapsed by default, it is the least useful thing to a companion. */}
-      {items.length > 0 && (
+      {canSee("packing") && items.length > 0 && (
         <section className="mb-6">
           <button
             type="button"

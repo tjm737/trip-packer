@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readState, tx } from "@/lib/db";
 import { getActingUser } from "@/lib/session";
 import { assertCanWriteTrip } from "@/lib/access";
+import { normalizeVisibility } from "@/lib/shareVisibility";
 
 /*
  * Share-link management.
@@ -105,7 +106,7 @@ export async function GET(req: Request) {
 
 /** POST /api/share — create a link. */
 export async function POST(req: Request) {
-  let body: { tripId?: string };
+  let body: { tripId?: string; visibility?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -117,11 +118,63 @@ export async function POST(req: Request) {
 
   try {
     const token = randomUUID();
-    tx.createShareToken(token, guard.tripId);
+    /*
+     * `normalizeVisibility` is the only thing that decides what a legal setting
+     * looks like: unknown keys are dropped, non-booleans are ignored, and
+     * `itinerary` is forced on. Passing the raw body through would let a
+     * hand-crafted request store a shape the public endpoint cannot render.
+     */
+    tx.createShareToken(token, guard.tripId, normalizeVisibility(body.visibility));
     return NextResponse.json({ token, tokens: tx.listShareTokens(guard.tripId) });
   } catch (err) {
     console.error("[api/share] create failed:", err);
     return NextResponse.json({ error: "Could not create share link" }, { status: 500 });
+  }
+}
+
+/**
+ * PATCH /api/share — change what an existing link reveals.
+ *
+ * Same authorization as every other handler here: a valid session that may write
+ * the trip. Editing visibility is a write to the trip's exposure, so it takes the
+ * write permission rather than merely being signed in — and a viewer is refused
+ * for the same reason they cannot create a link.
+ */
+export async function PATCH(req: Request) {
+  let body: { tripId?: string; token?: string; visibility?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const guard = await authorizeTrip(body.tripId ?? null);
+  if (isFailure(guard)) return guard.response;
+
+  if (!body.token) {
+    return NextResponse.json({ error: "token required" }, { status: 400 });
+  }
+
+  try {
+    /*
+     * The update is scoped to the authorized trip, so a token belonging to
+     * another trip cannot be retuned even by someone who can write this one —
+     * the same protection DELETE relies on. `changes === 0` means the token does
+     * not belong to this trip (or was revoked a moment ago); reporting it is
+     * better than returning a refreshed list that silently lacks the edit.
+     */
+    const changed = tx.updateShareTokenVisibility(
+      body.token,
+      guard.tripId,
+      normalizeVisibility(body.visibility)
+    );
+    if (changed === 0) {
+      return NextResponse.json({ error: "That link no longer exists" }, { status: 404 });
+    }
+    return NextResponse.json({ tokens: tx.listShareTokens(guard.tripId) });
+  } catch (err) {
+    console.error("[api/share] update failed:", err);
+    return NextResponse.json({ error: "Could not update share link" }, { status: 500 });
   }
 }
 

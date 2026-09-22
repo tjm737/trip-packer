@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 
 import { useApp } from "@/lib/AppContext";
+import { assertCanWriteTrip } from "@/lib/access";
 import { subscribeEditRequests } from "@/lib/editRequest";
 import { Reservation, ReservationType } from "@/lib/types";
 import { formatDate, isValidDate } from "@/lib/dates";
@@ -73,14 +74,54 @@ const VAGUE_LOCATION =
  * form for a single bit. It is therefore never disabled, and carries an
  * aria-label naming the action rather than the state, so a screen reader
  * announces what pressing it will do.
+ *
+ * Confirmed/draft pill for a reservation row.
+ *
+ * `readOnly` exists because this control writes to the database on tap, so a
+ * viewer of a shared trip would see an enabled pill that silently fails with a
+ * 403. Rendering it as a static badge instead keeps the information — a viewer
+ * should still be able to see what is confirmed — while removing the false
+ * affordance.
+ *
+ * The non-interactive branch is a <span>, not a disabled <button>. A disabled
+ * button is skipped by assistive tech and still announces as a control, so a
+ * screen reader user hears "button, dimmed" and gets no state. A span with the
+ * state in its text reads correctly and cannot be focused or activated.
  */
 function StatusPill({
   confirmed,
   onToggle,
+  readOnly = false,
 }: {
   confirmed: boolean;
   onToggle: () => void;
+  readOnly?: boolean;
 }) {
+  const tone = confirmed
+    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+    : "border-amber-500/30 bg-amber-500/10 text-amber-300";
+  const label = confirmed ? "Confirmed" : "Draft";
+  const icon = confirmed ? (
+    <CheckCheck className="h-3 w-3" />
+  ) : (
+    <CircleDashed className="h-3 w-3" />
+  );
+
+  if (readOnly) {
+    return (
+      <span
+        className={cn(
+          "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5",
+          "text-[11px] font-medium",
+          tone
+        )}
+      >
+        {icon}
+        {label}
+      </span>
+    );
+  }
+
   return (
     <Tooltip label={confirmed ? "Mark as draft" : "Mark as confirmed"}>
       <button
@@ -96,12 +137,8 @@ function StatusPill({
             : "border-amber-500/30 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20"
         )}
       >
-        {confirmed ? (
-          <CheckCheck className="h-3 w-3" />
-        ) : (
-          <CircleDashed className="h-3 w-3" />
-        )}
-        {confirmed ? "Confirmed" : "Draft"}
+        {icon}
+        {label}
       </button>
     </Tooltip>
   );
@@ -225,27 +262,49 @@ export function googleMapsUrl(query: string): string {
  *   - `javascript:` and `data:` — rendering user text as a clickable link is
  *     exactly where those become an XSS vector, and this string comes from an
  *     imported file. Rejecting them by only accepting http(s) is safer than
- *     escaping them.
+ *     escaping them: the scheme has to be the literal `http://` or `https://` for
+ *     the regex to match there at all, so a `javascript:` prefix cannot produce a
+ *     link. (An http URL appearing *inside* a javascript: string is a different
+ *     matter and is harmless — what matters is that the value returned here, and
+ *     therefore the href, always begins http:// or https://.)
  *   - bare `www.foo.com` / `foo.com/x` — without a scheme the "is this a link"
  *     guess gets ambiguous (in "Arrive 8.30am, email john.co" the domain-shaped
  *     tail is not a link), and guessing wrong turns note text into a button.
  *     A pasted link has a scheme; that is the signal used here.
  *
- * The match stops at whitespace, then trailing punctuation is trimmed, because
- * a URL at the end of a sentence swallows the full stop: "see https://x.com/a."
- * must not produce a link to `a.`.
+ * Parentheses are allowed inside the match and then balanced deliberately.
+ * Excluding `)` from the character class — the obvious version — truncates any
+ * URL that contains a bracketed segment, which real listing URLs do
+ * (`en.wikipedia.org/wiki/Foo_(bar)`), so the class admits both parens and the
+ * trimming below removes only the excess.
+ *
+ * The match stops at whitespace and quotes, then trailing sentence punctuation
+ * is trimmed, because a URL at the end of a sentence swallows the full stop:
+ * "see https://x.com/a." must not produce a link to `a.`.
  */
-const NOTE_URL = /\bhttps?:\/\/[^\s<>"')\]]+/i;
+const NOTE_URL = /\bhttps?:\/\/[^\s<>"']+/i;
 
 export function noteUrl(notes: string): string {
   const match = NOTE_URL.exec(notes || "");
   if (!match) return "";
-  // Trailing sentence punctuation, and a closing paren only when unbalanced
-  // (Wikipedia-style URLs legitimately end in ")").
+  // Trailing sentence punctuation.
   let url = match[0].replace(/[.,;:!?]+$/, "");
-  const opens = (url.match(/\(/g) || []).length;
-  const closes = (url.match(/\)/g) || []).length;
-  if (closes > opens) url = url.replace(/\)+$/, "");
+  /*
+   * Parentheses: keep them only when balanced. A URL that legitimately contains
+   * "(bar)" keeps it; the wrapping paren of "(see https://x/y_(b))" is dropped.
+   *
+   * One paren is removed per iteration, not the whole trailing run: the run may
+   * contain a paren that belongs to the URL. "…/Foo_(bar))" has one balanced
+   * pair plus one surplus, and stripping both would truncate the URL to
+   * "…/Foo_(bar" — the paren that closes "(bar)" is the last character that must
+   * survive.
+   */
+  for (;;) {
+    const opens = (url.match(/\(/g) || []).length;
+    const closes = (url.match(/\)/g) || []).length;
+    if (closes <= opens || !url.endsWith(")")) break;
+    url = url.slice(0, -1);
+  }
   return url;
 }
 
@@ -504,8 +563,25 @@ function formatTime(t: string): string {
 }
 
 export function TripReservations({ tripId }: { tripId: string }) {
-  const { reservation, helpers } = useApp();
+  const { reservation, helpers, state, activeUser } = useApp();
   const items = helpers.getReservations(tripId);
+
+  /*
+   * Whether this user may add or change bookings on THIS trip.
+   *
+   * Uses the same pure `assertCanWriteTrip` the mutate route enforces, so the
+   * button and the server can never disagree about who is allowed to write.
+   * Deriving it locally (an `isOwner` check, say) would drift: it would be
+   * wrong for an editor, who is not the owner but may write.
+   *
+   * Previously this component had no permission concept at all, so a viewer on
+   * a shared trip was shown a fully working Add panel. The write was refused
+   * server-side with a 403 — no data was at risk — but the client swallowed
+   * that error, so tapping "Add booking" did nothing and said nothing. It is
+   * the failure mode that reads as a crash: a control that visibly responds to
+   * a tap and then silently discards the result.
+   */
+  const canWrite = assertCanWriteTrip(state, activeUser?.id, tripId);
 
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState<Draft>(emptyDraft());
@@ -790,7 +866,7 @@ export function TripReservations({ tripId }: { tripId: string }) {
           )}
         </div>
 
-        {!adding && (
+        {!adding && canWrite && (
           <Tooltip label="Add a booking">
             <Button
               size="sm"
@@ -810,10 +886,11 @@ export function TripReservations({ tripId }: { tripId: string }) {
 
       {items.length === 0 && !adding && (
         <p className="py-2 text-sm text-zinc-500">
-          No bookings yet. Add flights, lodging or a rental car so the details are
-          in one place when you need them.
-        </p>
-      )}
+            {canWrite
+              ? "No bookings yet. Add flights, lodging or a rental car so the details are in one place when you need them."
+              : "No bookings yet."}
+          </p>
+        )}
 
       <AnimatePresence initial={false}>
         {adding && (
@@ -918,28 +995,33 @@ export function TripReservations({ tripId }: { tripId: string }) {
                       <StatusPill
                         confirmed={r.confirmed}
                         onToggle={() => toggleConfirmed(r)}
+                        readOnly={!canWrite}
                       />
                     </div>
-                    <div className="flex shrink-0 items-center gap-1 transition-opacity md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100">
-                      <Tooltip label="Edit booking">
-                        <button
-                          onClick={() => startEdit(r)}
-                          className="rounded p-1 text-zinc-500 hover:bg-white/5 hover:text-zinc-200"
-                          aria-label="Edit booking"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
-                      </Tooltip>
-                      <Tooltip label="Delete booking">
-                        <button
-                          onClick={() => remove(r.id)}
-                          className="rounded p-1 text-zinc-500 hover:bg-white/5 hover:text-rose-400"
-                          aria-label="Delete booking"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </Tooltip>
-                    </div>
+                    {/* Hidden entirely for a viewer: every control here writes,
+                        and each one would 403 and swallow the error. */}
+                    {canWrite && (
+                      <div className="flex shrink-0 items-center gap-1 transition-opacity md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100">
+                        <Tooltip label="Edit booking">
+                          <button
+                            onClick={() => startEdit(r)}
+                            className="rounded p-1 text-zinc-500 hover:bg-white/5 hover:text-zinc-200"
+                            aria-label="Edit booking"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                        </Tooltip>
+                        <Tooltip label="Delete booking">
+                          <button
+                            onClick={() => remove(r.id)}
+                            className="rounded p-1 text-zinc-500 hover:bg-white/5 hover:text-rose-400"
+                            aria-label="Delete booking"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </Tooltip>
+                      </div>
+                    )}
                   </div>
 
                   {/* Where */}

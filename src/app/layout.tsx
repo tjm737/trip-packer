@@ -5,6 +5,7 @@ import { AppProvider } from "@/lib/AppContext";
 import { ServiceWorkerRegistrar } from "@/components/ServiceWorkerRegistrar";
 import { Toaster } from "@/components/ui/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { DEFAULT_THEME, THEME_STORAGE_KEY, themeClassName } from "@/lib/theme";
 
 /*
  * Root layout. Deliberately minimal.
@@ -33,7 +34,20 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     title: "TripPlanner",
-    statusBarStyle: "black-translucent",
+    /*
+     * `black-translucent` places dark status-bar text over the app's own
+     * background, so it needs a LIGHT surface behind it to be legible. It was
+     * set while the app was dark-only and appears to have been inverted from
+     * the start — on the current dark theme the clock and battery render dark
+     * on near-black and are barely readable.
+     *
+     * Pinned to `default`, which lets iOS choose the status-bar content colour
+     * from the page's own `color-scheme` (set in globals.css and kept in sync
+     * by `applyTheme`). That is the only value that can follow an in-app theme
+     * toggle, since this metadata is resolved at launch and cannot be
+     * re-evaluated from a class change.
+     */
+    statusBarStyle: "default",
   },
   manifest: "/manifest.webmanifest",
   icons: {
@@ -50,7 +64,26 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 5,
   viewportFit: "cover",
-  themeColor: "#09090b",
+  /*
+   * Two theme colours as a media-query pair, rather than one hardcoded value.
+   *
+   * This drives the browser/OS chrome — the address bar on Android, and the
+   * status bar area on iOS where this ships as a Capacitor app. Pinning it to
+   * the dark page colour (#09090b) meant a light-theme user got a black band
+   * above a white page, which is the single most visible way a theme toggle can
+   * look broken on a phone.
+   *
+   * The `light`/`dark` media queries key off `prefers-color-scheme`, which does
+   * not know about our in-app toggle. To keep them honest, `applyTheme` also
+   * sets `color-scheme` on <html>, and the values below are chosen to match
+   * whichever *page* colour the user will actually be looking at in that OS
+   * mode. It is a best-effort match for the system setting, since a browser
+   * cannot recolour its own chrome from a page class.
+   */
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#fbfbfa" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+  ],
 };
 
 export default function RootLayout({
@@ -58,9 +91,42 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  return (
-    <html lang="en">
-      <body className={inter.className}>
+    return (
+      <html lang="en" className={themeClassName(DEFAULT_THEME)} suppressHydrationWarning>
+        <head>
+          {/*
+            Pre-paint theme resolution.
+
+            This must be an inline, synchronous script in <head>; any React-based
+            approach runs after hydration and the user sees a frame of the wrong
+            theme first (the "flash of unthemed content"). It reads the cached
+            choice and applies the class before the browser paints anything.
+
+            Dark is the default, so the worst case if localStorage is
+            unavailable (Safari private mode, disabled storage) is the dark
+            theme — the app's existing appearance. The class is still set
+            explicitly rather than left to the server-rendered value, because
+            the server cannot know the user's stored preference and would
+            otherwise paint dark over a light choice.
+
+            Wrapped in try/catch: in private mode even *reading* localStorage
+            can throw, and an exception here would abort the rest of the head
+            and leave the page unstyled. Failing into dark is fine; failing to
+            parse the document is not.
+
+            `suppressHydrationWarning` on <html> is required because this script
+            mutates the element's className before React hydrates, which React
+            would otherwise report as a mismatch.
+          */}
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `(function(){try{var t=localStorage.getItem(${JSON.stringify(
+                THEME_STORAGE_KEY
+              )});var r=document.documentElement;r.classList.remove("light","dark");r.classList.add(t==="light"?"light":"dark");if(t==="light"){r.style.colorScheme="light";}}catch(e){}})();`,
+            }}
+          />
+        </head>
+        <body className={inter.className}>
         <AppProvider>
           <TooltipProvider>{children}</TooltipProvider>
           <ServiceWorkerRegistrar />

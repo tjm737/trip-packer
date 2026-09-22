@@ -23,6 +23,7 @@
  */
 
 import type { AppState, User } from "./types";
+import { DEFAULT_THEME } from "./theme";
 
 /** Role a user holds on a trip they do not own. */
 export type TripRole = "owner" | "editor" | "viewer";
@@ -311,18 +312,30 @@ export function scopeStateForUser(
   );
   const visibleTripIds = new Set(visibleTrips.map((t) => t.id));
 
-  return {
-    /*
-     * Fall back to a minimal record for the authenticated user rather than to an
-     * empty list: the client needs someone to render in the sidebar, and a
-     * synthetic entry with only an id is the least we can hand over without
-     * leaking other accounts. The credential fields on User are optional, so a
-     * bare { id, name, ... } satisfies the type.
-     */
-    users:
-      users.length > 0
-        ? users
-        : [{ id: userId, name: "Traveler", avatarColor: "#64748b", createdAt: "" }],
+    return {
+      /*
+       * Fall back to a minimal record for the authenticated user rather than to an
+       * empty list: the client needs someone to render in the sidebar, and a
+       * synthetic entry with only an id is the least we can hand over without
+       * leaking other accounts.
+       *
+       * `theme` must be supplied explicitly. It is the one required display field
+       * that has no sensible absence — the credential fields on User are
+       * optional, so a bare { id, name, ... } used to satisfy the type, but a
+       * User without a theme would render with no class resolved.
+       */
+      users:
+        users.length > 0
+          ? users
+          : [
+              {
+                id: userId,
+                name: "Traveler",
+                avatarColor: "#64748b",
+                createdAt: "",
+                theme: DEFAULT_THEME,
+              },
+            ],
     // activeUserId is a legacy profile-switching concept. With real sessions it
     // is simply the authenticated user, so the client has nothing to switch.
     activeUserId: userId,

@@ -58,7 +58,20 @@ const config: CapacitorConfig = {
 
   ios: {
     contentInset: "always",
-    backgroundColor: "#09090b",
+    /*
+     * The WebView's own backdrop, visible during overscroll bounce and in the
+     * instant before the page paints. It was pinned to the dark page colour
+     * (#09090b), which meant a light-theme user saw the app rubber-band to
+     * black at the top and bottom of every scroll.
+     *
+     * This cannot follow the in-app toggle — it is a native-side value baked
+     * into the iOS project at build time, and the app has no way to repaint it
+     * per theme. A neutral mid-grey is therefore the deliberate compromise: it
+     * is inoffensive against both palettes, where either extreme is visibly
+     * wrong for one of them. The page itself paints its own background
+     * immediately, so this is only ever glimpsed at the very edges.
+     */
+    backgroundColor: "#8a8a8a",
   },
 };
 

@@ -40,8 +40,13 @@ export type ParsedItinerary = {
    * absent here and stamped once in `parseItinerary`, so that every record
    * from one import shares a timestamp instead of six extractors each
    * calling `new Date()` and producing values a few milliseconds apart.
+   *
+   * `orderManual` is omitted too: an imported file is an untrusted sequence,
+   * not a set of drag positions. The extractor's own `order` is just a counter
+   * for stable output; leaving the manual marker unset is what keeps the trip
+   * date-sequenced until the user actually drags something.
    */
-  reservations: Array<Omit<Reservation, "id" | "tripId" | "createdAt">>;
+  reservations: Array<Omit<Reservation, "id" | "tripId" | "createdAt" | "orderManual">>;
   tasks: Array<Omit<Task, "id" | "tripId" | "createdAt">>;
   warnings: string[];
 };
@@ -592,7 +597,10 @@ export function parseItinerary(html: string): ParsedItinerary {
       notes: notesFull,
       icon: "✈️",
     },
-    reservations: reservations.map((r) => ({ ...r, createdAt: stamp })),
+    // `orderManual: null` because nothing has been dragged yet. Explicit rather
+    // than left to the column default, so the intent is visible at the one
+    // place imports become real rows.
+    reservations: reservations.map((r) => ({ ...r, orderManual: null, createdAt: stamp })),
     tasks,
     warnings,
   };

@@ -54,6 +54,7 @@ import { TripReservations } from "@/components/TripReservations";
 import { TripMap } from "@/components/TripMap";
 import { Tabs } from "@/components/Tabs";
 import { ShareButton } from "@/components/ShareButton";
+import { PrintButton } from "@/components/PrintButton";
 import { ShareDialog } from "@/components/ShareDialog";
 import { observeEditRequests } from "@/lib/editRequest";
 import {
@@ -647,6 +648,14 @@ export default function TripDetail() {
               obvious owner (same idiom as AboutDialog in the sidebar).
             */}
             <ShareButton onClick={() => setShareOpen(true)} />
+            {/*
+              Print sits beside Share for the same reason Share sits here: both
+              are properties of THIS trip, and the header is the only part of the
+              page visible whichever tab is open. Anyone can print — including a
+              viewer of a shared trip — so it is deliberately not gated on write
+              access.
+            */}
+            <PrintButton tripId={tripInfo.id} />
             <ShareDialog
               tripId={tripId}
               canShare={canShare}

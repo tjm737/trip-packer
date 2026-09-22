@@ -10,9 +10,15 @@ import {
 } from "./types";
 import { compareByDate, daysUntilDate, isValidDate } from "./dates";
 import { readCachedState, writeCachedState } from "./offlineCache";
-import { clearQueue, enqueueOp, listQueuedOps, removeQueuedOp } from "./offlineQueue";
+import {
+  clearQueue,
+  enqueueOp,
+  listQueuedOps,
+  removeQueuedOp,
+} from "./offlineQueue";
 import { apiUrl } from "./apiUrl";
 import { reconcile } from "./reconcile";
+import { DEFAULT_THEME } from "./theme";
 
 /*
  * Client-side API wrapper.
@@ -72,6 +78,7 @@ export function createDefaultUser(): User {
     name: "You",
     avatarColor: AVATAR_COLORS[hashString(id) % AVATAR_COLORS.length],
     createdAt: new Date().toISOString(),
+    theme: DEFAULT_THEME,
   };
 }
 
@@ -559,6 +566,9 @@ export async function createReservation(
     cost: draft.cost?.trim() ?? "",
     notes: draft.notes?.trim() ?? "",
     order,
+    // Adding a booking is not a drag, so the trip stays date-sequenced. Only
+    // `setReservationOrder` stamps a manual position.
+    orderManual: null,
     createdAt: new Date().toISOString(),
     confirmed: draft.confirmed ?? true,
   };

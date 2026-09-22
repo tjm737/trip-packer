@@ -66,6 +66,24 @@ function cleanup() {
     updatedAt: now,
   });
 
+  // A second real trip, owned by the same owner as the first. Needed for the
+  // cross-trip tests: the threat is someone who legitimately owns one trip
+  // reaching for another trip's link, and a nonexistent trip would fail on the
+  // foreign key instead of exercising the scoping under test.
+  db.tx.insertTrip({
+    id: "trip-other",
+    userId: "u-owner",
+    name: "Other Trip",
+    destination: "Lisbon",
+    startDate: "",
+    endDate: "",
+    notes: "",
+    icon: "plane",
+    archived: false,
+    createdAt: now,
+    updatedAt: now,
+  });
+
   // A second account that owns nothing — the attacker in the exploit above.
   db.tx.insertUser({ id: "u-stranger", name: "Stranger", avatarColor: "bg-zinc-500", createdAt: now });
 
@@ -119,8 +137,59 @@ function cleanup() {
 
   await h.test("share tokens resolve only to their own trip", () => {
     db.tx.createShareToken("tok-alpha", "trip-owner");
-    h.assertEqual(db.tx.resolveShareToken("tok-alpha"), "trip-owner", "known token resolves");
+    // resolveShareToken returns { tripId, visibility } so the read path can apply
+    // the per-link section toggles in the same query that authenticates the link.
+    h.assertEqual(
+      db.tx.resolveShareToken("tok-alpha")?.tripId,
+      "trip-owner",
+      "known token resolves"
+    );
     h.assertEqual(db.tx.resolveShareToken("tok-forged"), undefined, "unknown token resolves to nothing");
+  });
+
+  await h.test("a token created without a visibility choice shows everything", () => {
+    /*
+     * A link minted before this feature (or by a caller that omits the argument)
+     * must not come back with a record that hides sections the owner never hid.
+     */
+    db.tx.createShareToken("tok-default", "trip-owner");
+    const resolved = db.tx.resolveShareToken("tok-default");
+    for (const section of ["itinerary", "packing", "tasks", "confirmations"]) {
+      h.assertEqual(resolved.visibility[section], true, `${section} should default to visible`);
+    }
+  });
+
+  await h.test("updating visibility cannot retune another trip's link", () => {
+    /*
+     * Same scoping as revoke, and the same reason: the UPDATE is constrained by
+     * tripId, so someone who may write trip A cannot change what trip B's link
+     * reveals. A returned 0 changes is what the route turns into a 404.
+     */
+    db.tx.createShareToken("tok-gamma", "trip-other");
+    const changed = db.tx.updateShareTokenVisibility("tok-gamma", "trip-owner", {
+      itinerary: true,
+      packing: false,
+      tasks: false,
+      confirmations: false,
+    });
+    h.assertEqual(changed, 0, "a mismatched tripId must change nothing");
+    const still = db.tx.resolveShareToken("tok-gamma");
+    h.assertEqual(still.visibility.packing, true, "the other trip's link must be untouched");
+  });
+
+  await h.test("updating visibility does persist for the owning trip", () => {
+    // The counterpart to the test above: without this, the scoping test would
+    // also pass if the update never wrote anything at all.
+    db.tx.createShareToken("tok-delta", "trip-owner");
+    const changed = db.tx.updateShareTokenVisibility("tok-delta", "trip-owner", {
+      itinerary: true,
+      packing: false,
+      tasks: true,
+      confirmations: true,
+    });
+    h.assertEqual(changed, 1, "the owning trip's link must be updated");
+    h.assertEqual(db.tx.resolveShareToken("tok-delta").visibility.packing, false);
+    h.assertEqual(db.tx.resolveShareToken("tok-delta").visibility.tasks, true);
   });
 
   await h.test("revoking a token with the wrong tripId does not delete it", () => {
@@ -131,7 +200,7 @@ function cleanup() {
     db.tx.createShareToken("tok-beta", "trip-owner");
     db.tx.deleteShareToken("tok-beta", "trip-other");
     h.assertEqual(
-      db.tx.resolveShareToken("tok-beta"),
+      db.tx.resolveShareToken("tok-beta")?.tripId,
       "trip-owner",
       "a mismatched tripId must not revoke someone else's link"
     );

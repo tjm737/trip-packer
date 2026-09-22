@@ -15,6 +15,12 @@ import type {
   TripMember,
   User,
 } from "../lib/types";
+import { normalizeTheme } from "./theme";
+import {
+  parseStoredVisibility,
+  serializeVisibility,
+  type ShareVisibility,
+} from "./shareVisibility";
 
 /*
  * SQLite persistence layer.
@@ -194,6 +200,26 @@ function migrate(db: SqliteDb): void {
   addColumnIfMissing(db, "reservations", "confirmed", "INTEGER NOT NULL DEFAULT 1");
 
   /*
+   * `order` was meant to be a drag position, but it is NOT NULL DEFAULT 0 and
+   * every insert assigns MAX+1, so there is no way to express "never dragged".
+   * The map's rank pass therefore lifts *every* row and sorts by `order`,
+   * discarding the date sort entirely — which is why a car collected in Munich
+   * can outrank the flight that flies you there, and why the map draws a road
+   * from London to Munich.
+   *
+   * `orderManual` is the missing signal. NULL means "the user has never dragged
+   * this trip", so sequencing falls back to date. Any value means the trip has
+   * been dragged and `order` is authoritative, exactly as before.
+   *
+   * Deliberately nullable with no default, and deliberately a separate column:
+   * ALTER TABLE cannot drop NOT NULL from `order`, and a table rebuild to make
+   * it nullable would rewrite every existing row. Existing trips keep their
+   * stored `order` and pick up NULL here, which is the correct reading — they
+   * have never been dragged either.
+   */
+  addColumnIfMissing(db, "reservations", "orderManual", "INTEGER");
+
+  /*
    * Accounts.
    *
    * `users` predates authentication: it was a profile list living inside one
@@ -221,6 +247,45 @@ function migrate(db: SqliteDb): void {
   addColumnIfMissing(db, "users", "email", "TEXT");
   addColumnIfMissing(db, "users", "passwordHash", "TEXT");
   addColumnIfMissing(db, "users", "isOwner", "INTEGER NOT NULL DEFAULT 0");
+  /*
+   * Theme preference.
+   *
+   * On `users`, not on `settings`, even though `settings` exists and is the
+   * obvious-looking home. That table is a global key/value store holding exactly
+   * one row (the active-user pointer) and has no user column — a theme written
+   * there would be shared by every account, so one person choosing light would
+   * change it for everyone else on the instance. Preferences belong to the
+   * person, so the column goes where the person is.
+   *
+   * Nullable with no default, rather than NOT NULL DEFAULT 'dark'. NULL means
+   * "never chose", which is a distinct state from "chose dark": it lets the
+   * client fall back to localStorage, then to the default, without a stored
+   * NULL being read as an explicit dark choice and permanently overriding a
+   * device-level preference. The read path normalises NULL to the default, so
+   * no consumer has to handle it.
+   */
+  addColumnIfMissing(db, "users", "theme", "TEXT");
+
+  /*
+   * Per-link visibility for share_tokens.
+   *
+   * A nullable JSON blob of `{ section: boolean }`. Nullable with no default so
+   * NULL means "the owner never chose" — the read path then falls back to
+   * showing everything, which is exactly how links behaved before this column
+   * existed. A NOT NULL DEFAULT with a JSON literal would bake today's default
+   * into the schema and make a future change to the default unable to affect
+   * rows already written.
+   *
+   * On the token row rather than on `trips` because links are independent by
+   * design: the table exists so one trip can have several links, one per
+   * companion, and the point of a per-link setting is that those links may
+   * legitimately differ. A trip-level column would make "share with my partner,
+   * not the dog sitter" impossible to express.
+   *
+   * TEXT rather than a set of boolean columns: the section list is expected to
+   * grow, and each addition as a column would need its own migration.
+   */
+  addColumnIfMissing(db, "share_tokens", "visibility", "TEXT");
 
   /*
    * Partial unique index on email.
@@ -353,6 +418,9 @@ type UserRow = {
   email: string | null;
   passwordHash: string | null;
   isOwner: number;
+  /* Nullable: NULL means "never chose a theme", which is not the same as "chose
+     dark". Normalised to a real theme by `toUser`. */
+  theme: string | null;
 };
 
 /**
@@ -422,6 +490,7 @@ type ReservationRow = {
   order: number;
   createdAt: string;
   confirmed: number;
+  orderManual: number | null;
 };
 
 const toUser = (r: UserRow): User => ({
@@ -433,6 +502,15 @@ const toUser = (r: UserRow): User => ({
   // needed by the client either; `passwordHash` must never leave the server.
   ...(r.email ? { email: r.email } : {}),
   ...(r.isOwner ? { isOwner: true } : {}),
+  /*
+   * Normalised on the way out, so every client sees a valid theme and never a
+   * NULL. `normalizeTheme` maps NULL (never chose) and any unrecognised string
+   * to the default, which means a hand-edited database or a downgrade that
+   * removed a theme cannot put the UI into an undefined state. Always present
+   * rather than conditionally spread — unlike `email`/`isOwner`, where absence
+   * carries meaning (companion vs account), a missing theme has no meaning.
+   */
+  theme: normalizeTheme(r.theme),
 });
 
 /** Like toUser, but carries the password hash. Only for login. */
@@ -524,6 +602,10 @@ const toReservation = (r: ReservationRow): Reservation => ({
   createdAt: r.createdAt,
   // SQLite hands back 0/1; the domain type is a boolean.
   confirmed: r.confirmed !== 0,
+  // NULL survives the round trip as NULL, which is the "never dragged" signal.
+  // Coerced explicitly because a driver may hand back undefined for a column
+  // added by ALTER TABLE on a connection that predates it.
+  orderManual: r.orderManual ?? null,
 });
 
 /* ------------------------------------------------------------------ reads */
@@ -765,15 +847,41 @@ export const tx = {
   },
 
   updateUser(id: string, updates: Partial<User>): void {
-    // Column names are allow-listed rather than interpolated from the payload,
-    // so a crafted update cannot reach a column it was not meant to touch.
-    const allowed = ["name", "avatarColor"] as const;
+    /*
+     * Column names are allow-listed rather than interpolated from the payload,
+     * so a crafted update cannot reach a column it was not meant to touch.
+     *
+     * `theme` is on the list because it is a display preference, like `name` and
+     * `avatarColor` — not a credential. The credential columns (email,
+     * passwordHash, isOwner) stay off it deliberately; `attachCredentials`
+     * below exists precisely so account changes never route through here.
+     *
+     * Omitting `theme` was not a silent no-op that failed loudly; the filter
+     * would produce an empty key list and return early, so the toggle would
+     * appear to work, write nothing, and revert on reload. Any new per-user
+     * display preference must be added here or it will not persist.
+     */
+    const allowed = ["name", "avatarColor", "theme"] as const;
     const keys = allowed.filter((k) => updates[k] !== undefined);
     if (keys.length === 0) return;
     const set = keys.map((k) => `${k} = @${k}`).join(", ");
+    /*
+     * Validate `theme` on the way IN as well as normalising on the way out.
+     *
+     * `updates` arrives from a client-supplied JSON body, so the declared type
+     * (`Partial<User>`) is a compile-time claim about data the server has not
+     * checked. Without this, an arbitrary string lands in the column: harmless
+     * for rendering, since `toUser` normalises on read, but it would be written
+     * and re-read forever, and any future consumer that trusts the stored value
+     * (a WHERE clause, an export, a migration) would be working with unvalidated
+     * input. Coercing here keeps the column's domain true at rest, not just at
+     * the edges.
+     */
+    const bound: Record<string, unknown> = { ...updates, id };
+    if (bound.theme !== undefined) bound.theme = normalizeTheme(bound.theme);
     getDb()
       .prepare(`UPDATE users SET ${set} WHERE id = @id`)
-      .run({ ...updates, id });
+      .run(bound);
   },
 
   /**
@@ -948,6 +1056,12 @@ export const tx = {
   },
 
   insertReservation(r: Reservation): void {
+    /*
+     * `orderManual` is deliberately absent from the column list. Adding a
+     * booking is not a drag, so it must not mark the trip as manually ordered —
+     * the column default of NULL is what keeps a freshly imported or hand-added
+     * trip sequenced by date. It is only ever set by `setReservationOrder`.
+     */
     getDb()
       .prepare(
         `INSERT INTO reservations
@@ -1005,14 +1119,20 @@ export const tx = {
    *
    * Only rows belonging to `tripId` are touched, so a stale client cannot
    * reorder another trip's bookings.
+   *
+   * Also stamps `orderManual`, because a drag is precisely the event that makes
+   * `order` authoritative for this trip. Every row in `orderedIds` is stamped,
+   * not just the one that moved: the sort is a whole-list rewrite, so treating
+   * only the dragged row as manual would leave the rest date-sorted underneath
+   * it and produce an order nobody asked for.
    */
   setReservationOrder(tripId: string, orderedIds: string[]): void {
     const db = getDb();
     const stmt = db.prepare(
-      'UPDATE reservations SET "order" = ? WHERE id = ? AND tripId = ?'
+      'UPDATE reservations SET "order" = ?, "orderManual" = ? WHERE id = ? AND tripId = ?'
     );
     const run = db.transaction((ids: string[]) => {
-      ids.forEach((id, i) => stmt.run(i, id, tripId));
+      ids.forEach((id, i) => stmt.run(i, i, id, tripId));
     });
     run(orderedIds);
   },
@@ -1179,36 +1299,85 @@ export const tx = {
    * The token is generated with crypto.randomUUID rather than a counter or a
    * hash of the trip id: it is the only thing guarding the trip, so it must not
    * be guessable from a trip id an outsider could already have seen.
+   *
+   * `visibility` is normalised before storage rather than trusted. The value
+   * arrives from a request body and is written verbatim into a column the public
+   * endpoint later reads, so a malformed value here would be a malformed value
+   * there.
    */
-  createShareToken(token: string, tripId: string): void {
+  createShareToken(token: string, tripId: string, visibility?: ShareVisibility): void {
     getDb()
       .prepare(
-        "INSERT INTO share_tokens (token, tripId, createdAt) VALUES (?, ?, ?)"
+        "INSERT INTO share_tokens (token, tripId, createdAt, visibility) VALUES (?, ?, ?, ?)"
       )
-      .run(token, tripId, new Date().toISOString());
+      .run(
+        token,
+        tripId,
+        new Date().toISOString(),
+        visibility ? serializeVisibility(visibility) : null
+      );
   },
 
   /** All share links for a trip, newest first. */
-  listShareTokens(tripId: string): { token: string; createdAt: string }[] {
-    return getDb()
+  listShareTokens(
+    tripId: string
+  ): { token: string; createdAt: string; visibility: ShareVisibility }[] {
+    const rows = getDb()
       .prepare(
-        "SELECT token, createdAt FROM share_tokens WHERE tripId = ? ORDER BY createdAt DESC"
+        "SELECT token, createdAt, visibility FROM share_tokens WHERE tripId = ? ORDER BY createdAt DESC"
       )
-      .all(tripId) as { token: string; createdAt: string }[];
+      .all(tripId) as {
+      token: string;
+      createdAt: string;
+      visibility: string | null;
+    }[];
+
+    // Normalised on the way out so callers (the dialog's toggles) never receive
+    // a null or partial record and never have to know the storage format.
+    return rows.map((r) => ({
+      token: r.token,
+      createdAt: r.createdAt,
+      visibility: parseStoredVisibility(r.visibility),
+    }));
   },
 
   /**
-   * Resolve a token to its trip id.
+   * Resolve a token to its trip id and visibility.
    *
    * Returns undefined for an unknown token so the caller can 404 without
    * distinguishing "never existed" from "revoked" — both should look the same
    * to someone holding a dead link.
+   *
+   * Visibility is returned alongside the trip id so the public endpoint reads the
+   * whole share record in one query; a second lookup keyed on the token would be
+   * a chance for the two to disagree.
    */
-  resolveShareToken(token: string): string | undefined {
+  resolveShareToken(token: string): { tripId: string; visibility: ShareVisibility } | undefined {
     const row = getDb()
-      .prepare("SELECT tripId FROM share_tokens WHERE token = ?")
-      .get(token) as { tripId: string } | undefined;
-    return row?.tripId;
+      .prepare("SELECT tripId, visibility FROM share_tokens WHERE token = ?")
+      .get(token) as { tripId: string; visibility: string | null } | undefined;
+    if (!row) return undefined;
+    return { tripId: row.tripId, visibility: parseStoredVisibility(row.visibility) };
+  },
+
+  /**
+   * Change what an existing link reveals.
+   *
+   * Scoped by tripId as well as token, matching deleteShareToken: a caller who
+   * can write one trip must not be able to retune another trip's link by
+   * presenting its token. Returns the number of rows changed so the route can
+   * report a miss rather than silently succeeding on a token that does not
+   * belong to the trip it was authorized against.
+   */
+  updateShareTokenVisibility(
+    token: string,
+    tripId: string,
+    visibility: ShareVisibility
+  ): number {
+    const res = getDb()
+      .prepare("UPDATE share_tokens SET visibility = ? WHERE token = ? AND tripId = ?")
+      .run(serializeVisibility(visibility), token, tripId);
+    return Number(res.changes ?? 0);
   },
 
   /** Revoke a single link. Scoped to the trip so one trip cannot delete another's. */

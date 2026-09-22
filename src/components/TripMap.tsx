@@ -4,10 +4,22 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { MapPin, Route, Loader2, AlertTriangle, Clock, ExternalLink, Plane, GripVertical, ChevronUp, ChevronDown, Pencil, BedDouble, Car, TrainFront, Ship, Ticket, CalendarDays, RotateCcw, CircleDashed } from "lucide-react";
 import "leaflet/dist/leaflet.css";
+/*
+ * Explicit import rather than relying on `@types/leaflet`'s UMD global.
+ *
+ * The UMD declaration makes `L` a global only for scripts; in a module, tsc
+ * rejects it with TS2686. It previously appeared to work because every use sat
+ * inside the component, where the reference resolved through the global
+ * namespace. The module-level `createBasemapLayers` below has no such cover, so
+ * the import is required.
+ */
+import L from "leaflet";
 
 import { useApp } from "@/lib/AppContext";
 import { Reservation, ReservationType } from "@/lib/types";
 import { formatDate } from "@/lib/dates";
+import { inItineraryOrder } from "@/lib/itineraryOrder";
+import { normalizeTheme, type Theme } from "@/lib/theme";
 import { MapProbe } from "@/components/MapProbe";
 import { readCachedCoords, writeCachedCoords } from "@/lib/geoCache";
 import { readCachedLegs, writeCachedLegs } from "@/lib/routeCache";
@@ -117,93 +129,6 @@ type Leg = {
   isAir?: boolean;
 };
 
-/**
- * Order reservations for the map: date order, adjusted by any manual drags.
- *
- * The base sequence is by date (undated last), because a booking's date is the
- * whole point and a record still missing one should never push a confirmed
- * flight down the route. On top of that base, a ranking says where the user has
- * dragged each booking.
- *
- * The ranking is applied as a stable adjustment over the date-sorted list, not
- * as a wholesale re-sort. That distinction is what makes a drag do what it looks
- * like it does: dragging the 9th row to the top gives that row rank 0 while
- * everyone else keeps their existing value, so the dragged booking moves and the
- * rest stay put relative to each other.
- *
- * The consequence is deliberate: a dragged booking can sit above one that is
- * chronologically earlier, so the list and the route may not read in date order.
- * That is the price of "grab a row, drop it, it stays there", and the drag is
- * the only way to express a position the dates disagree with.
- *
- * `ranks` lets a drag supply live positions before they are persisted; omitted,
- * each reservation's stored `order` is used.
- */
-function inItineraryOrder(
-  res: Reservation[],
-  opts: { includeUnmapped?: boolean; ranks?: Map<string, number> } = {}
-): Reservation[] {
-  const rankOf = (r: Reservation, i: number) => {
-    const live = opts.ranks?.get(r.id);
-    if (Number.isFinite(live)) return live as number;
-    return Number.isFinite(r.order) ? (r.order as number) : i;
-  };
-
-  /*
-   * `unranked` marks reservations with no manual position at all. They must not
-   * compete with dragged rows, or a booking that has never been touched could
-   * jump the queue purely because its `order` happens to be a small number.
-   */
-  const items = res
-    .map((r, i) => ({ r, rank: rankOf(r, i), touched: opts.ranks?.has(r.id) ?? true }))
-    .filter(({ r }) => opts.includeUnmapped || r.startDate || r.location);
-
-  /*
-   * Two passes. The first sorts by date alone, which is the arrangement a user
-   * who has never dragged anything should see. The second lifts out the rows
-   * carrying a manual position and re-inserts them at it.
-   */
-  const byDate = [...items].sort((a, b) => {
-    const aD = a.r.startDate || "";
-    const bD = b.r.startDate || "";
-    if (aD && bD && aD !== bD) return aD.localeCompare(bD);
-    if (aD && !bD) return -1;
-    if (!aD && bD) return 1;
-    const aT = a.r.startTime || "";
-    const bT = b.r.startTime || "";
-    if (aT !== bT) return aT.localeCompare(bT);
-    return a.r.id.localeCompare(b.r.id);
-  });
-
-  /*
-   * Rows are keyed by reservation id throughout. Holding position by object
-   * identity would silently fail: the entries below are built with object
-   * spreads, so a later `indexOf` on one of them matches nothing and the row is
-   * inserted a second time instead of moved. That produced a list with every
-   * booking duplicated.
-   */
-  const ranked = byDate
-    .map((it, i) => ({ id: it.r.id, rank: it.rank, dateIdx: i }))
-    .filter((it) => byDate.find((x) => x.r.id === it.id)!.touched)
-    .sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.dateIdx - b.dateIdx));
-
-  const lifted = new Set(ranked.map((it) => it.id));
-  const ordered = byDate.filter((it) => !lifted.has(it.r.id));
-
-  /*
-   * Insert in rank order, each at its rank clamped to the list it is entering.
-   * A plain comparison sort cannot express this: a dragged row has to move past
-   * rows whose dates it does not precede, while those rows keep their relative
-   * positions rather than shuffling among themselves.
-   */
-  for (const it of ranked) {
-    const at = Math.max(0, Math.min(ordered.length, it.rank));
-    const item = byDate.find((x) => x.r.id === it.id)!;
-    ordered.splice(at, 0, item);
-  }
-
-  return ordered.map(({ r }) => r);
-}
 
 /**
  * Order reservations for the map and the draggable list.
@@ -352,9 +277,52 @@ function greatCircle(a: LatLng, b: LatLng, segments = 64): [number, number][] {
   return out;
 }
 
+/*
+ * Builds the two Esri canvas layers for a theme.
+ *
+ * A module-level factory rather than inline construction, because the tile
+ * layers have to be rebuilt when the theme changes (see the swap effect inside
+ * TripMap) and the map-init effect only ever runs once. Keeping the URL
+ * knowledge in one function means the initial paint and a later swap cannot
+ * drift apart.
+ */
+function createBasemapLayers(theme: Theme): L.TileLayer[] {
+  const canvasBase =
+    "https://services.arcgisonline.com/ArcGIS/rest/services/Canvas";
+  const variant = theme === "light" ? "World_Light_Gray" : "World_Dark_Gray";
+
+  return [
+    L.tileLayer(`${canvasBase}/${variant}_Base/MapServer/tile/{z}/{y}/{x}`, {
+      maxZoom: 16, // Esri canvas coverage ends here
+      attribution:
+        "Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ, &copy; OpenStreetMap contributors",
+    }),
+    // Labels/roads overlay. Drawn above the base but below the route layers
+    // added by the caller, so pins and legs are never occluded by place names.
+    L.tileLayer(`${canvasBase}/${variant}_Reference/MapServer/tile/{z}/{y}/{x}`, {
+      maxZoom: 16,
+      attribution:
+        "Labels &copy; Esri &mdash; Esri, DeLorme, NAVTEQ, &copy; OpenStreetMap contributors",
+    }),
+  ];
+}
+
 export function TripMap({ tripId }: { tripId: string }) {
-  const { helpers, reservation } = useApp();
+  const { helpers, reservation, activeUser } = useApp();
   const reservations = helpers.getReservations(tripId);
+
+  /*
+   * Resolved once and held in a ref, not read reactively by the init effect.
+   *
+   * The init effect has an empty dependency array so the map is built exactly
+   * once — adding the theme to it would destroy and rebuild the whole Leaflet
+   * instance on every toggle, discarding the user's zoom and pan position and
+   * re-fetching every tile. The ref gives init a starting value without
+   * participating in its dependencies; the swap effect below handles changes.
+   */
+  const theme: Theme = normalizeTheme(activeUser?.theme);
+  const initialThemeRef = useRef<Theme>(theme);
+  const tileLayersRef = useRef<L.TileLayer[]>([]);
 
   /*
    * In-flight drag preview: a copy of the reservations with `order` rewritten
@@ -748,48 +716,38 @@ export function TripMap({ tripId }: { tripId: string }) {
       mapRef.current = map;
 
       /*
-       * Dark basemap: Esri "World Dark Gray Canvas", which is two layers.
+       * Basemap: Esri's gray canvas, which is two layers per theme.
        *
-       * The base layer carries land, water and terrain shaded for a dark UI;
-       * the reference layer is a 99% transparent overlay holding only labels
-       * and road lines. Leaflet draws them stacked, so the pair behaves as one
-       * labelled dark basemap.
+       * Light and dark are the SAME product family with one word changed in the
+       * path (World_Dark_Gray_* vs World_Light_Gray_*), so switching themes is a
+       * URL swap rather than a second tile provider. The light variant carries
+       * the same detail and label coverage, which matters because a light theme
+       * paired with a dark basemap is the single most jarring thing a theme
+       * toggle can produce.
        *
-       * Why not CARTO's dark_all: it serves tiles without a key, but the
-       * keyless tiles are a low-detail fallback (measured 15-17 distinct grey
-       * levels per tile against 175 here, i.e. flat washes with no roads or
-       * labels) and they carry a provider watermark. Its authenticated
-       * endpoint is a separate host that does not resolve on this network.
-       * Esri's canvas tiles need no key and are genuinely detailed.
+       * The base layer carries land, water and terrain; the reference layer is a
+       * near-transparent overlay holding only labels and road lines. Leaflet
+       * draws them stacked, so the pair behaves as one labelled basemap.
+       *
+       * Why not CARTO: it serves tiles without a key, but the keyless tiles are a
+       * low-detail fallback (measured 15-17 distinct grey levels per tile against
+       * 175 here, i.e. flat washes with no roads or labels) and they carry a
+       * provider watermark. Its authenticated endpoint is a separate host that
+       * does not resolve on this network. Esri's canvas tiles need no key and are
+       * genuinely detailed.
        *
        * A CSS `invert()` over standard OSM tiles was also rejected: it inverts
        * labels along with the land, leaving place names muddy and low-contrast
-       * against the app's zinc palette.
+       * against the app's palette.
        *
-       * Esri's REST tile path is /{z}/{y}/{x} -- row before column, the
-       * reverse of the usual slippy-map convention. Leaflet's {y}/{x} tokens
-       * are ordered to match; swapping them silently serves valid PNGs of the
-       * wrong places rather than erroring, so do not "tidy" this URL.
+       * Esri's REST tile path is /{z}/{y}/{x} -- row before column, the reverse
+       * of the usual slippy-map convention. Leaflet's {y}/{x} tokens are ordered
+       * to match; swapping them silently serves valid PNGs of the wrong places
+       * rather than erroring, so do not "tidy" this URL.
        */
-      L.tileLayer(
-        "https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
-        {
-          maxZoom: 16, // Esri canvas coverage ends here
-          attribution:
-            "Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ, &copy; OpenStreetMap contributors",
-        }
-      ).addTo(map);
-
-      // Labels/roads overlay. Drawn above the base but below the route layers
-      // added later, so pins and legs are never occluded by place names.
-      L.tileLayer(
-        "https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
-        {
-          maxZoom: 16,
-          attribution:
-            "Labels &copy; Esri &mdash; Esri, DeLorme, NAVTEQ, &copy; OpenStreetMap contributors",
-        }
-      ).addTo(map);
+      const initialTileLayers = createBasemapLayers(initialThemeRef.current);
+      initialTileLayers.forEach((l) => l.addTo(map));
+      tileLayersRef.current = initialTileLayers;
 
       /*
        * Leaflet measures its container when the map is created. This component
@@ -824,8 +782,51 @@ export function TripMap({ tripId }: { tripId: string }) {
       mapRef.current = null;
       layerRef.current = null;
       frameRef.current = null;
+      // The tile layers die with the map, but the ref must not keep pointing
+      // at removed layers or the swap effect would try to operate on them.
+      tileLayersRef.current = [];
     };
   }, []);
+
+
+    /*
+     * Swap the basemap when the theme changes.
+     *
+     * A separate effect from map init, deliberately. Init owns the map's
+     * lifetime and runs once; this only replaces the two tile layers on the
+     * existing map, so toggling the theme keeps the user's zoom and pan exactly
+     * where they were. Rebuilding the map instead would also re-run geocoding
+     * and route fetches for no reason.
+     *
+     * Layers are removed and re-added rather than having their URL mutated:
+     * Leaflet caches loaded tiles per layer, so a changed URL on a live layer
+     * would keep serving the old theme's imagery until each tile expired.
+     *
+     * `addTo` appends to the top of the layer stack, which would put the new
+     * basemap ABOVE the route lines and pins. `bringToBack` on each layer in
+     * reverse order restores the intended z-order — reference labels beneath the
+     * base is wrong, so the array is re-added in its original order (base, then
+     * reference) and each is pushed to the back, leaving base under reference
+     * and both under the routes.
+     */
+    useEffect(() => {
+      const map = mapRef.current;
+      if (!map) return;
+      // Init already drew this theme; re-adding identical layers would cause
+      // every tile to be re-fetched on first mount.
+      if (initialThemeRef.current === theme) return;
+
+      const previous = tileLayersRef.current;
+      const next = createBasemapLayers(theme);
+      // Add first, then remove: the container is never left without a basemap,
+      // which would flash the page background between the two.
+      next.forEach((l) => {
+        l.addTo(map);
+        l.bringToBack();
+      });
+      previous.forEach((l) => l.remove());
+      tileLayersRef.current = next;
+    }, [theme]);
 
   /*
    * Publish Leaflet's rendered state for the iOS UI test.
