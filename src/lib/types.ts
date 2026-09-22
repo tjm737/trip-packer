@@ -147,6 +147,19 @@ export type Reservation = {
   createdAt: string;
 };
 
+export type TripMember = {
+  tripId: string;
+  userId: string;
+  /*
+   * 'editor' may change the trip's contents; 'viewer' may only read it. The
+   * owner is deliberately never in this table — trips.userId already records
+   * ownership, and storing it twice lets the two disagree. Mirrors the CHECK
+   * constraint on trip_members.
+   */
+  role: "editor" | "viewer";
+  createdAt: string;
+};
+
 export type AppState = {
   users: User[];
   activeUserId: string;
@@ -155,4 +168,14 @@ export type AppState = {
   items: PackingItem[];
   tasks: Task[];
   reservations: Reservation[];
+  /*
+   * Non-owner grants, loaded by readState().
+   *
+   * This must be populated or lib/access.ts silently treats every shared trip as
+   * unreadable: roleOnTrip() reads this list, and an empty list is
+   * indistinguishable from "no shares exist". The failure is invisible — shared
+   * trips just never appear — so it is loaded eagerly alongside the trips it
+   * refers to rather than lazily on first permission check.
+   */
+  tripMembers?: TripMember[];
 };

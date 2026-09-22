@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useApp } from "@/lib/AppContext";
+import { roleOnTrip } from "@/lib/access";
 import { getWeatherForDestination, WeatherForecast, getSuggestions, getClimateSuggestions, getHistoricalClimate, ClimateSummary, isWithinForecastRange } from "@/lib/weather";
 import { formatDateRange, isValidDate } from "@/lib/dates";
 import { Trip } from "@/lib/types";
@@ -52,6 +53,8 @@ import { TripTasks } from "@/components/TripTasks";
 import { TripReservations } from "@/components/TripReservations";
 import { TripMap } from "@/components/TripMap";
 import { Tabs } from "@/components/Tabs";
+import { ShareButton } from "@/components/ShareButton";
+import { ShareDialog } from "@/components/ShareDialog";
 import { observeEditRequests } from "@/lib/editRequest";
 import {
   Select,
@@ -378,6 +381,7 @@ export default function TripDetail() {
 
   const [tripInfo, setTripInfo] = useState<Trip | null>(null);
   const [isReady, setIsReady] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   /*
    * Which of the four sections is showing. Kept in component state rather than
@@ -534,6 +538,25 @@ export default function TripDetail() {
   const isComplete = progress === 100;
   const categories = helpers.getCategories(tripId);
 
+  /*
+   * Whether the signed-in user may manage share links for this trip.
+   *
+   * Mirrors the server's rule rather than replacing it: /api/share requires a
+   * session AND write permission (owner or editor — a viewer is deliberately
+   * refused, because re-sharing would let a viewer grant access to third
+   * parties without the owner knowing). This only decides whether the create
+   * controls are OFFERED; if the role changed underneath us the route answers
+   * 403 and the dialog reports it. `roleOnTrip` is the same function the route
+   * uses, so the two cannot drift.
+   *
+   * `state.activeUserId` is the authenticated user under real sessions, and the
+   * scoped state only contains trips this user can read, so a null role here
+   * would mean a viewer/signed-out edge case rather than an unknown trip.
+   */
+  const canShare =
+    roleOnTrip(state, state.activeUserId, tripId) === "owner" ||
+    roleOnTrip(state, state.activeUserId, tripId) === "editor";
+
   // Early return if still loading
   if (!isReady) {
     return (
@@ -615,7 +638,21 @@ export default function TripDetail() {
               </Button>
             </Tooltip>
             <span className="text-2xl">{tripInfo.icon}</span>
-            <h1 className="text-xl font-bold text-white">{tripInfo.name}</h1>
+            <h1 className="text-xl font-bold text-white truncate min-w-0 flex-1">{tripInfo.name}</h1>
+            {/*
+              Share lives in the trip header, next to the trip name, because it
+              is a property of THIS trip and the header is the one part of the
+              page that is always visible whichever tab is open. The dialog is
+              rendered here too, at the natural parent, so its open state has an
+              obvious owner (same idiom as AboutDialog in the sidebar).
+            */}
+            <ShareButton onClick={() => setShareOpen(true)} />
+            <ShareDialog
+              tripId={tripId}
+              canShare={canShare}
+              open={shareOpen}
+              onOpenChange={setShareOpen}
+            />
           </div>
 
           {/* Trip meta */}

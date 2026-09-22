@@ -21,6 +21,17 @@ const perms = h.loadModule(path.join(h.SRC, "lib", "opPermissions.ts"));
 const ROUTE = path.join(h.SRC, "app", "api", "mutate", "route.ts");
 
 /**
+ * Switch-case label shapes.
+ *
+ * The route uses one `switch (body.op)` for dispatch, whose cases are dotted op
+ * names ("trip.update"), and a second `switch (permission.kind)` for
+ * authorisation, whose cases are bare kind names ("admin", "selfOrAdmin").
+ * Telling the two apart by shape lets one scanner feed both checks.
+ */
+const OP_LABELS = /^[A-Za-z]+\.[A-Za-z]+$/;
+const KINDS = /^[a-z][A-Za-z]*$/;
+
+/**
  * Every `op: "x.y"` literal in the route's Body union.
  *
  * Deliberately reads the union rather than the switch: the union is what the
@@ -43,18 +54,24 @@ function opsInRouteSource() {
 }
 
 /**
- * Every `case "x.y":` label in the route's switch.
+ * Every `case "<label>":` label in the route's switch.
  *
- * The union and the switch must agree. An op in the switch but not the union is
- * dead code; an op in the union but not the switch falls through to the
- * `default` 400. Both are bugs worth failing on.
+ * Called with no filter to get the op labels: the union and the switch must
+ * agree. An op in the switch but not the union is dead code; an op in the union
+ * but not the switch falls through to the `default` 400. Both are bugs worth
+ * failing on.
+ *
+ * Called with FILTERS.KINDS it returns the permission-kind labels, which is how
+ * the tests discover which permission kinds the route actually enforces.
  */
-function casesInRouteSource() {
+function casesInRouteSource(filters = OP_LABELS) {
   const src = fs.readFileSync(ROUTE, "utf8");
   const found = new Set();
-  const re = /case\s+"([a-zA-Z]+\.[a-zA-Z]+)":/g;
+  const re = /case\s+"([a-zA-Z.]+)":/g;
   let m;
-  while ((m = re.exec(src)) !== null) found.add(m[1]);
+  while ((m = re.exec(src)) !== null) {
+    if (filters.test(m[1])) found.add(m[1]);
+  }
   return found;
 }
 
@@ -114,16 +131,36 @@ function casesInRouteSource() {
     h.assert(!routeOps.has("user.switch"), "user.switch must not be dispatchable");
   });
 
+  await h.test("every enforced permission kind has a handler in the route", () => {
+    // The known kinds are only "known" because the route's authorisation switch
+    // handles them. Declaring a kind in opPermissions.ts and forgetting a case
+    // in the route would make the op fall through to a handler-less switch:
+    // either it is silently skipped (fail-open) or it is an unhandled op.
+    //
+    // So rather than hardcode a list of names, derive the set of kinds the
+    // route actually enforces from its `case "<kind>":` labels and require every
+    // declared kind to be one of them. A future kind nobody enforces fails here
+    // even if the name looks plausible.
+    const kindCases = casesInRouteSource(KINDS);
+    for (const kind of ["admin", "self", "selfOrAdmin"]) {
+      h.assert(
+        kindCases.has(kind),
+        `the route must enforce "${kind}" — no case "<kind>:" handler found`
+      );
+    }
+  });
+
   await h.test("no op is accidentally left permissive", () => {
-    // Every kind must be one of the known ones. A typo like kind:"admin " or a
-    // future kind nobody enforces would otherwise silently pass.
-    const known = new Set(["create", "byId", "admin", "self", "session"]);
+    // Every kind declared in the table must be one the route enforces. A typo
+    // like kind:"admin " or a future kind nobody handles would otherwise
+    // silently pass.
+    const enforced = casesInRouteSource(KINDS);
     for (const op of perms.ALL_OPS) {
       const p = perms.permissionFor(op);
       h.assert(p !== null, `${op} must have a permission`);
       h.assert(
-        known.has(p.kind),
-        `${op} has unknown permission kind "${p.kind}" which nothing enforces`
+        enforced.has(p.kind),
+        `${op} has permission kind "${p.kind}" which nothing enforces`
       );
       if (p.kind === "create" || p.kind === "byId") {
         h.assert(
@@ -156,14 +193,32 @@ function casesInRouteSource() {
     const sr = perms.permissionFor("state.replace");
     h.assertEqual(sr.kind, "admin", "state.replace must be admin-only");
 
-    // Account ops are admin-only: closed registration, owner-created accounts.
-    for (const op of ["user.add", "user.update", "user.delete"]) {
+    // Adding or deleting accounts changes who can log in, which is not a
+    // self-service action, so those stay admin-only.
+    for (const op of ["user.add", "user.delete"]) {
       h.assertEqual(
         perms.permissionFor(op).kind,
         "admin",
         `${op} must be admin-only`
       );
     }
+
+    // Editing an account IS partly self-service: the profile screen lets a user
+    // edit their own record, the owner-only traveler editor edits anyone's. The
+    // table expresses that as selfOrAdmin, and the route must enforce the
+    // target — otherwise any signed-in user could rename any account by id.
+    // Asserting the kind alone would be satisfied by a future "selfOrAdmin"
+    // that nothing handles, so also require a real handler for it.
+    h.assertEqual(
+      perms.permissionFor("user.update").kind,
+      "selfOrAdmin",
+      "user.update is self-service for the caller plus admin for the owner"
+    );
+    h.assert(
+      casesInRouteSource(KINDS).has("selfOrAdmin"),
+      "user.update is declared selfOrAdmin, so the route must enforce it: " +
+        'no case "selfOrAdmin": handler found in mutate/route.ts'
+    );
   });
 
   await h.test("bare-id ops declare byId so the server resolves the parent", () => {

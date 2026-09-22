@@ -43,8 +43,26 @@ export async function GET(
     return NextResponse.json({ error: "This link is no longer available" }, { status: 404 });
   }
 
+  /*
+   * Field-by-field rather than spreading `trip`.
+   *
+   * A spread would publish whatever columns the table happens to have, so both
+   * `userId` (the owner's identity) and `shareToken` would go out with every
+   * request. `userId` is not the viewer's business, and re-publishing the token
+   * the caller already holds turns any HTML cache or proxy log into a
+   * credential store. Listing the fields also means a future column is private
+   * by default instead of leaking the moment it is added.
+   */
   return NextResponse.json({
-    trip,
+    trip: {
+      id: trip.id,
+      name: trip.name,
+      destination: trip.destination,
+      startDate: trip.startDate,
+      endDate: trip.endDate,
+      notes: trip.notes,
+      icon: trip.icon,
+    },
     reservations: state.reservations.filter((r) => r.tripId === tripId),
     tasks: state.tasks.filter((t) => t.tripId === tripId),
     categories: state.categories.filter((c) => c.tripId === tripId),

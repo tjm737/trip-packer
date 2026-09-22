@@ -12,6 +12,7 @@ import type {
   ReservationType,
   Task,
   Trip,
+  TripMember,
   User,
 } from "../lib/types";
 
@@ -552,6 +553,33 @@ export function readState(): AppState | null {
     db.prepare('SELECT * FROM reservations ORDER BY "order", rowid').all() as ReservationRow[]
   ).map(toReservation);
 
+  /*
+   * Non-owner membership grants.
+   *
+   * Loaded eagerly, not lazily. lib/access.ts answers every permission question
+   * through roleOnTrip(), which reads this list off state, and an unloaded list
+   * is indistinguishable from "no shares exist" — shared trips would simply
+   * never appear, with nothing logged. Loading it here keeps membership in the
+   * same snapshot as the trips it refers to.
+   *
+   * The role is narrowed on read as well as constrained by the table's CHECK, so
+   * a hand-edited database cannot introduce a third value that access.ts would
+   * treat as "not editor" (i.e. silently downcast to viewer).
+   */
+  const tripMembers = (
+    db.prepare("SELECT tripId, userId, role, createdAt FROM trip_members").all() as {
+      tripId: string;
+      userId: string;
+      role: string;
+      createdAt: string;
+    }[]
+  ).map((m) => ({
+    tripId: m.tripId,
+    userId: m.userId,
+    role: (m.role === "editor" ? "editor" : "viewer") as "editor" | "viewer",
+    createdAt: m.createdAt,
+  }));
+
   const activeRow = db.prepare("SELECT value FROM settings WHERE key = ?").get(ACTIVE_USER_KEY) as
     | { value: string }
     | undefined;
@@ -561,7 +589,7 @@ export function readState(): AppState | null {
   const activeUserId =
     activeRow && users.some((u) => u.id === activeRow.value) ? activeRow.value : users[0].id;
 
-  return { users, activeUserId, trips, categories, items, tasks, reservations };
+  return { users, activeUserId, trips, categories, items, tasks, reservations, tripMembers };
 }
 
 /**
@@ -807,6 +835,40 @@ export const tx = {
 
   deleteTrip(id: string): void {
     getDb().prepare("DELETE FROM trips WHERE id = ?").run(id);
+  },
+
+  /*
+   * Membership grants.
+   *
+   * The owner is never a member row: trips.userId already records ownership, and
+   * a duplicate row would be a second source of truth that access.ts ignores
+   * (roleOnTrip returns "owner" before consulting this table). Callers that try
+   * to add the owner get a row that does nothing, which is why the UI must not
+   * offer it rather than relying on this layer to reject it.
+   *
+   * The role is validated here as well as by the table's CHECK constraint so a
+   * bad value fails with a legible error instead of a raw SqliteError.
+   */
+  addTripMember(m: TripMember): void {
+    if (m.role !== "editor" && m.role !== "viewer") {
+      throw new Error(`addTripMember: invalid role ${String(m.role)}`);
+    }
+    getDb()
+      .prepare(
+        `INSERT INTO trip_members (tripId, userId, role, createdAt)
+         VALUES (@tripId, @userId, @role, @createdAt)
+         ON CONFLICT(tripId, userId) DO UPDATE SET role = excluded.role`
+      )
+      .run(m);
+  },
+
+  removeTripMember(tripId: string, userId: string): void {
+    getDb().prepare("DELETE FROM trip_members WHERE tripId = ? AND userId = ?").run(tripId, userId);
+  },
+
+  /** Revoke every grant on a trip, e.g. when its owner makes it private again. */
+  removeAllTripMembers(tripId: string): void {
+    getDb().prepare("DELETE FROM trip_members WHERE tripId = ?").run(tripId);
   },
 
   insertCategory(c: Category): void {

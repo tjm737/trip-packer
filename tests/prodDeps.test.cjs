@@ -24,6 +24,7 @@
 const h = require("./harness.cjs");
 const fs = require("node:fs");
 const path = require("node:path");
+const { builtinModules } = require("node:module");
 
 const ROOT = path.join(h.SRC, "..");
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
@@ -31,10 +32,19 @@ const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"))
 const deps = new Set(Object.keys(pkg.dependencies || {}));
 const devDeps = new Set(Object.keys(pkg.devDependencies || {}));
 
-/** Bare specifiers: not relative, not absolute, not a node: builtin. */
+/*
+ * Node's own modules are supplied by the runtime, so they are correctly absent
+ * from package.json and there is nothing to install or prune. Asking Node for
+ * the list rather than hardcoding it means a newly imported builtin (os,
+ * crypto, child_process, ...) is excluded automatically instead of showing up
+ * as a phantom "undeclared package".
+ */
+const builtins = new Set(builtinModules);
+
+/** Bare specifiers: not relative, not absolute, not a Node builtin. */
 function isBare(spec) {
   if (spec.startsWith(".") || spec.startsWith("/") || spec.startsWith("node:")) return false;
-  return true;
+  return !builtins.has(packageOf(spec));
 }
 
 /** "better-sqlite3/lib/x" and "@scope/pkg/sub" both reduce to the package name. */
