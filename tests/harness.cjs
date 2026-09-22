@@ -14,6 +14,13 @@
  * which Node can resolve directly. We transpile each module to CommonJS with
  * `ts.transpileModule`, strip types, and resolve relative / `@/` imports
  * ourselves via a tiny loader, so the real files run unmodified.
+ *
+ * This makes `typescript` a RUNTIME dependency, not a dev one. scripts/
+ * create-account.cjs loads this harness to reach the real db.ts and auth.ts, and
+ * that CLI runs in production on the server. Keeping typescript in
+ * devDependencies meant `npm prune --omit=dev` removed it and the CLI died with
+ * "Cannot find module 'typescript'" -- so it lives in dependencies now. Do not
+ * move it back to devDependencies.
  */
 
 const ts = require("typescript");

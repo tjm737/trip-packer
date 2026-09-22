@@ -95,13 +95,23 @@ Accounts are **not** self-service; registration is closed by design. Create the
 first one on the server:
 
 ```bash
-sudo -u trip-packer npm run create-account -- \
-  --email you@example.com --name "Tyler Morgan"
+cd /opt/trip-packer
+node scripts/create-account.cjs --email you@example.com --name "Tyler Morgan"
 ```
 
 It prompts for the password with echo disabled. The **first** account created is
 automatically made owner; later ones are not. Pass `--owner` explicitly to
 promote a subsequent account.
+
+Run it as **root** from the repo root, not via `sudo -u trip-packer`. `sudo -u`
+resets `PATH`, so `npm` and even `node` may not resolve for that user, and the
+failure looks like a missing module rather than a missing PATH. The CLI opens the
+database by path and does its own hashing, so which user runs it does not affect
+correctness -- only file ownership matters, which `deploy.sh` handles.
+
+If it fails with `Cannot find module`, run `bash deploy/diagnose-account.sh`
+(read-only) -- it reports exactly which of PATH, read access, and write access is
+the problem.
 
 `data/` must be owned by `trip-packer`, since the CLI and the service open the
 same SQLite file. The deploy script sets this.
