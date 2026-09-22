@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+		Privacy manifest for TripPlanner.
+
+		Required by Apple since Spring 2024 for every app and SDK submitted to
+		the App Store. This file is the app's own declaration; each third-party
+		SDK must ship its own alongside its binary, and Capacitor's packages
+		do (they arrive via SPM into the built product, which is why none are
+		found loose in this repo).
+
+		Everything here is a statement of fact about what the app actually
+		does. It was checked against the source rather than filled in from a
+		template, because an inaccurate manifest is worse than a missing one:
+		it is a signed declaration, and reviewers do diff it against observed
+		behaviour.
+
+		Verified absences -- these are why the corresponding keys are NOT here:
+		  * No geolocation. Nothing in src/ calls navigator.geolocation. Maps
+		    are rendered from stored trip data, not the device's position.
+		  * No camera, microphone, or photo library access.
+		  * No notification permission requests.
+		  * No ATT / IDFA / advertising identifiers, and no analytics SDK.
+		    The app talks to exactly three kinds of host: its own origin, the
+		    Open-Meteo weather/geocoding APIs, and OpenStreetMap/Nominatim for
+		    geocoding and map tiles. None are ad or tracking networks.
+	-->
+
+	<!--
+		No tracking. The app does not link user or device data with data from
+		third parties for advertising, and does not share data with data
+		brokers. A false value here is the strong claim, and it is true: there
+		is no ad SDK and no cross-app identifier in the binary.
+	-->
+	<key>NSPrivacyTracking</key>
+	<false/>
+
+	<!--
+		Empty, and deliberately explicit rather than omitted, so the absence of
+		tracking domains is a positive declaration a reviewer can read at a
+		glance instead of having to infer.
+	-->
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+
+	<!--
+		Collected data types.
+
+		TripPlanner stores an account email, a display name, and the travel
+		itinerary the user enters (trips, bookings, notes). Two properties
+		matter for the answers below:
+
+		  * It is all first-party. The data is written to the operator's own
+		    SQLite instance. It is not sent to a third party for processing,
+		    so the purposes are App Functionality only -- not Analytics, not
+		    Third-Party Advertising, not Developer Advertising.
+		  * All of it is user-provided. The user types their email, their
+		    name, and their bookings. Nothing is collected passively from the
+		    device, which is why no NSPrivacyCollectedDataTypeSensor or
+		    *UsageData / *Diagnostics entries appear.
+	-->
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array>
+
+		<!-- Account identity: email + display name, supplied at sign-up. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeEmailAddress</string>
+			<!-- Plain integer, not a string: Apple's schema requires a boolean. -->
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+
+		<!-- Display name. Same handling as the email above. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeName</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+
+		<!--
+			Itinerary content: flight numbers, hotel names and addresses, car
+			rentals, notes. Apple has no "travel" category, so this is other
+			user content -- the residual bucket for data that is not identity,
+			financial, or device telemetry. It is linked because it belongs to
+			the account that created it.
+		-->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeOtherUserContent</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+
+	</array>
+
+	<!--
+		Required-reason APIs.
+
+		This app calls none of them from its own code: no UserDefaults, no
+		file-timestamp or disk-space probes, no system-boot-time reads, no
+		active-keyboard queries. The list is therefore empty.
+
+		It is empty on purpose rather than by omission. If a future change adds
+		a Capacitor plugin that reads UserDefaults, that plugin ships its own
+		manifest declaring its own reason -- this file does not need to grow
+		for that. It would need to grow only if app-authored Swift started
+		calling one of those APIs directly.
+	-->
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array/>
+
+</dict>
+</plist>

@@ -47,9 +47,25 @@
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
+	<!--
+		arm64, not armv7.
+
+		armv7 is the value the Capacitor template ships with, but it is a
+		32-bit architecture that iOS dropped support for years ago: the app
+		builds arm64-only (lipo reports a non-fat arm64 binary, and the arch
+		settings in the project carry no 32-bit slice). Declaring a capability
+		the binary does not contain is at best meaningless and at worst an
+		automated-review flag for a stale project config.
+
+		Xcode happens to rewrite this key during the build from the resolved
+		ARCHS, so the shipped Info.plist already said arm64 while the source
+		said armv7 -- the two disagreed, and only the build output was right.
+		Correcting the source so the committed file matches what actually
+		ships, rather than leaving a trap for the next person to read it.
+	-->
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
-		<string>armv7</string>
+		<string>arm64</string>
 	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
@@ -67,18 +83,37 @@
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 	<!--
-	  Allows the app to reach a plain-http host during development, which is
-	  what a laptop dev server is. NSAllowsLocalNetworking alone does not cover
-	  a localhost origin, so a loopback exception is declared explicitly.
+		App Transport Security.
 
-	  This is scoped to development only: a deployed host is HTTPS, and once
-	  TRIP_PACKER_URL points at it this block should be removed. Leaving it in
-	  a shipping build would let any cleartext request through.
+		WHAT IS HERE AND WHY IT IS SAFE TO SHIP
+
+		Only the two loopback entries remain, and only so that a device or
+		simulator build can point at a plain-http dev server via
+		TRIP_PACKER_URL during bring-up.
+
+		Loopback exceptions cannot weaken the shipped app. Production is
+		https://trips.planetracker.app (the default in capacitor.config.ts),
+		so cleartext is false and no exception is consulted. And localhost /
+		127.0.0.1 resolve to the phone itself, where there is no attacker to
+		intercept: these grant no reachability that ATS was protecting.
+
+		The LAN-IP exception that used to live here is deliberately gone. That
+		one WAS a real hole -- it permitted cleartext to a stale address on
+		whatever network the device later joined, so a released build could
+		have talked in the clear to a stranger's host.
+
+		WHAT IS NOT HERE
+
+		No NSAllowsArbitraryLoads. That would disable ATS app-wide and is the
+		usual cause of an App Store rejection under guideline 5.1.1.
+
+		NSAllowsLocalNetworking is also absent. It was present earlier, but it
+		is a broader grant than the two loopback domains need, and removing it
+		cost nothing: the loopback entries cover the development case on their
+		own. Kept out so the declaration stays as narrow as the actual need.
 	-->
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
 		<key>NSExceptionDomains</key>
 		<dict>
 			<key>localhost</key>
