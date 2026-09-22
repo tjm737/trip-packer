@@ -37,6 +37,22 @@ export interface Release {
  */
 export const RELEASES: Release[] = [
   {
+    version: "0.7.0",
+    date: "2026-09-22",
+    headline: "Packing suggestions you choose from",
+    groups: [
+      {
+        area: "Packing",
+        items: [
+          "The packing list can now suggest items for your trip — tap \"Suggest items\" and you get ideas based on where you are going, how long for, and the time of year.",
+          "Suggestions never change your list on their own. Each idea is offered as a row you tap to add, so you keep full control of what goes on the list.",
+          "Anything already packed is left out of the suggestions, and items you have already added are marked so they cannot be added twice.",
+          "This runs on your iPhone using Apple Intelligence, so what you are packing for is worked out on the device and nothing is sent anywhere.",
+        ],
+      },
+    ],
+  },
+  {
     version: "0.6.1",
     date: "2026-09-22",
     headline: "Groundwork for on-device suggestions",

@@ -50,7 +50,40 @@ interface FoundationModelsPlugin {
   }): Promise<StructuredResult>;
 }
 
-const Plugin = registerPlugin<FoundationModelsPlugin>("FoundationModels");
+/*
+ * Register with an explicit web implementation.
+ *
+ * Capacitor resolves a plugin's implementation lazily, per call, from the
+ * second argument to `registerPlugin`. Registering with no second argument
+ * leaves that empty, so every method throws CapacitorException("... is not
+ * implemented on web") before our own logic runs. That still lands in the
+ * catch blocks below and produces the right answer, but by exception rather
+ * than by declaration -- and it makes the bridge untestable, because there is
+ * no supported seam to substitute.
+ *
+ * Declaring the web implementation makes "this platform cannot do on-device
+ * generation" an explicit, inspectable fact. The reason is reported as
+ * `os_too_old` so it reads as the same user-facing situation as an old iOS
+ * build: on the web there is simply no on-device model to call.
+ */
+const WEB_UNAVAILABLE: AvailabilityReport = {
+  available: false,
+  reason: "os_too_old",
+  message: "Suggestions need the iOS app on iOS 26 or later.",
+};
+
+const Plugin = registerPlugin<FoundationModelsPlugin>("FoundationModels", {
+  web: () =>
+    Promise.resolve({
+      isAvailable: async (): Promise<AvailabilityReport> => WEB_UNAVAILABLE,
+      generate: async (): Promise<{ text: string }> => {
+        throw new Error("FoundationModels.generate is unavailable on the web");
+      },
+      generateStructured: async (): Promise<StructuredResult> => {
+        throw new Error("FoundationModels.generateStructured is unavailable on the web");
+      },
+    } satisfies FoundationModelsPlugin),
+});
 
 /**
  * The report returned when the plugin is not present at all.

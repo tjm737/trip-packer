@@ -139,6 +139,19 @@ export function tripDurationDays(startDate: string | null | undefined, endDate: 
 }
 
 /**
+ * Month the trip starts, as 1-12; null when unknown or invalid.
+ *
+ * Used to reason about climate — a packing prompt that knows the trip is in
+ * February suggests different things than one that doesn't. Routed through
+ * `parseDateOnly` for the same UTC off-by-one reason as the other helpers: at
+ * month boundaries, `new Date("2026-02-01")` can report January.
+ */
+export function tripStartMonth(startDate: string | null | undefined): number | null {
+  const start = parseDateOnly(startDate ?? "");
+  return start ? start.getMonth() + 1 : null;
+}
+
+/**
  * Number of nights between two dates: a check-in on the 3rd and a check-out on
  * the 8th is five nights.
  *

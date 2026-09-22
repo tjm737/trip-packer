@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useApp } from "@/lib/AppContext";
 import { roleOnTrip } from "@/lib/access";
 import { getWeatherForDestination, WeatherForecast, getSuggestions, getClimateSuggestions, getHistoricalClimate, ClimateSummary, isWithinForecastRange } from "@/lib/weather";
-import { formatDateRange, isValidDate } from "@/lib/dates";
+import { formatDateRange, isValidDate, tripDurationDays, tripStartMonth } from "@/lib/dates";
 import { Trip } from "@/lib/types";
 import { fetchState } from "@/lib/storage";
 import { useCacheTripPage } from "@/lib/useCacheTripPage";
@@ -55,6 +55,7 @@ import { TripTasks } from "@/components/TripTasks";
 import { TripReservations } from "@/components/TripReservations";
 import { TripMap } from "@/components/TripMap";
 import { Tabs } from "@/components/Tabs";
+import { PackingSuggestions } from "@/components/PackingSuggestions";
 import { ShareButton } from "@/components/ShareButton";
 import { PrintButton } from "@/components/PrintButton";
 import { ShareDialog } from "@/components/ShareDialog";
@@ -1053,6 +1054,16 @@ export default function TripDetail() {
                      stacks one item per row with a mostly-empty middle. The two-column
                      grid nearly halves the page height. `items-start` stops a short
                      category from stretching to match a tall neighbour. */}
+                    {/* Suggest items -- on-device model, click-to-add only.
+                        Sits above the category grid so the candidates are
+                        visible next to the list they'd join. */}
+                    <PackingSuggestions
+                      tripId={tripId}
+                      destination={tripInfo.destination}
+                      days={tripDurationDays(tripInfo.startDate, tripInfo.endDate) ?? undefined}
+                      month={tripStartMonth(tripInfo.startDate) ?? undefined}
+                    />
+
                     {categories.length === 0 ? (
                       <div className="text-center py-16">
                     <Cloud className="w-12 h-12 text-zinc-700 mx-auto mb-3" />
