@@ -105,9 +105,11 @@ function loadModule(file, parentCache = new Map()) {
 
 let passed = 0;
 let failed = 0;
+let registeredTests = 0;
 const failures = [];
 
 function test(name, fn) {
+  registeredTests++;
   return Promise.resolve()
     .then(fn)
     .then(() => {
@@ -143,6 +145,33 @@ function assertDeepEqual(actual, expected, msg) {
 function summary() {
   console.log("");
   console.log(`  ${passed} passed, ${failed} failed`);
+
+  /*
+   * Guard against the top-level-summary trap.
+   *
+   * `test()` is async, so calling `summary()` synchronously at module top level
+   * runs it BEFORE any test has completed: it prints "0 passed, 0 failed" and
+   * leaves process.exitCode untouched, so a suite with real failures exits 0
+   * and run.cjs counts it as passing. That is a silent-loss failure — the tests
+   * look green forever while asserting nothing.
+   *
+   * Zero completed tests is only ever legitimate if no test was registered.
+   * If tests were registered but none finished, the caller forgot to await.
+   */
+  const registered = passed + failed;
+  if (registered === 0 && registeredTests > 0) {
+    console.log("");
+    console.log(
+      `  HARNESS ERROR: ${registeredTests} test(s) registered but 0 completed.`
+    );
+    console.log(
+      "  summary() was called before the tests finished — wrap the suite in an"
+    );
+    console.log("  async IIFE and `await h.test(...)` each case.");
+    process.exitCode = 1;
+    return;
+  }
+
   if (failed > 0) {
     console.log("");
     for (const f of failures) {

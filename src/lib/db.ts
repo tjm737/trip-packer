@@ -191,6 +191,123 @@ function migrate(db: SqliteDb): void {
    * field must not retroactively relabel everybody's itinerary as tentative.
    */
   addColumnIfMissing(db, "reservations", "confirmed", "INTEGER NOT NULL DEFAULT 1");
+
+  /*
+   * Accounts.
+   *
+   * `users` predates authentication: it was a profile list living inside one
+   * shared dataset, and `activeUserId` was a setting the client could point at
+   * anyone. Under real auth the same rows become accounts, so we add the
+   * credential columns rather than creating a parallel table — that would
+   * orphan the existing userId foreign keys on trips.
+   *
+   * NULLs are deliberate and load-bearing:
+   *
+   *   email        NULL for a pre-auth profile that has not been claimed yet.
+   *                UNIQUE in SQLite permits multiple NULLs, so several
+   *                unclaimed profiles can coexist without colliding.
+   *   passwordHash NULL means "cannot log in". A profile created from the old
+   *                switchable list has no password and therefore no access
+   *                until an admin sets one. This is why the column is nullable
+   *                rather than NOT NULL with an empty-string default: an empty
+   *                hash must never be mistaken for a valid credential.
+   *
+   * There is no `isAdmin` flag. Admin is "this account has a password and
+   * therefore can log in and create others" — see lib/auth. A boolean would
+   * need a migration and could drift out of sync with the credential it
+   * describes.
+   */
+  addColumnIfMissing(db, "users", "email", "TEXT");
+  addColumnIfMissing(db, "users", "passwordHash", "TEXT");
+  addColumnIfMissing(db, "users", "isOwner", "INTEGER NOT NULL DEFAULT 0");
+
+  /*
+   * Partial unique index on email.
+   *
+   * A plain `UNIQUE` column would also work, but uniqueness is only wanted for
+   * rows that HAVE an email. The `WHERE email IS NOT NULL` predicate scopes the
+   * constraint to claimed accounts, so any number of pre-auth profiles can keep
+   * a NULL email without colliding with each other — which a bare UNIQUE index
+   * would also allow in SQLite, but only by accident of NULL comparison
+   * semantics. Stating it explicitly keeps the intent visible.
+   */
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
+      ON users(email)
+      WHERE email IS NOT NULL;
+  `);
+
+  /*
+   * Sessions.
+   *
+   * The cookie carries a random opaque token; this table is the only thing that
+   * can turn it into a user id. Nothing about the user is encoded in the cookie,
+   * so a client cannot forge or edit an identity — it can only present a token
+   * that either exists here or does not.
+   *
+   * `tokenHash` rather than the raw token: a leaked database dump (or a backup
+   * left in /tmp) must not hand an attacker live sessions. The raw token is
+   * shown to the browser once and never stored.
+   *
+   * ON DELETE CASCADE means deleting an account immediately invalidates its
+   * sessions instead of leaving orphaned tokens that still authenticate to a
+   * user row that no longer exists.
+   */
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      tokenHash TEXT PRIMARY KEY,
+      userId    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      createdAt TEXT NOT NULL,
+      expiresAt TEXT NOT NULL,
+      userAgent TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(userId);
+    CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expiresAt);
+  `);
+
+  /*
+   * Trip membership — the sharing model.
+   *
+   * The owner of a trip is `trips.userId` and is deliberately NOT represented
+   * here. Storing the owner as a row would create two sources of truth that can
+   * disagree (an owner row deleted, or a membership row claiming ownership of
+   * someone else's trip), and the resolution order in lib/access.ts depends on
+   * ownership being unambiguous.
+   *
+   * So this table holds only *non-owner* grants. The role check constraint
+   * enforces that at the schema level: 'owner' cannot be inserted here at all,
+   * which means a bug in application code cannot create a second owner.
+   */
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS trip_members (
+      tripId    TEXT NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+      userId    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role      TEXT NOT NULL DEFAULT 'viewer'
+                  CHECK (role IN ('editor', 'viewer')),
+      createdAt TEXT NOT NULL,
+      PRIMARY KEY (tripId, userId)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_trip_members_user ON trip_members(userId);
+  `);
+
+  /*
+   * Login attempts, for rate limiting.
+   *
+   * Only FAILED attempts are recorded. A successful login clears the counter,
+   * so a working user is never locked out no matter how many times they log in.
+   * Rate limiting on totals is the classic way to lock a legitimate user out of
+   * their own account after a handful of normal uses.
+   */
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS login_attempts (
+      key         TEXT PRIMARY KEY,
+      failures    INTEGER NOT NULL DEFAULT 0,
+      firstFailedAt TEXT NOT NULL,
+      lastFailedAt  TEXT NOT NULL
+    );
+  `);
 }
 
 function addColumnIfMissing(
