@@ -26,9 +26,13 @@ import type { CapacitorConfig } from "@capacitor/cli";
  * itself, so set TRIP_PACKER_URL to the Mac's LAN address before running on
  * hardware.
  *
- * cleartext is enabled only so a plain-http dev host works during bring-up. A
- * deployed host is HTTPS and does not need it — see the ATS note in
- * ios/App/App/Info.plist.
+ * The deployed build points at https://trips.planetracker.app. Because that is
+ * HTTPS the WebView loads it with no cleartext exemption at all: `cleartext`
+ * below evaluates to false, and the ATS block in ios/App/App/Info.plist keeps
+ * only the localhost/127.0.0.1 exceptions needed to develop against a plain-http
+ * dev server. The LAN-IP exception that used to live there is gone — it was a
+ * bring-up scaffold, and leaving it in would have shipped a build that silently
+ * permitted cleartext to a stale address on someone else's network.
  */
 const serverUrl = process.env.TRIP_PACKER_URL ?? "http://localhost:4000";
 
