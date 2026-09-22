@@ -168,7 +168,8 @@ Check it is alive:
 
 Create your login (run as root, from ${APP_DIR}):
   cd ${APP_DIR}
-  node scripts/create-account.cjs --email you@example.com --name "You"
+  EMAIL="you@example.com"
+  node scripts/create-account.cjs --email "\$EMAIL" --name "You"
 
 That prompts for a password with echo off. The first account becomes owner.
 
