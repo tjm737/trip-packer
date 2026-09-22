@@ -5,15 +5,18 @@ import { motion } from "framer-motion";
 import { MapPin, Route, Loader2, AlertTriangle, Clock, ExternalLink, Plane, GripVertical, ChevronUp, ChevronDown, Pencil, BedDouble, Car, TrainFront, Ship, Ticket, CalendarDays, RotateCcw, CircleDashed } from "lucide-react";
 import "leaflet/dist/leaflet.css";
 /*
- * Explicit import rather than relying on `@types/leaflet`'s UMD global.
+ * Leaflet is never imported statically.
  *
- * The UMD declaration makes `L` a global only for scripts; in a module, tsc
- * rejects it with TS2686. It previously appeared to work because every use sat
- * inside the component, where the reference resolved through the global
- * namespace. The module-level `createBasemapLayers` below has no such cover, so
- * the import is required.
+ * It reads browser-only globals at module scope — `var requestFn =
+ * window.requestAnimationFrame || ...` in leaflet-src — so a static import
+ * throws "window is not defined" while the SSR module graph instantiates this
+ * file, 500ing the entire /trips/[id] route before React renders. "use client"
+ * does not help: Next still evaluates the client graph on the server for
+ * prerendering.
+ *
+ * Every consumer therefore loads it lazily with `await import("leaflet")` from
+ * inside an effect, and createBasemapLayers takes the namespace as an argument.
  */
-import L from "leaflet";
 
 import { useApp } from "@/lib/AppContext";
 import { Reservation, ReservationType } from "@/lib/types";
@@ -286,7 +289,10 @@ function greatCircle(a: LatLng, b: LatLng, segments = 64): [number, number][] {
  * knowledge in one function means the initial paint and a later swap cannot
  * drift apart.
  */
-function createBasemapLayers(theme: Theme): L.TileLayer[] {
+function createBasemapLayers(
+  theme: Theme,
+  L: typeof import("leaflet"),
+): import("leaflet").TileLayer[] {
   const canvasBase =
     "https://services.arcgisonline.com/ArcGIS/rest/services/Canvas";
   const variant = theme === "light" ? "World_Light_Gray" : "World_Dark_Gray";
@@ -322,7 +328,7 @@ export function TripMap({ tripId }: { tripId: string }) {
    */
   const theme: Theme = normalizeTheme(activeUser?.theme);
   const initialThemeRef = useRef<Theme>(theme);
-  const tileLayersRef = useRef<L.TileLayer[]>([]);
+  const tileLayersRef = useRef<import("leaflet").TileLayer[]>([]);
 
   /*
    * In-flight drag preview: a copy of the reservations with `order` rewritten
@@ -745,7 +751,7 @@ export function TripMap({ tripId }: { tripId: string }) {
        * to match; swapping them silently serves valid PNGs of the wrong places
        * rather than erroring, so do not "tidy" this URL.
        */
-      const initialTileLayers = createBasemapLayers(initialThemeRef.current);
+      const initialTileLayers = createBasemapLayers(initialThemeRef.current, L);
       initialTileLayers.forEach((l) => l.addTo(map));
       tileLayersRef.current = initialTileLayers;
 
@@ -816,16 +822,29 @@ export function TripMap({ tripId }: { tripId: string }) {
       // every tile to be re-fetched on first mount.
       if (initialThemeRef.current === theme) return;
 
-      const previous = tileLayersRef.current;
-      const next = createBasemapLayers(theme);
-      // Add first, then remove: the container is never left without a basemap,
-      // which would flash the page background between the two.
-      next.forEach((l) => {
-        l.addTo(map);
-        l.bringToBack();
-      });
-      previous.forEach((l) => l.remove());
-      tileLayersRef.current = next;
+      let cancelled = false;
+
+      (async () => {
+        // Lazy import: leaflet touches `window` at module scope, so it must not
+        // be evaluated on the server (see the note at the top of this file).
+        const L = await import("leaflet");
+        if (cancelled) return;
+
+        const previous = tileLayersRef.current;
+        const next = createBasemapLayers(theme, L);
+        // Add first, then remove: the container is never left without a basemap,
+        // which would flash the page background between the two.
+        next.forEach((l) => {
+          l.addTo(map);
+          l.bringToBack();
+        });
+        previous.forEach((l) => l.remove());
+        tileLayersRef.current = next;
+      })();
+
+      return () => {
+        cancelled = true;
+      };
     }, [theme]);
 
   /*
