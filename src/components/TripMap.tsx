@@ -8,6 +8,7 @@ import "leaflet/dist/leaflet.css";
 import { useApp } from "@/lib/AppContext";
 import { Reservation, ReservationType } from "@/lib/types";
 import { formatDate } from "@/lib/dates";
+import { MapProbe } from "@/components/MapProbe";
 import { readCachedCoords, writeCachedCoords } from "@/lib/geoCache";
 import { readCachedLegs, writeCachedLegs } from "@/lib/routeCache";
 import { apiUrl } from "@/lib/apiUrl";
@@ -387,6 +388,23 @@ export function TripMap({ tripId }: { tripId: string }) {
    * either endpoint edits the same booking.
    */
   const [editingStopId, setEditingStopId] = useState<string | null>(null);
+
+  /*
+   * What Leaflet actually rendered, republished for the iOS UI test.
+   *
+   * Polled from the live DOM rather than derived from React state, because the
+   * question is whether the *browser* decoded tiles, not whether we asked it to.
+   * `leaflet-tile-loaded` is only applied after decode, so it is real evidence;
+   * counting <img> tags would not be. See MapProbe.tsx for why the page has to
+   * report this itself.
+   */
+  const [probe, setProbe] = useState({
+    paneExists: false,
+    tiles: 0,
+    loaded: 0,
+    errored: 0,
+    pins: 0,
+  });
 
   /* Collect every distinct location named by a booking. */
   const locations = useMemo(() => {
@@ -809,6 +827,40 @@ export function TripMap({ tripId }: { tripId: string }) {
     };
   }, []);
 
+  /*
+   * Publish Leaflet's rendered state for the iOS UI test.
+   *
+   * Only runs in the Capacitor shell: the probe is test scaffolding and has no
+   * business running in a browser, where the regression tests cover the map.
+   *
+   * Polls rather than subscribes because tile loading is driven by the network
+   * and there is no "all tiles decoded" event to hook. The interval stops once
+   * every tile has loaded cleanly, so this costs nothing in the steady state.
+   */
+  useEffect(() => {
+    if (!mapReady) return;
+    if (typeof window === "undefined" || !("Capacitor" in window)) return;
+
+    let stopped = false;
+    const read = () => {
+      if (stopped) return;
+      const pane = document.querySelector(".leaflet-pane");
+      const tiles = document.querySelectorAll("img.leaflet-tile").length;
+      const loaded = document.querySelectorAll("img.leaflet-tile-loaded").length;
+      const errored = document.querySelectorAll("img.leaflet-tile-error").length;
+      const pins = document.querySelectorAll(".leaflet-marker-icon").length;
+      setProbe({ paneExists: !!pane, tiles, loaded, errored, pins });
+      // Everything decoded and nothing broken: nothing left to report.
+      if (tiles > 0 && loaded === tiles && errored === 0) stopped = true;
+    };
+    read();
+    const id = window.setInterval(read, 1000);
+    return () => {
+      stopped = true;
+      window.clearInterval(id);
+    };
+  }, [mapReady]);
+
   /* --- Step 4: draw pins and legs whenever the data changes -------------- */
   useEffect(() => {
     if (!mapReady) return;
@@ -1103,6 +1155,8 @@ export function TripMap({ tripId }: { tripId: string }) {
 
   return (
     <div className="surface-raised rounded-xl border border-white/8 p-4 sm:p-5">
+      {/* Reports Leaflet's rendered state to the iOS UI test; no-op in a browser. */}
+      <MapProbe {...probe} />
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Route className="h-4 w-4 text-emerald-400" />
