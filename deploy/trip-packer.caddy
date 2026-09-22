@@ -1,4 +1,10 @@
-trips.planetracker.app {
+# Caddy site block for trip-packer.
+#
+# This is a TEMPLATE. deploy.sh replaces the double-braced token below with the
+# $DOMAIN value and installs the result at /etc/caddy/trip-packer.caddy. Do not
+# install this file verbatim: the token is not a valid Caddy hostname and
+# `caddy validate` would reject it.
+{{DOMAIN}} {
     reverse_proxy localhost:4100
 
     header / {

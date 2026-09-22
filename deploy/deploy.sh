@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# deploy.sh — deploy trip-packer to the plane-tracker VPS (198.71.49.25).
+# deploy.sh — deploy trip-packer to a VPS behind Caddy.
 #
 # Run AS ROOT on the VPS. Mirrors plane-tracker's deploy.sh conventions:
 #   - app lives in /opt/<name>, owned by a dedicated system user
@@ -21,7 +21,9 @@ set -euo pipefail
 APP_NAME="trip-packer"
 APP_DIR="/opt/${APP_NAME}"
 REPO_DIR="${APP_DIR}"
-DOMAIN="trips.planetracker.app"
+# Domain Caddy serves this app on. Override without editing this file:
+#   DOMAIN=trips.mydomain.com bash deploy/deploy.sh
+DOMAIN="${DOMAIN:-trips.example.com}"
 PORT=4100
 SERVICE_USER="trip-packer"
 CADDYFILE="/etc/caddy/${APP_NAME}.caddy"
@@ -152,7 +154,17 @@ fi
 # ── Caddy ───────────────────────────────────────────────────────────────────
 if command -v caddy &>/dev/null; then
   info "Configuring Caddy for ${DOMAIN}"
-  install -m 644 "${APP_DIR}/deploy/trip-packer.caddy" "${CADDYFILE}"
+  # The template carries {{DOMAIN}} rather than a literal hostname, so that no
+  # real domain lives in the repository. Substituting here rather than shipping
+  # a second pre-filled file keeps one source of truth for the site block.
+  sed "s/{{DOMAIN}}/${DOMAIN}/g" "${APP_DIR}/deploy/trip-packer.caddy" > "${CADDYFILE}"
+  chmod 644 "${CADDYFILE}"
+  # Fail loudly if the placeholder somehow survived: a literal {{DOMAIN}} would
+  # make Caddy reject the whole config, taking the other site on this box down
+  # with it when the reload is attempted.
+  if grep -q "{{DOMAIN}}" "${CADDYFILE}"; then
+    die "Caddy template placeholder {{DOMAIN}} was not substituted (DOMAIN='${DOMAIN}')"
+  fi
   mkdir -p /var/log/caddy
   chown -R caddy:caddy /var/log/caddy 2>/dev/null || true
   caddy fmt "${CADDYFILE}" --overwrite 2>/dev/null || true
@@ -198,7 +210,7 @@ if getent hosts "${DOMAIN}" >/dev/null 2>&1 || host "${DOMAIN}" >/dev/null 2>&1;
   fi
 else
   warn "${DOMAIN} does NOT resolve yet. Add the record, then re-run this script:"
-  warn "    A  trips  ->  198.71.49.25"
+  warn "    A  trips  ->  <SERVER_IP>"
 fi
 
 echo

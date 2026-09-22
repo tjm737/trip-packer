@@ -1,22 +1,27 @@
-# Deploying trip-packer to trips.planetracker.app
+# Deploying trip-packer
 
-Target: the existing Plane Tracker VPS, **198.71.49.25**. Same box, different
-port (4100) and a second Caddy site block. Nothing here touches the running
-Plane Tracker app (port 3000).
+Target: an existing VPS that already serves another app. Same box, different
+port (4100) and a second Caddy site block. Nothing here touches the app already
+running on port 3000.
+
+Throughout this document `<SERVER_IP>` stands for that host's address, and
+`example.com` stands for your domain. Substitute your own values -- the
+placeholders are deliberate, so the repository carries no real infrastructure
+details.
 
 ---
 
 ## Step 1 — DNS (the blocker)
 
-Add one record at whoever hosts DNS for `planetracker.app`:
+Add one record at whoever hosts DNS for your domain:
 
 ```
 Type   Name    Value             TTL
-A      trips   198.71.49.25      300
+A      trips   <SERVER_IP>      300
 ```
 
 Use `trips` (not the FQDN) if the provider appends the zone automatically. If
-the provider wants the full name, use `trips.planetracker.app`.
+the provider wants the full name, use `trips.example.com`.
 
 **Verify before doing anything else.** Caddy requests a TLS certificate on first
 request for a hostname, and Let's Encrypt will fail the HTTP-01 challenge if the
@@ -24,8 +29,8 @@ name does not resolve. Deploying first means a failed cert and a confusing
 debugging session.
 
 ```bash
-dig +short trips.planetracker.app
-# must print 198.71.49.25
+dig +short trips.example.com
+# must print <SERVER_IP>
 ```
 
 Do not proceed until that returns the right IP. Propagation is usually minutes
@@ -51,13 +56,26 @@ Then clone and deploy:
 
 ```bash
 cd /opt
-git clone git@github.com:tjm737/trip-packer.git
+git clone https://github.com/tjm737/trip-packer.git
 cd trip-packer
-bash deploy/deploy.sh
+DOMAIN=trips.mydomain.com bash deploy/deploy.sh
+```
+
+`DOMAIN` selects the hostname Caddy serves and requests a certificate for. If you
+omit it, the placeholder `trips.example.com` is used, which will not resolve and
+the certificate request will fail -- so always pass it.
+
+Prefer `bootstrap.sh` over `deploy.sh` on a fresh box: it checks the
+preconditions first (root, node/git/npm/sqlite3 present, node >= v20, port state)
+and clones the repo itself, rather than failing partway through with a raw git
+error. It accepts the same `DOMAIN` override.
+
+```bash
+DOMAIN=trips.mydomain.com bash deploy/bootstrap.sh
 ```
 
 If the clone fails with `Permission denied (publickey)`, the deploy key is not
-attached to the repo, or the `trip-packer` host alias is missing. Confirm with:
+attached to the repo. Confirm with:
 
 ```bash
 ssh -T git@github.com     # expect: "Hi tjm737/trip-packer! You've successfully authenticated"

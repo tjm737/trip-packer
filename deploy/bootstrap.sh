@@ -22,6 +22,11 @@ REPO_SLUG="${REPO_OWNER}/${REPO_NAME}"
 APP_DIR="/opt/${REPO_NAME}"
 KEY_PATH="/root/.ssh/${REPO_NAME}"
 
+# Hostname Caddy serves this app on. Required: the default is a placeholder that
+# will not resolve, and a certificate request for it would fail.
+#   DOMAIN=trips.mydomain.com bash bootstrap.sh
+DOMAIN="${DOMAIN:-}"
+
 # Colours only if stdout is a terminal, so piping to a file stays readable.
 if [[ -t 1 ]]; then
   R=$'\033[31m'; G=$'\033[32m'; Y=$'\033[33m'; D=$'\033[2m'; N=$'\033[0m'
@@ -83,7 +88,8 @@ else
 fi
 
 fetch_repo() {
-  # Prefer a token if given: it needs no GitHub UI step and no host key dance.
+  # The repo is public, so an anonymous HTTPS clone normally just works.
+  # A token is still honoured if supplied, for forks or if it goes private again.
   if [[ -n "${GITHUB_TOKEN:-}" ]]; then
     info "cloning with GITHUB_TOKEN"
     git clone --quiet \
@@ -94,14 +100,21 @@ fetch_repo() {
     return 0
   fi
 
+  info "cloning ${REPO_SLUG} anonymously (public repo)"
+  if git clone --quiet "https://github.com/${REPO_SLUG}.git" "${APP_DIR}"; then
+    return 0
+  fi
+
+  # Anonymous failed. Most likely the repo went private again. Try a deploy key
+  # before giving up, since one may already be on disk.
   if [[ -f "${KEY_PATH}" ]]; then
-    info "cloning with deploy key ${KEY_PATH}"
+    info "anonymous clone failed; retrying with deploy key ${KEY_PATH}"
     GIT_SSH_COMMAND="ssh -i ${KEY_PATH} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
       git clone --quiet "git@github.com:${REPO_SLUG}.git" "${APP_DIR}" || return 1
     return 0
   fi
 
-  return 2  # no credential available
+  return 3  # clone failed and there is no fallback credential
 }
 
 if [[ "${USE_EXISTING}" -eq 1 ]]; then
@@ -113,34 +126,35 @@ else
   rc=$?
   set -e
   case "${rc}" in
-    0) ok "cloned ${REPO_SLUG} to ${APP_DIR}" ;;
-    2)
-      cat <<EOF
+  0) ok "cloned ${REPO_SLUG} to ${APP_DIR}" ;;
+  *)
+    cat <<EOF
 
-  No git credential found, and the repo is PRIVATE.
+  Could not clone ${REPO_SLUG}.
 
-  Pick one of these, then re-run bootstrap.sh:
+  If the anonymous clone was refused, the repo is probably private again. Two
+  ways to get a credential, then re-run bootstrap.sh:
 
-  A) deploy key (no token to leak)
+  A) personal access token (no GitHub UI step)
+       GITHUB_TOKEN=<token> bash $0
+
+     The token needs read access to this repo. It is used only for the clone and
+     is stripped from .git/config immediately afterwards.
+
+  B) deploy key
        ssh-keygen -t ed25519 -f ${KEY_PATH} -N "" -C "trip-packer-deploy"
        cat ${KEY_PATH}.pub
      Add that key at:
        https://github.com/${REPO_SLUG}/settings/keys
      (read-only access is enough; do NOT enable write access)
 
-  B) personal access token
-       GITHUB_TOKEN=<token> bash $0
-
-     The token needs read access to this repo. It is used only for the clone and
-     is stripped from .git/config immediately afterwards.
+  If the repo IS public, check network egress: can this host reach github.com?
+       curl -sI https://github.com | head -1
 
 EOF
-      die "cannot clone a private repo without a credential"
-      ;;
-    *)
-      die "git clone failed (see the error above). A common cause is the deploy key existing locally but not having been added to GitHub at https://github.com/${REPO_SLUG}/settings/keys"
-      ;;
-  esac
+    die "git clone failed (see the error above)"
+    ;;
+esac
 fi
 
 # Prove we can actually read from origin before spending minutes on a build.
@@ -153,7 +167,15 @@ fi
 # ── Deploy ──────────────────────────────────────────────────────────────────
 printf '\n== deploy ==\n'
 [[ -f "${APP_DIR}/deploy/deploy.sh" ]] || die "deploy/deploy.sh missing from the checkout"
+if [[ -z "${DOMAIN}" ]]; then
+  die "DOMAIN is not set. Pass the hostname Caddy should serve, e.g.
+       DOMAIN=trips.mydomain.com bash $0
+     Without it the Caddy template's 'trips.example.com' placeholder is used,
+     which will not resolve and the Let's Encrypt challenge will fail."
+fi
 cd "${APP_DIR}"
+# Export so deploy.sh sees it and substitutes it into the Caddy template.
+export DOMAIN
 bash deploy/deploy.sh
 
 # ── Next step ───────────────────────────────────────────────────────────────
@@ -164,7 +186,7 @@ ${G}Deploy script finished.${N}
 Check it is alive:
   systemctl status trip-packer --no-pager
   curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4100/api/state   # expect 401
-  curl -s -o /dev/null -w '%{http_code}\n' https://trips.planetracker.app/api/state
+  curl -s -o /dev/null -w '%{http_code}\n' https://trips.example.com/api/state
 
 Create your login (run as root, from ${APP_DIR}):
   cd ${APP_DIR}
