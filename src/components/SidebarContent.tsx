@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AboutButton, AboutDialog } from "@/components/AboutDialog";
 import { SignInButton, LoginDialog } from "@/components/LoginDialog";
+import { CreateAccountDialog } from "@/components/CreateAccountDialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { toast } from "@/components/ui/toast";
 import {
@@ -36,6 +37,7 @@ import {
   ArrowRight,
   UserRound,
   UserCog,
+  UserPlus,
   LogOut,
 } from "lucide-react";
 
@@ -59,6 +61,33 @@ function UserAvatar({ user, size = "md" }: { user: User; size?: "sm" | "md" | "l
     >
       {initials}
     </div>
+  );
+}
+
+/**
+ * Sidebar entry that opens the create-account dialog.
+ *
+ * Same square icon-button shape as SignInButton and ProfileButton so the footer
+ * row stays visually even. `data-keep-drawer-open` IS set, for the same reason
+ * AboutButton needs it: MobileSidebar closes on any button click, and since the
+ * dialog renders inside the drawer body, that close would unmount the dialog in
+ * the same tick and it would flash and disappear on a phone.
+ *
+ * Only rendered for an owner (see SidebarBody). That is presentation: the
+ * permission lives in /api/accounts, which refuses any non-owner regardless of
+ * what the client chooses to draw.
+ */
+function CreateAccountButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      data-keep-drawer-open
+      title="Create an account for someone else"
+      aria-label="Create an account"
+      className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200 focus-ring"
+    >
+      <UserPlus className="h-4 w-4" />
+    </button>
   );
 }
 
@@ -1007,13 +1036,37 @@ function TripList() {
 }
 
 export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
+  const { activeUser, hydrated } = useApp();
   const [aboutOpen, setAboutOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+
+  /*
+   * "Signed in" here is the SESSION (the authenticated user this browser's
+   * state was scoped to), not the accounts list. `activeUser` resolves from
+   * `state.activeUserId`, which scopeStateForUser() sets to the authenticated
+   * actor, so it is non-null exactly when the client holds a real session's
+   * data. `state.users` would be the wrong signal: the sidebar's ACCOUNTS
+   * section deliberately lists every account, and that list existing says
+   * nothing about who is signed in.
+   *
+   * `hydrated` is required as well, because state is empty during SSR: without
+   * it the server would paint a Sign in button into the signed-in page and it
+   * would only disappear on hydration — the same flash of a control the user
+   * cannot use that the AppShell docs describe for the "New Trip" button.
+   */
+  const signedIn = hydrated && Boolean(activeUser);
 
   return (
     <>
-      {/* Brand */}
-      <div className="flex items-center gap-2.5 border-b border-white/8 px-4 py-3.5">
+      {/* Brand — the whole block links home, matching the wordmark-as-home
+          affordance users expect from a top-left logo. */}
+      <Link
+        href="/"
+        className="focus-ring flex items-center gap-2.5 border-b border-white/8 px-4 py-3.5 transition-colors hover:bg-white/5"
+        title="Back to the TripPlanner home page"
+        aria-label="TripPlanner home"
+      >
         <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400 to-emerald-600">
           <span className="text-sm leading-none">✈️</span>
         </div>
@@ -1025,7 +1078,7 @@ export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
             Plan smarter, stress less
           </p>
         </div>
-      </div>
+      </Link>
 
       <UserSwitcher />
 
@@ -1041,7 +1094,21 @@ export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
           <Plus className="mr-1.5 h-4 w-4" />
           New Trip
         </Button>
-        <SignInButton onClick={() => setLoginOpen(true)} />
+        {/* Same session gate as the account controls above: the sidebar is the
+            signed-in chrome, so a Sign in button while there is a session is a
+            control the user can only be confused by. It stays for the case
+            where the shell rendered but the client has no session data. */}
+        {!signedIn && <SignInButton onClick={() => setLoginOpen(true)} />}
+        {/*
+          Owner-only. The gate is `hydrated` AND the acting user being an owner,
+          which mirrors the server's own check rather than replacing it: a
+          non-owner who unhides this button still gets a 403 from /api/accounts.
+          Hydration is required so the server does not paint an admin control
+          into the page for a non-owner and only remove it on hydrate.
+        */}
+        {hydrated && activeUser?.isOwner ? (
+          <CreateAccountButton onClick={() => setCreateOpen(true)} />
+        ) : null}
         <ThemeToggle />
         <ProfileButton />
         <SignOutButton />
@@ -1049,6 +1116,16 @@ export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
       </div>
 
       <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
+      <CreateAccountDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={(user) => {
+          toast.add({
+            title: `Account created for ${user.name}`,
+            type: "success",
+          });
+        }}
+      />
       <LoginDialog
         open={loginOpen}
         onOpenChange={setLoginOpen}

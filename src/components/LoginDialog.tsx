@@ -17,10 +17,10 @@ import { AlertCircle, Loader2, Lock } from "lucide-react";
 /**
  * Sign-in dialog.
  *
- * Accounts are created on the server with `npm run create-account`; there is no
- * sign-up here by design, and the copy says so rather than leaving the absence
- * to be discovered. Closed registration is a deliberate property of a
- * single-owner app, so the UI should not imply a door that is not there.
+ * There is no self-service sign-up here by design: accounts are created by an
+ * existing owner, either from their sidebar or with `npm run create-account` on
+ * the server. Closed registration is a deliberate property of an app for a
+ * known handful of people, so the UI should not imply a door that is not there.
  *
  * The dialog never reports WHY a sign-in failed. The server returns a single
  * `Invalid email or password` for both an unknown email and a wrong password so
@@ -201,7 +201,7 @@ export function LoginDialog({
 
           <div className="mt-4 flex items-center justify-between gap-3">
             <p className="text-[10px] leading-snug text-zinc-500">
-              Accounts are created by the server administrator.
+              Accounts are created by the trip owner from their sidebar.
             </p>
             <Button
               type="submit"
