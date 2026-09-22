@@ -9,6 +9,7 @@ import { useApp } from "@/lib/AppContext";
 import { Reservation, ReservationType } from "@/lib/types";
 import { formatDate } from "@/lib/dates";
 import { readCachedCoords, writeCachedCoords } from "@/lib/geoCache";
+import { readCachedLegs, writeCachedLegs } from "@/lib/routeCache";
 import { apiUrl } from "@/lib/apiUrl";
 import { useWhenServiceWorkerReady } from "@/lib/serviceWorker";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -656,14 +657,33 @@ export function TripMap({ tripId }: { tripId: string }) {
       return;
     }
 
+    const hops = roadHops.map((h) => ({
+      from: visibleStops[h.a].point,
+      to: visibleStops[h.b].point,
+    }));
+
+    /*
+     * Seed from previously resolved legs before the request, so a cached route
+     * is drawn immediately offline rather than after a failed fetch. Same
+     * ordering contract as the live path: index into `roadHops`.
+     */
+    const cached = readCachedLegs(hops);
+    if (!cancelled && cached.size > 0) {
+      setLegs(
+        [...cached.entries()].map(([i, l]) => ({
+          ...l,
+          fromIndex: roadHops[i].a,
+          toIndex: roadHops[i].b,
+        }))
+      );
+    }
+
     (async () => {
       try {
         const res = await fetch(apiUrl("/api/route"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            hops: roadHops.map((h) => ({ from: visibleStops[h.a].point, to: visibleStops[h.b].point })),
-          }),
+          body: JSON.stringify({ hops }),
         });
         if (!res.ok) return; // legs are a bonus; the map still works without them
         const data = (await res.json()) as {
@@ -678,8 +698,14 @@ export function TripMap({ tripId }: { tripId: string }) {
           toIndex: roadHops[i].b,
         }));
         setLegs(mapped);
+        // Persist so the next offline visit can still draw the route.
+        writeCachedLegs(hops, data.legs ?? []);
       } catch {
-        // Ignore: the pins are the essential part, the route line is not.
+        /*
+         * Offline. The cached legs seeded above are already on screen, so there
+         * is nothing to do here — the pins and the drive figures are the
+         * essential part and both survive without a connection.
+         */
       }
     })();
 
