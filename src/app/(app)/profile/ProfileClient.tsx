@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { UserAvatar } from "@/components/UserAvatar";
+import { DangerZone } from "./DangerZone";
 
 export function ProfileClient({ userId }: { userId: string }) {
   const router = useRouter();
@@ -102,6 +103,13 @@ export function ProfileClient({ userId }: { userId: string }) {
   }
 
   const preview = { ...me, name: name.trim() || me.name, avatarColor: color || me.avatarColor };
+
+  /*
+   * Trips this account owns, which is exactly what a delete would cascade away.
+   * Counted rather than described so the warning can name a number — "your
+   * trips" is easy to skim past, "2 trips" is not.
+   */
+  const ownedTripCount = state.trips.filter((t) => t.userId === userId).length;
 
   return (
     <div className="mx-auto w-full max-w-2xl px-5 py-8">
@@ -223,6 +231,25 @@ export function ProfileClient({ userId }: { userId: string }) {
           Email and password are managed by the instance owner.
         </p>
       </section>
+
+      {/*
+        * Account deletion lives on the profile screen because this is where a
+        * user is already looking at their own account. App Store guideline
+        * 5.1.1(v) requires the ability to delete an in-app account, and a CLI
+        * script on the server is not that.
+        *
+        * Owned-trip count is loaded before offering the button: deleting an
+        * account cascades to every trip it owns (db.ts trips.userId is
+        * ON DELETE CASCADE), so "delete my account" silently destroys the
+        * itineraries too. The user is told the real number first, because the
+        * one thing worse than losing the account is losing the trips without
+        * being warned.
+        */}
+      <DangerZone userId={userId} ownedTripCount={ownedTripCount} />
+
+      <p className="mt-6 text-center text-[11px] text-zinc-600">
+        Signed in as {me.name}
+      </p>
     </div>
   );
 }

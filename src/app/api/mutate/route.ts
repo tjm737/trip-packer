@@ -196,8 +196,13 @@ export function applyMutation(
        * user rename any other account by passing its id, and the store layer
        * would not catch it: updateUser's allow-list constrains which COLUMNS can
        * be written, not which ROW.
+       *
+       * user.delete is checked the same way for the same reason: relaxing it to
+       * selfOrAdmin (which 5.1.1(v) requires) would otherwise let any signed-in
+       * user delete any other account by passing its id.
        */
-      const targetUserId = body.op === "user.update" ? body.id : null;
+      const targetUserId =
+        body.op === "user.update" || body.op === "user.delete" ? body.id : null;
       if (!targetUserId) {
         return { ok: false, status: 400, error: "Missing user id" };
       }

@@ -188,27 +188,49 @@ function casesInRouteSource(filters = OP_LABELS) {
     );
   });
 
-  await h.test("destructive ops are not reachable by a plain member", () => {
+  await h.test("destructive ops stay gated, and self-service stays narrow", () => {
     // Spot-check the highest-consequence ops. state.replace rewrites all data.
     const sr = perms.permissionFor("state.replace");
     h.assertEqual(sr.kind, "admin", "state.replace must be admin-only");
 
-    // Adding or deleting accounts changes who can log in, which is not a
-    // self-service action, so those stay admin-only.
-    for (const op of ["user.add", "user.delete"]) {
-      h.assertEqual(
-        perms.permissionFor(op).kind,
-        "admin",
-        `${op} must be admin-only`
-      );
-    }
+    // Adding an account changes who can log in and is not a self-service
+    // action, so it stays admin-only.
+    h.assertEqual(
+      perms.permissionFor("user.add").kind,
+      "admin",
+      "user.add must be admin-only"
+    );
 
-    // Editing an account IS partly self-service: the profile screen lets a user
-    // edit their own record, the owner-only traveler editor edits anyone's. The
-    // table expresses that as selfOrAdmin, and the route must enforce the
-    // target — otherwise any signed-in user could rename any account by id.
-    // Asserting the kind alone would be satisfied by a future "selfOrAdmin"
-    // that nothing handles, so also require a real handler for it.
+    /*
+     * Deleting an account is different, and deliberately so.
+     *
+     * This used to assert user.delete was admin-only, on the reasoning that
+     * deleting accounts "changes who can log in". That reasoning still holds
+     * for OTHER people's accounts — but a user deleting THEMSELVES is the one
+     * case where it must not be admin-only: App Store guideline 5.1.1(v)
+     * requires in-app account deletion, and the alternative was telling users
+     * to run a server-side script. So user.delete is selfOrAdmin, and the
+     * admin-only invariant moves to the target check: the route must refuse a
+     * target that is not the caller. Asserting the kind alone is not enough,
+     * because a selfOrAdmin that nothing enforces is just "anyone".
+     */
+    h.assertEqual(
+      perms.permissionFor("user.delete").kind,
+      "selfOrAdmin",
+      "user.delete is self-service (5.1.1(v)) plus admin for the owner"
+    );
+
+    /*
+     * Editing an account IS partly self-service: the profile screen lets a user
+     * edit their own record, the owner-only traveler editor edits anyone's. The
+     * table expresses that as selfOrAdmin, and the route must enforce the
+     * target — otherwise any signed-in user could rename any account by id.
+     *
+     * The handler assertion below now covers user.delete as well as
+     * user.update: both are selfOrAdmin, so both depend on the same route
+     * branch resolving a target. Asserting the kind alone would be satisfied by
+     * a future "selfOrAdmin" that nothing handles.
+     */
     h.assertEqual(
       perms.permissionFor("user.update").kind,
       "selfOrAdmin",
@@ -216,8 +238,8 @@ function casesInRouteSource(filters = OP_LABELS) {
     );
     h.assert(
       casesInRouteSource(KINDS).has("selfOrAdmin"),
-      "user.update is declared selfOrAdmin, so the route must enforce it: " +
-        'no case "selfOrAdmin": handler found in mutate/route.ts'
+      "user.update AND user.delete are declared selfOrAdmin, so the route must " +
+        "enforce them: no case \"selfOrAdmin\": handler found in mutate/route.ts"
     );
   });
 

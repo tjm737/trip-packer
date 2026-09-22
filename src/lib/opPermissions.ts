@@ -82,7 +82,20 @@ export const OP_PERMISSIONS = {
    * instance is an invitation.
    */
   "user.add": { kind: "admin" },
-  "user.delete": { kind: "admin" },
+  /*
+   * Deleting an account is selfOrAdmin, not admin.
+   *
+   * App Store guideline 5.1.1(v) requires that a user be able to delete their
+   * own account from inside the app, and an owner-only op cannot satisfy that:
+   * the whole point is that the person deleting is not the owner. The target is
+   * therefore enforced in the route (same shape as user.update) so a caller can
+   * only ever delete themselves unless they are an owner.
+   *
+   * This is deliberately narrower than it looks: "who can log in" is still
+   * owner-controlled for everyone else, and the route keeps the last-account
+   * guard — an instance with zero accounts has no way back in through the UI.
+   */
+  "user.delete": { kind: "selfOrAdmin" },
   /*
    * Editing an account is the one account op that is not purely administrative.
    * The sidebar's traveler editor (owner-only) and the profile screen
