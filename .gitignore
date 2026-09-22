@@ -40,7 +40,11 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# local database (SQLite data + WAL sidecar files)
-/data/*.db
-/data/*.db-shm
-/data/*.db-wal
+# Local database (SQLite data + WAL sidecar files).
+#
+# /data/ is ignored wholesale rather than by extension. The earlier narrow
+# patterns (*.db, *.db-shm, *.db-wal) matched only that exact suffix, so
+# timestamped backups such as trip-packer.db.bak-20260922-095154 slipped
+# through and were committed -- carrying real trip data. Anything in here is
+# machine-local state and must never be pushed.
+/data/
