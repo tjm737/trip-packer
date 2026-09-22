@@ -34,6 +34,7 @@ import {
   X,
   ArrowRight,
   UserRound,
+  UserCog,
   LogOut,
 } from "lucide-react";
 
@@ -131,12 +132,23 @@ function ProfileButton() {
 }
 
 /**
- * User switcher.
+ * User switcher — split into two sections.
  *
- * Sits in the sidebar header. The active user's name is rendered inline next to
- * their avatar rather than underneath it — an absolutely-positioned label
- * (`-bottom-4`) previously overflowed the section, whose padding-bottom is 0,
- * and landed on top of the "Upcoming" control below.
+ * Sits in the sidebar header. The list is no longer flat: every row in `users`
+ * is either an ACCOUNT (has credentials, can sign in) or a COMPANION (a
+ * per-trip person with no login). The client cannot read `passwordHash` by
+ * design — `toUser()` in lib/db.ts strips it and omits `email` entirely when
+ * absent — so the discriminator is exactly `Boolean(u.email)`. An account has
+ * an email on its row; a companion does not. That is the only signal the
+ * client is given, and it is sufficient, so no field was added to the type or
+ * the API for this.
+ *
+ * Account rows are owner-gated: a non-owner sees them read-only, because the
+ * underlying ops (user.add/user.update/user.delete) are owner-only server-side
+ * and offering a control that can only 403 is worse than offering none. The
+ * "new accounts are made with the CLI" hint exists because `user.add` inserts
+ * a profile with NO credentials (api/mutate/route.ts user.add), so there is no
+ * honest in-app way to create a login — see the hint's own comment.
  *
  * Avatars are one control each: the active one is highlighted with a ring and
  * carries the name, inactive ones are dimmed and show their name on hover.
@@ -154,22 +166,33 @@ function UserSwitcher() {
 
   if (!activeUser) return null;
 
+  // See the doc comment above: email is the client-side account marker.
+  const isAccount = (u: User) => Boolean(u.email);
+  const accounts = state.users.filter(isAccount);
+  const companions = state.users.filter((u) => !isAccount(u));
+  // Owner-gating runs off the signed-in user's own isOwner flag, which the
+  // server sends only when true (toUser). A non-owner therefore sees the
+  // Accounts list but none of its controls.
+  const isOwner = Boolean(activeUser.isOwner);
+
   return (
     <div className="px-4 py-3 border-b border-white/8">
+      {/* ---------------------------------------------------------- */}
+      {/* Accounts — owner-gated                                      */}
+      {/* ---------------------------------------------------------- */}
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-          <Users className="h-3.5 w-3.5 text-zinc-500" />
+          <UserCog className="h-3.5 w-3.5 text-zinc-500" />
           <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500">
-            Travelers
+            Accounts
           </span>
         </div>
-        <span className="text-[10px] text-zinc-600 tnum">
-          {state.users.length}
-        </span>
+        <span className="text-[10px] text-zinc-600 tnum">{accounts.length}</span>
       </div>
+      <p className="mb-1.5 text-[11px] text-zinc-500">Can sign in to TripPlanner.</p>
 
       <div className="flex flex-col gap-0.5">
-        {state.users.map((u) => {
+        {accounts.map((u) => {
           return (
             <div
               key={u.id}
@@ -184,46 +207,48 @@ function UserSwitcher() {
                 </span>
               </div>
 
-              {/*
-                * The edit (pencil) button is always rendered, including for the
-                * sole traveler - the profile editor is the only way to change
-                * your own name and avatar colour, so hiding it behind
-                * `users.length > 1` made a single-traveler setup uneditable.
-                * Delete stays guarded: removing the last traveler is refused by
-                * the API anyway (there is no user-less state), so offering the
-                * button would only ever produce an error.
-                * `data-keep-drawer-open` is required on both controls for the
-                * same reason AboutButton needs it: MobileSidebar closes on any
-                * button tap, which unmounts SidebarBody and takes the dialog
-                * with it. Without this the editor flashed open and vanished on
-                * a phone.
-                */}
-              <div className="flex flex-shrink-0 items-center gap-0.5 transition-opacity md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100">
-                <button
-                  data-keep-drawer-open
-                  onClick={() => {
-                    setEditingId(u.id);
-                    setEditName(u.name);
-                    setEditColor(u.avatarColor);
-                  }}
-                  className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200 focus-ring"
-                  aria-label={`Edit ${u.name} profile`}
-                  title={`Edit ${u.name} profile`}
-                >
-                  <Pencil className="h-3 w-3" />
-                </button>
-                {state.users.length > 1 && (
+              {isOwner && (
+                /*
+                 * The edit (pencil) button is always rendered, including for the
+                 * sole traveler - the profile editor is the only way to change
+                 * your own name and avatar colour, so hiding it behind
+                 * `users.length > 1` made a single-traveler setup uneditable.
+                 * Delete stays guarded: removing the last traveler is refused by
+                 * the API anyway (there is no user-less state), so offering the
+                 * button would only ever produce an error.
+                 * `data-keep-drawer-open` is required on both controls for the
+                 * same reason AboutButton needs it: MobileSidebar closes on any
+                 * button tap, which unmounts SidebarBody and takes the dialog
+                 * with it. Without this the editor flashed open and vanished on
+                 * a phone.
+                 */
+                <div className="flex flex-shrink-0 items-center gap-0.5 transition-opacity md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100">
                   <button
                     data-keep-drawer-open
-                    onClick={() => setConfirmDeleteId(u.id)}
-                    className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-red-500/10 hover:text-red-400 focus-ring"
-                    aria-label={`Remove ${u.name}`}
-                    title={`Remove ${u.name}`}
+                    onClick={() => {
+                      setEditingId(u.id);
+                      setEditName(u.name);
+                      setEditColor(u.avatarColor);
+                    }}
+                    className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200 focus-ring"
+                    aria-label={`Edit ${u.name} profile`}
+                    title={`Edit ${u.name} profile`}
                   >
-                    <Trash2 className="h-3 w-3" />
+                    <Pencil className="h-3 w-3" />
                   </button>
-                )}
-              </div>
+                  {state.users.length > 1 && (
+                    <button
+                      data-keep-drawer-open
+                      onClick={() => setConfirmDeleteId(u.id)}
+                      className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-red-500/10 hover:text-red-400 focus-ring"
+                      aria-label={`Remove ${u.name}`}
+                      title={`Remove ${u.name}`}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              )}
 
               {/* Edit profile */}
               <Dialog
@@ -236,7 +261,7 @@ function UserSwitcher() {
               >
                 <DialogContent className="sm:max-w-[360px] bg-[var(--surface-2)] border-zinc-700">
                   <DialogHeader>
-                    <DialogTitle className="text-zinc-100">Edit traveler</DialogTitle>
+                    <DialogTitle className="text-zinc-100">Edit account</DialogTitle>
                     <DialogDescription className="text-xs text-zinc-500">
                       Your name and avatar colour appear throughout the app.
                     </DialogDescription>
@@ -254,9 +279,7 @@ function UserSwitcher() {
                           {editName.trim() || u.name}
                         </p>
                         <p className="text-[11px] text-zinc-500">
-                          {state.users.length > 1
-                            ? "Traveler"
-                            : "You · only traveler"}
+                          {u.id === activeUser.id ? "Account · you" : "Account"}
                         </p>
                       </div>
                     </div>
@@ -354,7 +377,7 @@ function UserSwitcher() {
               >
                 <DialogContent className="sm:max-w-[320px] bg-[var(--surface-2)] border-zinc-700">
                   <DialogHeader>
-                    <DialogTitle className="text-zinc-100">Remove traveler</DialogTitle>
+                    <DialogTitle className="text-zinc-100">Remove account</DialogTitle>
                   </DialogHeader>
                   <p className="text-sm text-zinc-400">
                     Remove {u.name} and all of their trips? This cannot be undone.
@@ -380,26 +403,289 @@ function UserSwitcher() {
           );
         })}
 
-        {/* Add traveler */}
-        <button
-          data-keep-drawer-open
-          onClick={() => setOpen(true)}
-          className="mt-0.5 flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-xs text-zinc-500 transition-colors hover:bg-white/[0.03] hover:text-zinc-300 focus-ring"
-          title="Add a traveler"
-        >
-          <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-dashed border-zinc-600">
-            <Plus className="h-3.5 w-3.5" />
+        {isOwner ? (
+          /*
+           * There is deliberately NO in-app "add account" button. `user.add`
+           * inserts a profile row with no credentials (see
+           * api/mutate/route.ts, case "user.add"), so an account created that
+           * way could never sign in — a button labelled "Add account" would lie
+           * about what it does. Real logins are minted on the server by
+           * scripts/create-account.cjs (`npm run create-account`), so the UI
+           * states that instead of offering a control that cannot work. Not a
+           * button: nothing to tap, nothing to trick the drawer into closing.
+           */
+          <p className="mt-1 rounded-lg border border-dashed border-zinc-700/60 px-2 py-1.5 text-[11px] leading-relaxed text-zinc-600">
+            New sign-in accounts are created on the server with{" "}
+            <code className="rounded bg-white/5 px-1 py-0.5 text-[10px] text-zinc-400">
+              npm run create-account
+            </code>
+            .
+          </p>
+        ) : (
+          <p className="mt-1 px-2 py-1.5 text-[11px] text-zinc-600">
+            Only the owner can manage accounts.
+          </p>
+        )}
+      </div>
+
+      {/* ---------------------------------------------------------- */}
+      {/* Companions                                                  */}
+      {/* ---------------------------------------------------------- */}
+      {/*
+        * Companions are ALSO owner-only, and that is not obvious: a companion
+        * profile is a `users` row, and the op that creates one (`user.add`) is
+        * `{ kind: "admin" }`. opPermissions.ts is explicit that this is
+        * deliberate — "an open registration endpoint on a personal instance is
+        * an invitation" — so the server refuses a non-owner with 403.
+        *
+        * A previous revision of this component claimed "open to anyone" and
+        * rendered the controls unconditionally. Because the client discards the
+        * mutate error, a non-owner saw a working-looking dialog that silently
+        * did nothing. Gate the controls to match what the API will actually
+        * allow, rather than offering a button that cannot succeed.
+        *
+        * (Per-trip collaboration is the thing that IS open to non-owners, and
+        * it belongs on trip_members, not on the global users table.)
+        */}
+      <div className="mb-2 mt-4 flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Users className="h-3.5 w-3.5 text-zinc-500" />
+          <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500">
+            Companions
           </span>
-          <span>Add traveler</span>
-        </button>
+        </div>
+        <span className="text-[10px] text-zinc-600 tnum">{companions.length}</span>
+      </div>
+      <p className="mb-1.5 text-[11px] text-zinc-500">
+        Appear on trips but cannot sign in.
+      </p>
+
+      <div className="flex flex-col gap-0.5">
+        {companions.length === 0 && (
+          <p className="px-2 py-1.5 text-[11px] text-zinc-600">No companions yet.</p>
+        )}
+
+        {companions.map((u) => {
+          return (
+            <div
+              key={u.id}
+              className="group flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-white/[0.03]"
+            >
+              <div className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+                <span className="relative flex-shrink-0">
+                  <UserAvatar user={u} size="sm" />
+                </span>
+                <span className="truncate text-xs text-zinc-300">
+                  {u.name}
+                </span>
+              </div>
+
+              {/* Same reasoning as the Accounts pencil: always rendered so a
+                  companion's name and colour stay editable. Delete is guarded
+                  on length > 1 for the same API reason. Both are hidden for a
+                  non-owner because user.update and user.delete are refused
+                  server-side for anyone who is not an owner. */}
+              <div className="flex flex-shrink-0 items-center gap-0.5 transition-opacity md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100">
+                {isOwner && (
+                  <button
+                    data-keep-drawer-open
+                    onClick={() => {
+                      setEditingId(u.id);
+                      setEditName(u.name);
+                      setEditColor(u.avatarColor);
+                    }}
+                    className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200 focus-ring"
+                    aria-label={`Edit ${u.name} profile`}
+                    title={`Edit ${u.name} profile`}
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                )}
+                {isOwner && state.users.length > 1 && (
+                  <button
+                    data-keep-drawer-open
+                    onClick={() => setConfirmDeleteId(u.id)}
+                    className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-red-500/10 hover:text-red-400 focus-ring"
+                    aria-label={`Remove ${u.name}`}
+                    title={`Remove ${u.name}`}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+
+              {/* Edit companion */}
+              <Dialog
+                open={editingId === u.id}
+                onOpenChange={(o) =>
+                  o
+                    ? (setEditingId(u.id), setEditName(u.name), setEditColor(u.avatarColor))
+                    : setEditingId(null)
+                }
+              >
+                <DialogContent className="sm:max-w-[360px] bg-[var(--surface-2)] border-zinc-700">
+                  <DialogHeader>
+                    <DialogTitle className="text-zinc-100">Edit companion</DialogTitle>
+                    <DialogDescription className="text-xs text-zinc-500">
+                      This name and avatar colour appear on trips you add them to.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                      <UserAvatar
+                        user={{ ...u, name: editName || u.name, avatarColor: editColor || u.avatarColor }}
+                        size="lg"
+                      />
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-zinc-100">
+                          {editName.trim() || u.name}
+                        </p>
+                        <p className="text-[11px] text-zinc-500">Companion</p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label
+                        htmlFor={`name-${u.id}`}
+                        className="text-xs text-zinc-400"
+                      >
+                        Name
+                      </Label>
+                      <Input
+                        id={`name-${u.id}`}
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && editName.trim()) {
+                            user.update(u.id, {
+                              name: editName.trim(),
+                              avatarColor: editColor || u.avatarColor,
+                            });
+                            setEditingId(null);
+                          }
+                        }}
+                        className="mt-1.5 bg-zinc-800 border-zinc-600 text-zinc-100"
+                      />
+                    </div>
+
+                    <div>
+                      <Label className="text-xs text-zinc-400">Avatar color</Label>
+                      <div
+                        role="radiogroup"
+                        aria-label="Avatar color"
+                        className="mt-2 flex flex-wrap gap-2"
+                      >
+                        {AVATAR_COLORS.map((c) => {
+                          const selected = (editColor || u.avatarColor) === c;
+                          return (
+                            <button
+                              key={c}
+                              type="button"
+                              role="radio"
+                              aria-checked={selected}
+                              aria-label={c.replace(/^bg-|-\d+$/g, "")}
+                              title={c.replace(/^bg-|-\d+$/g, "")}
+                              onClick={() => setEditColor(c)}
+                              className={`flex h-7 w-7 items-center justify-center rounded-full ${c} transition-transform hover:scale-110 focus-ring ${
+                                selected
+                                  ? "ring-2 ring-white ring-offset-2 ring-offset-[var(--surface-2)]"
+                                  : "ring-1 ring-white/15"
+                              }`}
+                            >
+                              {selected && <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="ghost" size="sm" onClick={() => setEditingId(null)} className="text-zinc-400">
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={!editName.trim()}
+                      onClick={() => {
+                        if (editName.trim()) {
+                          user.update(u.id, {
+                            name: editName.trim(),
+                            avatarColor: editColor || u.avatarColor,
+                          });
+                        }
+                        setEditingId(null);
+                      }}
+                      className="bg-primary hover:bg-emerald-700"
+                    >
+                      Save
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
+              {/* Remove companion */}
+              <Dialog
+                open={confirmDeleteId === u.id}
+                onOpenChange={(o) => !o && setConfirmDeleteId(null)}
+              >
+                <DialogContent className="sm:max-w-[320px] bg-[var(--surface-2)] border-zinc-700">
+                  <DialogHeader>
+                    <DialogTitle className="text-zinc-100">Remove companion</DialogTitle>
+                  </DialogHeader>
+                  <p className="text-sm text-zinc-400">
+                    Remove {u.name} and all of their trips? This cannot be undone.
+                  </p>
+                  <DialogFooter>
+                    <Button variant="ghost" size="sm" onClick={() => setConfirmDeleteId(null)} className="text-zinc-400">
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        user.delete(u.id);
+                        setConfirmDeleteId(null);
+                      }}
+                      className="bg-red-600 hover:bg-red-700"
+                    >
+                      Remove
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </div>
+          );
+        })}
+
+        {/* Add companion — owner only, matching `user.add`'s admin gate. */}
+        {isOwner ? (
+          <button
+            data-keep-drawer-open
+            onClick={() => setOpen(true)}
+            className="mt-0.5 flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-xs text-zinc-500 transition-colors hover:bg-white/[0.03] hover:text-zinc-300 focus-ring"
+            title="Add a companion"
+            aria-label="Add companion"
+          >
+            <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-dashed border-zinc-600">
+              <Plus className="h-3.5 w-3.5" />
+            </span>
+            <span>Add companion</span>
+          </button>
+        ) : (
+          /* Not a dead button: say why, so the absence of a control reads as a
+             rule rather than as a missing feature. */
+          <p className="mt-1 px-2 py-1.5 text-[11px] text-zinc-600">
+            Only the owner can add companions.
+          </p>
+        )}
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-[320px] bg-[var(--surface-2)] border-zinc-700">
           <DialogHeader>
-            <DialogTitle className="text-zinc-100">New traveler</DialogTitle>
+            <DialogTitle className="text-zinc-100">New companion</DialogTitle>
             <DialogDescription className="text-zinc-400">
-              Each traveler keeps their own trips and packing lists.
+              Companions appear on trips but cannot sign in. Each keeps their own
+              packing list on trips they are added to.
             </DialogDescription>
           </DialogHeader>
           <div>
