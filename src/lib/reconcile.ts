@@ -52,7 +52,6 @@ type OpBody =
   | { op: "user.add"; name: string; user: User }
   | { op: "user.update"; id: string; updates: Partial<User> }
   | { op: "user.delete"; id: string }
-  | { op: "user.switch"; id: string }
   | { op: "trip.create"; trip: Trip }
   | { op: "trip.update"; id: string; updates: Partial<Trip> }
   | { op: "trip.delete"; id: string }
@@ -120,9 +119,6 @@ export function applyOpToState(state: AppState, body: unknown): AppState {
         activeUserId: state.activeUserId === op.id ? (users[0]?.id ?? "") : state.activeUserId,
       };
     }
-
-    case "user.switch":
-      return { ...state, activeUserId: op.id };
 
     case "trip.create":
       return { ...state, trips: upsert(state.trips, op.trip) };

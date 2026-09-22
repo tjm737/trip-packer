@@ -52,9 +52,16 @@ Options:
   --password <text>    Optional. Prompted for (hidden) when omitted.
   --avatar <class>     Optional. Tailwind background class, e.g. bg-emerald-500.
   --owner              Optional. Grant owner (admin) rights.
+  --upgrade-user <id>  Optional. Attach these credentials to an existing
+                       profile instead of creating a new one. The profile keeps
+                       its id, so trips it already owns stay with it. Use this
+                       to convert the pre-accounts default profile into a real
+                       login. Find the id with:
+                         sqlite3 data/trip-packer.db "SELECT id, name FROM users;"
 
 Notes:
   The DB is chosen by TRIP_PACKER_DB, defaulting to data/trip-packer.db.
+  The resolved path is always printed, so the target is never ambiguous.
   Passing --password puts it in shell history and in ps output; prefer the
   hidden prompt on a shared machine.
 `;
@@ -70,6 +77,7 @@ function parseArgs(argv) {
       case "--password": out.password = next(); break;
       case "--avatar": out.avatarColor = next(); break;
       case "--owner": out.owner = true; break;
+      case "--upgrade-user": out["upgrade-user"] = next(); break;
       case "-h":
       case "--help":
         console.log(USAGE);
@@ -135,8 +143,13 @@ async function main() {
   const auth = h.loadModule(path.join(h.SRC, "lib", "auth.ts"));
 
   const existing = db.tx.getUserByEmail(email);
-  if (existing) {
+  if (existing && !args["upgrade-user"]) {
     console.error(`An account with that email already exists (id ${existing.id}).`);
+    console.error(
+      "To attach credentials to an existing profile instead, pass " +
+        `--upgrade-user <id>. The profile keeps its id, so trips it already ` +
+        "owns stay with it."
+    );
     process.exit(1);
   }
 
@@ -172,24 +185,51 @@ async function main() {
     process.exit(1);
   }
 
-  const user = {
-    id: crypto.randomUUID(),
-    name,
-    avatarColor: args.avatarColor || "bg-emerald-500",
-    createdAt: new Date().toISOString(),
-    email,
-    passwordHash: hash,
-    isOwner: Boolean(args.owner),
-  };
-
-  db.tx.insertAccount(user);
+  // --upgrade-user attaches credentials to a profile that already exists,
+  // preserving its id. That matters because trips reference users.id: inserting
+  // a new row instead would leave the existing trips owned by a profile that can
+  // never log in, which is the problem this flag exists to fix.
+  let userId;
+  if (args["upgrade-user"]) {
+    userId = String(args["upgrade-user"]);
+    const target = db.tx.getUserById ? db.tx.getUserById(userId) : null;
+    if (!target) {
+      console.error(`No profile with id ${userId} in this database.`);
+      process.exit(1);
+    }
+    if (target.email && target.email !== email) {
+      console.error(
+        `That profile already has a login (${target.email}). Refusing to ` +
+          "silently replace an existing account's credentials."
+      );
+      process.exit(1);
+    }
+    db.tx.setCredentials(userId, email, hash);
+    console.log(`Upgraded existing profile ${userId} — its id is unchanged.`);
+  } else {
+    const user = {
+      id: crypto.randomUUID(),
+      name,
+      avatarColor: args.avatarColor || "bg-emerald-500",
+      createdAt: new Date().toISOString(),
+      email,
+      passwordHash: hash,
+      isOwner: Boolean(args.owner),
+    };
+    db.tx.insertAccount(user);
+    userId = user.id;
+  }
 
   // The first account becomes the owner automatically, so a fresh install has
   // an admin without anyone having to remember --owner.
-  let isOwner = user.isOwner;
-  if (!isOwner && db.tx.promoteToOwnerIfNone(user.id)) {
-    isOwner = true;
-    console.log("No owner existed yet — this account was made the owner.");
+  let isOwner = false;
+  {
+    const row = db.tx.getUserByEmail(email);
+    isOwner = Boolean(row && row.isOwner);
+    if (!isOwner && db.tx.promoteToOwnerIfNone(userId)) {
+      isOwner = true;
+      console.log("No owner existed yet — this account was made the owner.");
+    }
   }
 
   // Read the row back rather than trusting the in-memory object: this proves
@@ -198,10 +238,10 @@ async function main() {
   const canLogIn = Boolean(stored && stored.passwordHash);
   const verified = auth.verifyPassword(password, stored ? stored.passwordHash : null);
 
-  console.log(`\nCreated account:`);
-  console.log(`  id       ${user.id}`);
+  console.log(args["upgrade-user"] ? `\nAccount updated:` : `\nCreated account:`);
+  console.log(`  id       ${userId}`);
   console.log(`  email    ${email}`);
-  console.log(`  name     ${user.name}`);
+  console.log(`  name     ${stored ? stored.name : name}`);
   // Print the target database unambiguously. This exists because it was already
   // got wrong once: the script was run expecting a throwaway copy while
   // TRIP_PACKER_DB was unset, so it silently wrote to the default

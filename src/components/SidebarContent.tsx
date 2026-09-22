@@ -97,33 +97,19 @@ function UserSwitcher() {
 
       <div className="flex flex-col gap-0.5">
         {state.users.map((u) => {
-          const active = u.id === state.activeUserId;
           return (
             <div
               key={u.id}
-              className={`group flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors ${
-                active ? "bg-white/[0.06]" : "hover:bg-white/[0.03]"
-              }`}
+              className="group flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-white/[0.03]"
             >
-              <button
-                onClick={() => user.switch(u.id)}
-                className="flex min-w-0 flex-1 items-center gap-2.5 text-left focus-ring rounded-md"
-                title={active ? `${u.name} (current)` : `Switch to ${u.name}`}
-              >
+              <div className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
                 <span className="relative flex-shrink-0">
                   <UserAvatar user={u} size="sm" />
-                  {active && (
-                    <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--surface-1)] bg-emerald-400" />
-                  )}
                 </span>
-                <span
-                  className={`truncate text-xs ${
-                    active ? "font-medium text-zinc-100" : "text-zinc-400"
-                  }`}
-                >
+                <span className="truncate text-xs text-zinc-300">
                   {u.name}
                 </span>
-              </button>
+              </div>
 
               {/*
                 * The edit (pencil) button is always rendered, including for the

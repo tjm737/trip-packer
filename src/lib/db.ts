@@ -649,6 +649,14 @@ export const tx = {
       });
   },
 
+  /** Look up a profile by id, including credential columns. */
+  getUserById(userId: string): UserWithSecret | null {
+    const row = getDb()
+      .prepare("SELECT * FROM users WHERE id = ?")
+      .get(userId) as UserRow | undefined;
+    return row ? toUserWithSecret(row) : null;
+  },
+
   /**
    * Look up an account by email, for login.
    *
@@ -738,6 +746,26 @@ export const tx = {
     getDb()
       .prepare(`UPDATE users SET ${set} WHERE id = @id`)
       .run({ ...updates, id });
+  },
+
+  /**
+   * Attach credentials to an existing profile, turning it into a login.
+   *
+   * Separate from updateUser(), which is allow-listed to name and avatarColor
+   * precisely so a client payload cannot reach credential columns. Rather than
+   * widening that list — which would reopen the user.add escalation hole — this
+   * is a distinct, explicitly-named operation that only the CLI calls.
+   *
+   * The id is preserved so anything already owned by this profile (trips, and
+   * rows in trip_members) keeps pointing at it.
+   */
+  setCredentials(userId: string, email: string, passwordHash: string): void {
+    const result = getDb()
+      .prepare("UPDATE users SET email = ?, passwordHash = ? WHERE id = ?")
+      .run(email, passwordHash, userId);
+    if (result.changes === 0) {
+      throw new Error(`No user with id ${userId}; credentials not set.`);
+    }
   },
 
   deleteUser(id: string): void {

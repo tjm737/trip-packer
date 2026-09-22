@@ -270,10 +270,6 @@ export async function deleteUser(id: string): Promise<AppState> {
   return mutate({ op: "user.delete", id });
 }
 
-export async function switchUser(userId: string): Promise<AppState> {
-  return mutate({ op: "user.switch", id: userId });
-}
-
 export async function createTrip(
   userId: string,
   data: {

@@ -16,7 +16,6 @@ import {
   addUser,
   updateUser,
   deleteUser,
-  switchUser,
   createTrip,
   updateTrip,
   archiveTrip,
@@ -79,7 +78,6 @@ interface AppContextType {
     add: (name: string) => Promise<void>;
     update: (id: string, updates: Partial<User>) => Promise<void>;
     delete: (id: string) => Promise<void>;
-    switch: (userId: string) => Promise<void>;
   };
   trip: {
     create: (
@@ -288,12 +286,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           };
         },
         () => deleteUser(id)
-      );
-    },
-    switch: async (userId: string) => {
-      await run(
-        (prev) => ({ ...prev, activeUserId: userId }),
-        () => switchUser(userId)
       );
     },
   };
