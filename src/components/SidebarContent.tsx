@@ -174,6 +174,21 @@ function UserSwitcher() {
   // server sends only when true (toUser). A non-owner therefore sees the
   // Accounts list but none of its controls.
   const isOwner = Boolean(activeUser.isOwner);
+  /*
+   * Editing is NOT owner-only. It mirrors the server's rule in
+   * api/mutate/route.ts, case "selfOrAdmin":
+   *
+   *     targetUserId !== actor.id && !actor.isOwner  ->  403
+   *
+   * which reads as: you may always edit yourself, and an owner may edit anyone.
+   * So a non-owner gets the pencil on their OWN row and nowhere else. Gating
+   * this on isOwner alone (an earlier revision did) hid the one control that
+   * let a signed-in person rename themselves from the sidebar, and pushed them
+   * to the separate Profile screen to do it.
+   *
+   * Deletion stays owner-only: user.delete is { kind: "admin" }.
+   */
+  const canEdit = (u: User) => isOwner || u.id === activeUser.id;
 
   return (
     <div className="px-4 py-3 border-b border-white/8">
@@ -207,21 +222,29 @@ function UserSwitcher() {
                 </span>
               </div>
 
-              {isOwner && (
-                /*
-                 * The edit (pencil) button is always rendered, including for the
-                 * sole traveler - the profile editor is the only way to change
-                 * your own name and avatar colour, so hiding it behind
-                 * `users.length > 1` made a single-traveler setup uneditable.
-                 * Delete stays guarded: removing the last traveler is refused by
-                 * the API anyway (there is no user-less state), so offering the
-                 * button would only ever produce an error.
-                 * `data-keep-drawer-open` is required on both controls for the
-                 * same reason AboutButton needs it: MobileSidebar closes on any
-                 * button tap, which unmounts SidebarBody and takes the dialog
-                 * with it. Without this the editor flashed open and vanished on
-                 * a phone.
-                 */
+              {/*
+                * Outer gate is canEdit, not isOwner. A non-owner must still
+                * reach the pencil on their OWN row so they can rename
+                * themselves without detouring to /profile. The inner delete
+                * stays isOwner-gated. (An earlier revision wrapped this whole
+                * div in `isOwner &&`, which short-circuited the inner
+                * canEdit and left a non-owner with no controls at all.)
+                *
+                * The edit (pencil) button is always rendered for anyone who
+                * can edit the row, including the sole traveler - the profile
+                * editor is the only way to change your own name and avatar
+                * colour, so hiding it behind `users.length > 1` made a
+                * single-traveler setup uneditable.
+                * Delete stays guarded: removing the last traveler is refused by
+                * the API anyway (there is no user-less state), so offering the
+                * button would only ever produce an error.
+                * `data-keep-drawer-open` is required on both controls for the
+                * same reason AboutButton needs it: MobileSidebar closes on any
+                * button tap, which unmounts SidebarBody and takes the dialog
+                * with it. Without this the editor flashed open and vanished on
+                * a phone.
+                */}
+              {canEdit(u) && (
                 <div className="flex flex-shrink-0 items-center gap-0.5 transition-opacity md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100">
                   <button
                     data-keep-drawer-open
@@ -236,7 +259,8 @@ function UserSwitcher() {
                   >
                     <Pencil className="h-3 w-3" />
                   </button>
-                  {state.users.length > 1 && (
+                  {/* Admin-only: user.delete is { kind: "admin" }. */}
+                  {isOwner && state.users.length > 1 && (
                     <button
                       data-keep-drawer-open
                       onClick={() => setConfirmDeleteId(u.id)}
@@ -289,7 +313,7 @@ function UserSwitcher() {
                         htmlFor={`name-${u.id}`}
                         className="text-xs text-zinc-400"
                       >
-                        Name
+                        Display name
                       </Label>
                       <Input
                         id={`name-${u.id}`}
@@ -480,13 +504,13 @@ function UserSwitcher() {
                 </span>
               </div>
 
-              {/* Same reasoning as the Accounts pencil: always rendered so a
-                  companion's name and colour stay editable. Delete is guarded
-                  on length > 1 for the same API reason. Both are hidden for a
-                  non-owner because user.update and user.delete are refused
-                  server-side for anyone who is not an owner. */}
+              {/* Same rule as the Accounts pencil: canEdit (self or owner) for
+                  editing, isOwner for deleting. A companion row has no email,
+                  so u.id === activeUser.id can never be true for one — the
+                  practical effect is these stay owner-only, but the predicate
+                  is the shared server rule rather than a hand-rolled copy. */}
               <div className="flex flex-shrink-0 items-center gap-0.5 transition-opacity md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100">
-                {isOwner && (
+                {canEdit(u) && (
                   <button
                     data-keep-drawer-open
                     onClick={() => {
@@ -549,7 +573,7 @@ function UserSwitcher() {
                         htmlFor={`name-${u.id}`}
                         className="text-xs text-zinc-400"
                       >
-                        Name
+                        Display name
                       </Label>
                       <Input
                         id={`name-${u.id}`}
