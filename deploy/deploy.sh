@@ -77,14 +77,29 @@ cd "${APP_DIR}"
 
 # ── Dependencies + build ────────────────────────────────────────────────────
 info "Installing dependencies"
-npm ci --omit=dev || npm install --omit=dev
+# NOT --omit=dev. The build needs packages that live in devDependencies:
+# @tailwindcss/postcss is loaded by PostCSS during `next build`, and the
+# TypeScript/@types pair is needed to compile. Pruning dev deps first makes the
+# build die on "Cannot find module '@tailwindcss/postcss'".
+#
+# This needs a C toolchain: better-sqlite3 is a native module and compiles on
+# install. Building after install is correct because the module is loaded at
+# runtime from the built output, not during the build.
+npm ci || npm install
 ok "Dependencies installed"
 
 info "Building"
-# better-sqlite3 is a native module; it needs a toolchain at install time but is
-# loaded at runtime from the built output, so building after install is correct.
 npm run build
 ok "Build complete"
+
+# Prune dev dependencies only AFTER the build, so the running service carries
+# less on disk without breaking the build that produced it.
+#
+# next and react are regular dependencies, so they survive this. If a package
+# is ever moved from dependencies to devDependencies and is needed at runtime,
+# this line is what will surface it — as a crash on first request, not at boot.
+npm prune --omit=dev
+ok "Dev dependencies pruned"
 
 # ── Database backup (WAL-safe) ──────────────────────────────────────────────
 mkdir -p "${BACKUP_DIR}"

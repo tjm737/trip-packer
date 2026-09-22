@@ -35,11 +35,37 @@ at TTL 300.
 
 ## Step 2 — Deploy
 
+The repo is private, so the VPS needs a credential to clone it. Create a
+read-only deploy key once, in a root shell:
+
 ```bash
-scp -r deploy/ root@198.71.49.25:/opt/trip-packer/    # or git pull as in the script
-ssh root@198.71.49.25
-cd /opt/trip-packer && ./deploy/deploy.sh
+ssh-keygen -t ed25519 -f ~/.ssh/trip-packer -N "" -C "trip-packer-deploy"
+cat ~/.ssh/trip-packer.pub
 ```
+
+Add that public key to the GitHub repo under
+**Settings -> Deploy keys -> Add deploy key** (read access is enough; do not
+tick "Allow write access").
+
+Then clone and deploy:
+
+```bash
+cd /opt
+git clone git@github.com:tjm737/trip-packer.git
+cd trip-packer
+bash deploy/deploy.sh
+```
+
+If the clone fails with `Permission denied (publickey)`, the deploy key is not
+attached to the repo, or the `trip-packer` host alias is missing. Confirm with:
+
+```bash
+ssh -T git@github.com     # expect: "Hi tjm737/trip-packer! You've successfully authenticated"
+```
+
+`deploy.sh` must run from the repository root, because it copies into itself and
+reads `deploy/` relative to the checkout. Running it from somewhere else fails
+on a missing path rather than doing half the work.
 
 The script is idempotent and re-runnable. It:
 
