@@ -49,22 +49,25 @@ printf '\n== ownership ==\n'
 stat -c '  %U:%G %a %n' "${APP_DIR}" "${APP_DIR}/data" "${APP_DIR}/scripts" 2>/dev/null
 [ -f "${DB_PATH}" ] && stat -c '  %U:%G %a %n' "${DB_PATH}" || printf '  (no database yet at %s)\n' "${DB_PATH}"
 
-printf '\n== the actual failure, reproduced ==\n'
-echo '  --- as root ---'
+printf '\n== the documented command, run as-is ==\n'
+# The supported invocation is `node scripts/create-account.cjs` as root from the
+# repo root. `sudo -u trip-packer npm run create-account` is NOT supported:
+# sudo -u resets PATH so npm may not resolve, and the npm script pulls in
+# tests/harness.cjs, whose `require("typescript")` fails after the deploy step
+# runs `npm prune --omit=dev`. This script used to test that unsupported form.
 ( cd "${APP_DIR}" && node scripts/create-account.cjs --help >/dev/null 2>&1 \
     && echo '  --help works' || echo '  --help FAILED (run without 2>&1 to see why)' )
-echo "  --- as ${SERVICE_USER} ---"
-sudo -u "${SERVICE_USER}" bash -lc "cd ${APP_DIR} && npm run create-account -- --help" 2>&1 | tail -12
 
 printf '\n== likely fixes ==\n'
 cat <<'EOF'
-  "npm: command not found"            -> use the absolute node path instead:
-      sudo -u trip-packer /usr/bin/node scripts/create-account.cjs --email ... --name ...
-      (find it with: command -v node)
+  "Cannot find module 'typescript'" -> the CLI reaches tests/harness.cjs, which
+      requires typescript. If the deploy pruned it from dependencies, restore it:
+          cd /opt/trip-packer && npm install typescript --save
 
-  "EACCES" on the repo, or DENIED above -> the checkout is root-owned. Either
-      chown -R trip-packer:trip-packer /opt/trip-packer
-    or run the CLI as root with TRIP_PACKER_DB pointing at the real DB. Running
+  "EACCES" on the repo, or DENIED above -> the checkout is not readable/writable
+      by the account running the command. Either
+          chown -R trip-packer:trip-packer /opt/trip-packer
+      or run the CLI as root with TRIP_PACKER_DB pointing at the real DB. Running
     as root is what deploy.sh already does for the service's files, and the DB
     is opened by path, so ownership of the row does not matter for correctness.
 

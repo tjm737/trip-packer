@@ -220,7 +220,9 @@ if command -v caddy &>/dev/null; then
     warn "Caddy config did not validate; NOT reloading. Check ${CADDYFILE}"
   fi
 else
-  warn "Caddy not installed — skipping. The app is reachable only on localhost:${PORT}."
+  CADDY_MISSING=1
+  warn "Caddy not installed — the app is reachable only on localhost:${PORT}."
+  warn "Nothing is serving https://${DOMAIN} yet."
 fi
 
 # ── Smoke test ──────────────────────────────────────────────────────────────
@@ -253,7 +255,30 @@ else
 fi
 
 echo
-info "Done. Next steps for a fresh install:"
-echo "     sudo -u ${SERVICE_USER} npm run create-account -- \\"
-echo "         --email you@example.com --name \"Your Name\""
+if [[ "${CADDY_MISSING:-0}" -eq 1 ]]; then
+  cat <<EOF
+
+$(printf '\033[0;33m')Deploy finished WITHOUT a web server.$(printf '\033[0m')
+
+  The app is running on localhost:${PORT}, but nothing serves
+  https://${DOMAIN} — Caddy is not installed. This is not a complete deploy.
+
+  Install Caddy, then re-run this script:
+
+      apt-get update && apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
+      curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \\
+        | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+      curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \\
+        | tee /etc/apt/sources.list.d/caddy-stable.list
+      apt-get update && apt-get install -y caddy
+
+  The re-run is idempotent and will leave the already-built app in place.
+
+EOF
+else
+  info "Done. Next steps for a fresh install:"
+fi
+echo "   Create the owner account (run as root, from ${APP_DIR}):"
+echo "     cd ${APP_DIR}"
+echo "     node scripts/create-account.cjs --email you@example.com --name \"Your Name\""
 echo "   The first account created becomes the owner."
