@@ -19,15 +19,17 @@ import { Sparkles, Plus, Check, Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useApp } from "@/lib/AppContext";
+import { checkAvailability, generateObject, type AvailabilityReport } from "@/lib/foundationModels";
 import {
-  checkAvailability,
-  generateObject,
-  type AvailabilityReport,
-} from "@/lib/foundationModels";
-import {
-  addability,
+  addableRowCount,
   buildPackingPrompt,
-  normalizeSuggestions,
+  buildSuggestionRows,
+  generateControlState,
+  suggestionsAfterAdd,
+  suggestionsFromResponse,
+  suggestionsViewState,
+  unavailableHint,
+  type AddPayload,
   type PackingSuggestion,
 } from "@/lib/packingSuggestions";
 
@@ -97,7 +99,12 @@ export function PackingSuggestions({
         existingNames()
       );
       const raw = await generateObject<Record<string, unknown>>(prompt, ["items"]);
-      setSuggestions(normalizeSuggestions(raw, existingNames()));
+      /*
+       * null (the bridge's failure value) becomes [], the same "generated,
+       * nothing usable" state as an empty reply. Both mean "show the empty
+       * message", and neither is allowed to look like an unhandled error.
+       */
+      setSuggestions(suggestionsFromResponse(raw, existingNames()));
     } finally {
       setGenerating(false);
     }
@@ -108,22 +115,30 @@ export function PackingSuggestions({
    * only path by which a suggestion reaches the packing list.
    */
   const addOne = useCallback(
-    async (suggestion: PackingSuggestion) => {
-      const name = suggestion.name.trim();
-
-      // Re-check at click time: the list may have gained this item since the
-      // suggestions were generated (another tab, or an earlier click).
-      const existingItem = helpers.getItemsForCategoryAndName(tripId, CATEGORY_NAME, name);
-      if (addability(name, !!existingItem) !== "ok") return;
+    async (payload: AddPayload) => {
+      /*
+       * The row model already ran the click-time gate against the live list
+       * when it was built, and handed over the trimmed name. This re-reads
+       * `name` from the payload rather than re-trimming here, because the set
+       * key and the name written to the list must be the same string -- if
+       * they drifted, a row could keep a stale spinner or add a second item.
+       */
+      const name = payload.name;
 
       setAdding((prev) => new Set(prev).add(name));
       try {
         const categoryId = await helpers.findOrCreateCategory(
           tripId,
-          CATEGORY_NAME,
-          CATEGORY_ICON
+          payload.categoryName,
+          payload.categoryIcon
         );
-        await itemActions.create(tripId, categoryId, name, CATEGORY_ICON, 1);
+        await itemActions.create(
+          payload.tripId,
+          categoryId,
+          name,
+          payload.categoryIcon,
+          payload.quantity
+        );
       } finally {
         setAdding((prev) => {
           const next = new Set(prev);
@@ -132,7 +147,7 @@ export function PackingSuggestions({
         });
         // Drop it from the candidate list -- it is on the list now, and the
         // row would otherwise invite a second, duplicate add.
-        setSuggestions((prev) => (prev ? prev.filter((s) => s.name !== name) : prev));
+        setSuggestions((prev) => suggestionsAfterAdd(prev, name));
       }
     },
     [helpers, itemActions, tripId]
@@ -147,7 +162,26 @@ export function PackingSuggestions({
     );
   }
 
-  const available = availability?.available === true;
+  const control = generateControlState(availability, generating, suggestions !== null);
+  const view = suggestionsViewState(suggestions);
+
+  /*
+   * Rows are rebuilt from the live list on every render, so a row that has
+   * just been added (here or in another tab) comes back non-actionable rather
+   * than clickable-but-refused.
+   *
+   * `getItemsForCategoryAndName` is consulted by trimmed name because that is
+   * what the gate keys on everywhere else.
+   */
+  const rows = buildSuggestionRows(
+    suggestions ?? [],
+    (name) => !!helpers.getItemsForCategoryAndName(tripId, CATEGORY_NAME, name),
+    adding,
+    tripId,
+    CATEGORY_NAME,
+    CATEGORY_ICON
+  );
+  const canAddAnything = addableRowCount(rows) > 0;
 
   return (
     <div className="py-2 px-3">
@@ -158,7 +192,7 @@ export function PackingSuggestions({
             most needs to know why the control is dead. */}
         <Tooltip
           label={
-            available
+            control.enabled
               ? "Ask the on-device model for packing ideas — you choose what to add"
               : unavailableHint(availability)
           }
@@ -168,21 +202,21 @@ export function PackingSuggestions({
             <Button
               variant="ghost"
               size="sm"
-              disabled={!available || generating}
+              disabled={!control.enabled}
               onClick={generate}
               className="text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50 focus-ring disabled:opacity-50"
             >
-              {generating ? (
+              {control.generating ? (
                 <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
               ) : (
                 <Sparkles className="w-4 h-4 mr-1.5" />
               )}
-              {generating ? "Thinking…" : suggestions ? "Suggest again" : "Suggest items"}
+              {control.label}
             </Button>
           </span>
         </Tooltip>
 
-        {!available && (
+        {!control.enabled && (
           <span className="text-[11px] text-zinc-500 flex items-center gap-1.5">
             <AlertCircle className="w-3 h-3 flex-shrink-0" />
             {unavailableHint(availability)}
@@ -192,33 +226,39 @@ export function PackingSuggestions({
 
       {/* Candidates. Each row is a button -- clicking it adds that one item and
           nothing else. */}
-      {suggestions !== null && suggestions.length > 0 && (
+      {view === "list" && canAddAnything && (
         <div className="mt-3">
           <p className="text-[10px] uppercase tracking-[0.08em] text-zinc-500 mb-2">
             Suggestions — tap to add
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {suggestions.map((s) => {
-              const isAdding = adding.has(s.name);
+            {rows.map((row) => {
+              /*
+               * A row whose name is unusable, already on the list, or mid-add
+               * has no payload; rendering it as a live button would offer a
+               * click that does nothing.
+               */
+              if (!row.payload) return null;
+              const payload = row.payload;
               return (
                 <button
-                  key={s.name}
+                  key={row.name}
                   type="button"
-                  disabled={isAdding}
-                  onClick={() => addOne(s)}
-                  title={`Add "${s.name}" to your packing list`}
+                  disabled={row.adding}
+                  onClick={() => addOne(payload)}
+                  title={`Add "${payload.name}" to your packing list`}
                   className="flex items-start gap-2 p-2 rounded-lg border text-sm text-left bg-zinc-800/50 border-zinc-700/50 text-zinc-300 hover:bg-zinc-700/50 hover:border-zinc-600 focus-ring transition-all disabled:opacity-60"
                 >
-                  {isAdding ? (
+                  {row.adding ? (
                     <Loader2 className="w-3.5 h-3.5 mt-0.5 text-emerald-400 flex-shrink-0 animate-spin" />
                   ) : (
                     <Plus className="w-3.5 h-3.5 mt-0.5 text-zinc-500 flex-shrink-0" />
                   )}
                   <span className="flex-1 min-w-0">
-                    <span className="block truncate">{s.name}</span>
-                    {s.reason && (
+                    <span className="block truncate">{payload.name}</span>
+                    {row.reason && (
                       <span className="block text-[11px] text-zinc-500 leading-relaxed mt-0.5">
-                        {s.reason}
+                        {row.reason}
                       </span>
                     )}
                   </span>
@@ -229,7 +269,7 @@ export function PackingSuggestions({
         </div>
       )}
 
-      {suggestions !== null && suggestions.length === 0 && (
+      {view === "empty" && (
         <p className="mt-3 text-xs text-zinc-500 flex items-center gap-1.5">
           <Check className="w-3.5 h-3.5" />
           Nothing new to suggest — everything it came up with is already on your list.
@@ -237,26 +277,4 @@ export function PackingSuggestions({
       )}
     </div>
   );
-}
-
-/** Plain-language reason the feature is off, for the tooltip and inline note. */
-function unavailableHint(report: AvailabilityReport | null): string {
-  if (!report) return "Checking device support…";
-  if (report.available) return "";
-  /* The plugin already sends a user-safe `message`; prefer it so the wording
-     lives in one place. The switch is the fallback for the reasons that can
-     arrive with an empty message. */
-  if (report.message) return report.message;
-  switch (report.reason) {
-    case "os_too_old":
-      return "Packing suggestions need a newer version of iOS.";
-    case "device_not_eligible":
-      return "This device doesn't support on-device Apple Intelligence.";
-    case "not_enabled":
-      return "Turn on Apple Intelligence in Settings to use packing suggestions.";
-    case "model_not_ready":
-      return "The on-device model is still getting ready — try again shortly.";
-    default:
-      return "On-device suggestions aren't available right now.";
-  }
 }

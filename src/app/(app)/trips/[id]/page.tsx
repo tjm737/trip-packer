@@ -871,10 +871,42 @@ export default function TripDetail() {
                                           return (
                                             <div
                                               key={i}
-                                              className={`flex items-center gap-2 p-2 rounded-lg border text-sm cursor-pointer transition-all ${
+                                              onClick={
+                                                existingItem
+                                                  ? undefined
+                                                  : async () => {
+                                                      /*
+                                                       * The handler lives on the row, not the
+                                                       * icon. It used to hang off the <Plus>
+                                                       * alone while the row advertised itself
+                                                       * as clickable ("cursor-pointer", and a
+                                                       * "Click to add" title), so clicking
+                                                       * anywhere but that 14px glyph did
+                                                       * nothing.
+                                                       *
+                                                       * The `existingItem` check makes this
+                                                       * idempotent: without it, repeated taps
+                                                       * appended duplicates, because nothing
+                                                       * re-read the list between clicks.
+                                                       */
+                                                      const weatherCat = await helpers.findOrCreateCategory(
+                                                        tripId,
+                                                        "Weather Suggestions",
+                                                        "🌤️"
+                                                      );
+                                                      await itemActions.create(
+                                                        tripId,
+                                                        weatherCat,
+                                                        sugg.name,
+                                                        "🌤️",
+                                                        1
+                                                      );
+                                                    }
+                                              }
+                                              className={`flex items-center gap-2 p-2 rounded-lg border text-sm transition-all ${
                                                 existingItem
                                                   ? "bg-emerald-900/20 border-emerald-700/30 text-emerald-400/70"
-                                                  : "bg-zinc-800/50 border-zinc-700/50 text-zinc-300 hover:bg-zinc-700/50 hover:border-zinc-600"
+                                                  : "bg-zinc-800/50 border-zinc-700/50 text-zinc-300 hover:bg-zinc-700/50 hover:border-zinc-600 cursor-pointer"
                                               }`}
                                               title={existingItem ? "Already in list" : "Click to add to packing list"}
                                             >
@@ -883,14 +915,7 @@ export default function TripDetail() {
                                               {existingItem ? (
                                                 <Check className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
                                               ) : (
-                                                <Plus
-                                                  className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0"
-                                                  onClick={async (e) => {
-                                                    e.stopPropagation();
-                                                    const weatherCat = await helpers.findOrCreateCategory(tripId, "Weather Suggestions", "🌤️");
-                                                    await itemActions.create(tripId, weatherCat, sugg.name, "🌤️", 1);
-                                                  }}
-                                                />
+                                                <Plus className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0" />
                                               )}
                                             </div>
                                           );
