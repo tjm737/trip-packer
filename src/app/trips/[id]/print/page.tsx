@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { readState } from "@/lib/db";
+import { hasValidSession } from "@/lib/session";
 import { PrintableItinerary } from "@/components/PrintableItinerary";
 import { PrintNowButton } from "@/components/PrintNowButton";
 import { normalizeTheme } from "@/lib/theme";
@@ -19,6 +21,28 @@ import { normalizeTheme } from "@/lib/theme";
  *
  * `force-dynamic` because the itinerary must reflect the database at the moment
  * the user prints, not whatever a build cached.
+ *
+ * ---------------------------------------------------------------------------
+ * SECURITY: this page checks the session itself, and it must keep doing so.
+ *
+ * Middleware matches /trips/:path* and redirects a request with NO cookie at
+ * all, which makes a bare curl test look like this route is protected. It is
+ * not: middleware runs on the Edge runtime, where better-sqlite3 cannot load,
+ * so it can only ask whether a cookie is *present*, never whether it is valid.
+ * A forged `tp_session=anything` passes it.
+ *
+ * Every other page under (app)/ is a client component that fetches through
+ * fetchState() → the session-checked API, so that boundary catches a forged
+ * cookie. This page reads the database directly, so no handler ever runs and
+ * nothing else would reject it. Without the guard below, any caller who knows
+ * a trip id could print the full itinerary — including booking confirmation
+ * codes, which exist for no other purpose than to identify the traveller to an
+ * airline or hotel.
+ *
+ * If this page is ever moved under (app)/, re-verify: the route group supplies
+ * chrome, not auth. Middleware matches on PATH, and `(app)` is not a path
+ * segment, so the move silently removes even the redirect.
+ * ---------------------------------------------------------------------------
  */
 export const dynamic = "force-dynamic";
 
@@ -28,6 +52,22 @@ export async function generateMetadata({
   params: Promise<{ id: string }>;
 }): Promise<Metadata> {
   const { id } = await params;
+
+  /*
+   * This guard is not redundant with the one in the page component. Next runs
+   * generateMetadata independently, and it is resolved BEFORE the page body's
+   * redirect takes effect — so without this, the trip NAME is rendered into
+   * <title> on a response that otherwise redirects to the sign-in form. That
+   * leaks the existence and name of another user's trip to anyone who can
+   * guess an id (they are UUIDs, but they travel in URLs, screenshots and
+   * shared links, and this is a private-trip disclosure either way).
+   *
+   * Verified by probing the forged-cookie response's <title> directly.
+   */
+  if (!(await hasValidSession())) {
+    return { title: "Trip not available", robots: { index: false, follow: false } };
+  }
+
   const trip = readState()?.trips.find((t) => t.id === id);
   return {
     title: trip ? `${trip.name} — Itinerary` : "Trip not available",
@@ -45,6 +85,18 @@ export default async function PrintTripPage({
 }) {
   const { id } = await params;
   const { autoprint } = await searchParams;
+
+  /*
+   * See the SECURITY note above: middleware would let a forged cookie through,
+   * and this page never goes near the API, so this is the only thing standing
+   * between a guessed trip id and the itinerary. Redirect rather than render an
+   * error, so a signed-out visitor with a stale bookmark lands on the sign-in
+   * form and continues to where they were headed.
+   */
+  if (!(await hasValidSession())) {
+    redirect(`/login?from=${encodeURIComponent(`/trips/${id}/print`)}`);
+  }
+
   const state = readState();
   const trip = state?.trips.find((t) => t.id === id);
 
