@@ -172,6 +172,56 @@ export function isExpired(expiresAt: string, now: Date = new Date()): boolean {
 }
 
 /* ------------------------------------------------------------------ */
+/* Session verification                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A session row as stored, reduced to what verification needs.
+ *
+ * Structural rather than importing the DB layer's type, so this module stays
+ * free of database coupling and remains directly testable.
+ */
+export type SessionRecord = {
+  tokenHash: string;
+  userId: string;
+  expiresAt: string;
+};
+
+/**
+ * Verify a presented token against a set of session rows.
+ *
+ * Returns the matching session, or null. Takes the rows as an argument rather
+ * than querying, so the policy ("which token is valid") is separable from the
+ * storage ("where the rows live") and can be tested without a database.
+ *
+ * Comparison is by hash, in constant time. A token is never compared in plain
+ * form and never trusted to carry its own identity — the userId comes from the
+ * matched ROW, not from anything the client sent.
+ */
+export function verifySessionToken(
+  token: string,
+  sessions: SessionRecord[],
+  now: Date = new Date()
+): SessionRecord | null {
+  if (typeof token !== "string" || token.length === 0) return null;
+
+  const candidate = Buffer.from(hashSessionToken(token), "hex");
+
+  for (const session of sessions) {
+    if (typeof session?.tokenHash !== "string") continue;
+    const stored = Buffer.from(session.tokenHash, "hex");
+    // Length check first: timingSafeEqual throws on a length mismatch.
+    if (stored.length !== candidate.length) continue;
+    if (!timingSafeEqual(stored, candidate)) continue;
+    // Expiry is checked only after the hash matches, so a wrong token cannot
+    // be used to probe whether some other session has expired.
+    if (isExpired(session.expiresAt, now)) return null;
+    return session;
+  }
+  return null;
+}
+
+/* ------------------------------------------------------------------ */
 /* Cookies                                                             */
 /* ------------------------------------------------------------------ */
 

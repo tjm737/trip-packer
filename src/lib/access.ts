@@ -22,7 +22,7 @@
  * be tested directly, which is the only reason to trust it.
  */
 
-import type { AppState } from "./types";
+import type { AppState, User } from "./types";
 
 /** Role a user holds on a trip they do not own. */
 export type TripRole = "owner" | "editor" | "viewer";
@@ -298,13 +298,12 @@ export function canReadEntityById(
 export function scopeStateForUser(
   state: AccessState & Partial<Pick<AppState, "users" | "activeUserId">>,
   userId: string | null | undefined
-): (AccessState & { users: unknown[]; activeUserId: string }) | null {
+): (AccessState & { users: User[]; activeUserId: string }) | null {
   if (!isRealUserId(userId)) return null;
 
   // The user must actually exist. An unknown id is not a wildcard.
-  const knownUser = (state.users ?? []).some(
-    (u) => (u as { id?: string }).id === userId
-  );
+  const users = (state.users ?? []) as User[];
+  const knownUser = users.some((u) => u.id === userId);
   if (state.users && !knownUser) return null;
 
   const visibleTrips = state.trips.filter(
@@ -313,7 +312,17 @@ export function scopeStateForUser(
   const visibleTripIds = new Set(visibleTrips.map((t) => t.id));
 
   return {
-    users: state.users ?? [{ id: userId }],
+    /*
+     * Fall back to a minimal record for the authenticated user rather than to an
+     * empty list: the client needs someone to render in the sidebar, and a
+     * synthetic entry with only an id is the least we can hand over without
+     * leaking other accounts. The credential fields on User are optional, so a
+     * bare { id, name, ... } satisfies the type.
+     */
+    users:
+      users.length > 0
+        ? users
+        : [{ id: userId, name: "Traveler", avatarColor: "#64748b", createdAt: "" }],
     // activeUserId is a legacy profile-switching concept. With real sessions it
     // is simply the authenticated user, so the client has nothing to switch.
     activeUserId: userId,

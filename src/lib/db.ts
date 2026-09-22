@@ -536,6 +536,27 @@ export function readState(): AppState | null {
   return { users, activeUserId, trips, categories, items, tasks, reservations };
 }
 
+/**
+ * All session rows, for token verification.
+ *
+ * Exposed as a standalone function rather than only as a `tx` method, because
+ * callers outside the write layer (session.ts) read it. `tx` is the write
+ * surface; reads that other modules need live here alongside readState.
+ *
+ * Returns hashes, never raw tokens — the raw token exists only in the client's
+ * cookie and briefly in memory at creation. There is deliberately no way to read
+ * a usable token back out of this table.
+ */
+export function getSessionRecords(): {
+  tokenHash: string;
+  userId: string;
+  expiresAt: string;
+}[] {
+  return getDb()
+    .prepare("SELECT tokenHash, userId, expiresAt FROM sessions")
+    .all() as { tokenHash: string; userId: string; expiresAt: string }[];
+}
+
 /* ----------------------------------------------------------------- writes */
 
 export const tx = {
@@ -766,6 +787,144 @@ export const tx = {
       tx.setActiveUser(s.activeUserId);
     });
     run(state);
+  },
+
+  /**
+   * Replace ONLY the rows belonging to one user's own trips.
+   *
+   * This is the multi-user-safe counterpart to replaceAll above. It exists
+   * because the offline sync path pushes a full local snapshot, and during the
+   * transition to accounts that snapshot is a view of the pusher's own data —
+   * not a claim about everyone else's. Running replaceAll for a snapshot push
+   * would delete every other account, so the two cannot share an implementation.
+   *
+   * Deliberately does NOT touch the users table: account records outlive any
+   * single snapshot, and a snapshot is trip data, not an account roster.
+   *
+   * Scope of the delete is derived from the user's OWN trips (trip.userId), and
+   * child rows are removed by trip membership rather than by trusting the ids in
+   * the incoming payload. An id in the payload that belongs to someone else is
+   * therefore ignored rather than acted upon.
+   */
+  replaceOwnedRows(
+    userId: string,
+    /*
+     * A projection, not a full AppState: the caller has already scoped this down
+     * to the acting user's own trips, so `users`/`activeUserId` are absent. Only
+     * the row collections are read here.
+     */
+    scoped: Pick<
+      AppState,
+      "trips" | "categories" | "items" | "tasks" | "reservations"
+    >
+  ): void {
+    const db = getDb();
+
+    const run = db.transaction(
+      (
+        uid: string,
+        s: Pick<
+          AppState,
+          "trips" | "categories" | "items" | "tasks" | "reservations"
+        >
+      ) => {
+      const ownedTripIds = (
+        db.prepare("SELECT id FROM trips WHERE userId = ?").all(uid) as {
+          id: string;
+        }[]
+      ).map((r) => r.id);
+
+      if (ownedTripIds.length === 0) return;
+
+      const placeholders = ownedTripIds.map(() => "?").join(",");
+
+      /*
+       * Order matters: children before parents, because the foreign keys point
+       * upward. Items are deleted by their own tripId, with a fallback to the
+       * parent category for legacy rows that predate the column.
+       */
+      db.prepare(
+        `DELETE FROM items WHERE tripId IN (${placeholders})
+           OR categoryId IN (SELECT id FROM categories WHERE tripId IN (${placeholders}))`
+      ).run(...ownedTripIds, ...ownedTripIds);
+
+      db.prepare(`DELETE FROM tasks WHERE tripId IN (${placeholders})`).run(
+        ...ownedTripIds
+      );
+      db.prepare(`DELETE FROM reservations WHERE tripId IN (${placeholders})`).run(
+        ...ownedTripIds
+      );
+      db.prepare(`DELETE FROM categories WHERE tripId IN (${placeholders})`).run(
+        ...ownedTripIds
+      );
+      db.prepare(`DELETE FROM trip_members WHERE tripId IN (${placeholders})`).run(
+        ...ownedTripIds
+      );
+      db.prepare(`DELETE FROM trips WHERE id IN (${placeholders})`).run(
+        ...ownedTripIds
+      );
+
+      /*
+       * Re-insert. Only rows whose owning trip is in ownedTripIds are written,
+       * so a payload cannot smuggle in a row owned by someone else. Trips are
+       * force-owned by uid for the same reason.
+       */
+      const ownedSet = new Set(ownedTripIds);
+      for (const t of s.trips) {
+        if (ownedSet.has(t.id)) tx.insertTrip({ ...t, userId: uid });
+      }
+      for (const c of s.categories ?? []) {
+        if (ownedSet.has(c.tripId)) tx.insertCategory(c);
+      }
+      for (const i of s.items ?? []) {
+        const owning = i.tripId ?? null;
+        if (owning && ownedSet.has(owning)) tx.insertItem(i);
+      }
+      for (const t of s.tasks ?? []) {
+        if (ownedSet.has(t.tripId)) tx.insertTask(t);
+      }
+      for (const r of s.reservations ?? []) {
+        if (ownedSet.has(r.tripId)) tx.insertReservation(r);
+      }
+    });
+
+    run(userId, scoped);
+  },
+
+  /**
+   * Delete every session belonging to a user.
+   *
+   * Called when an account is deleted. Without this a removed account keeps a
+   * working cookie until the token expires, which reads as "I deleted the user
+   * but they can still log in".
+   */
+  deleteSessionsForUser(userId: string): void {
+    getDb().prepare("DELETE FROM sessions WHERE userId = ?").run(userId);
+  },
+
+  /**
+   * Record a new session.
+   *
+   * The caller supplies the hash, never the raw token, so the plaintext token
+   * never reaches the database layer.
+   */
+  insertSession(tokenHash: string, userId: string, expiresAt: string): void {
+    getDb()
+      .prepare(
+        "INSERT INTO sessions (tokenHash, userId, expiresAt, createdAt) VALUES (?, ?, ?, ?)"
+      )
+      .run(tokenHash, userId, expiresAt, new Date().toISOString());
+  },
+
+  /** Remove a single session by token hash — the logout path. */
+  deleteSessionByTokenHash(tokenHash: string): void {
+    getDb().prepare("DELETE FROM sessions WHERE tokenHash = ?").run(tokenHash);
+  },
+
+  /** Drop expired sessions. Called opportunistically; not required for safety. */
+  pruneExpiredSessions(now: string = new Date().toISOString()): number {
+    const res = getDb().prepare("DELETE FROM sessions WHERE expiresAt <= ?").run(now);
+    return Number(res.changes ?? 0);
   },
 
   /**

@@ -3,6 +3,20 @@ export type User = {
   name: string;
   avatarColor: string;
   createdAt: string;
+  /*
+   * Credentials. Optional because a "companion" profile — a fellow traveller who
+   * appears on a trip but has no account — is a User row with no login. The
+   * previous model had every profile equally able to be the active user, which
+   * is what `user.switch` did; now only rows with credentials can sign in.
+   */
+  email?: string;
+  passwordHash?: string;
+  /*
+   * Whether this account may administer others. A plain boolean rather than a
+   * role enum because there are exactly two levels and an enum invites a third
+   * that nothing enforces.
+   */
+  isOwner?: boolean;
 };
 
 export type Trip = {
