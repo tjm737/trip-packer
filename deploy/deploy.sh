@@ -87,6 +87,34 @@ info "Installing dependencies"
 # This needs a C toolchain: better-sqlite3 is a native module and compiles on
 # install. Building after install is correct because the module is loaded at
 # runtime from the built output, not during the build.
+#
+# Check for the toolchain first. Without it, npm fails deep inside node-gyp with
+# "not found: make" after several minutes of work, and the error names the
+# symptom rather than the missing package.
+missing=""
+for tool in make g++ python3; do
+  command -v "$tool" >/dev/null 2>&1 || missing="${missing} ${tool}"
+done
+if [[ -n "${missing}" ]]; then
+  info "missing build tools:${missing} (needed to compile better-sqlite3)"
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update -qq && apt-get install -y -qq build-essential python3 >/dev/null \
+      || die "could not install build-essential. Run: apt-get update && apt-get install -y build-essential python3"
+    ok "build toolchain installed"
+  else
+    die "install a C++ toolchain and python3, then re-run (missing:${missing})"
+  fi
+fi
+
+# A previous failed install leaves a half-built better-sqlite3 in node_modules.
+# npm ci reuses that directory instead of starting over, so the failure repeats
+# even after the toolchain is present. Removing just that package is enough and
+# avoids a full re-download.
+if [[ -d "${APP_DIR}/node_modules/better-sqlite3/build" && ! -f "${APP_DIR}/node_modules/better-sqlite3/build/Release/better_sqlite3.node" ]]; then
+  warn "found a broken better-sqlite3 build; removing it so npm rebuilds cleanly"
+  rm -rf "${APP_DIR}/node_modules/better-sqlite3"
+fi
+
 npm ci || npm install
 ok "Dependencies installed"
 

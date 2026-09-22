@@ -53,6 +53,31 @@ for tool in git node npm sqlite3; do
   fi
 done
 
+# better-sqlite3 is a native addon: `npm ci` compiles it with node-gyp, which
+# needs a C++ toolchain. Without these the install dies deep inside node-gyp
+# with "not found: make", which names the symptom and not the cause.
+printf '\n== build toolchain ==\n'
+missing_tools=()
+for tool in make g++ cc; do
+  command -v "$tool" >/dev/null 2>&1 || missing_tools+=("$tool")
+done
+if [[ ${#missing_tools[@]} -gt 0 ]]; then
+  warn "missing: ${missing_tools[*]} (needed to compile better-sqlite3)"
+  if command -v apt-get >/dev/null 2>&1; then
+    info "installing build-essential + python3 via apt-get"
+    if apt-get update -qq && apt-get install -y -qq build-essential python3 >/dev/null; then
+      ok "build toolchain installed"
+    else
+      die "could not install build-essential. Install it manually, then re-run:
+       apt-get update && apt-get install -y build-essential python3"
+    fi
+  else
+    die "no apt-get available; install a C++ toolchain and python3, then re-run"
+  fi
+else
+  ok "make, g++, cc present"
+fi
+
 NODE_MAJOR="$(node -v | sed 's/^v//; s/\..*//')"
 if [[ "${NODE_MAJOR}" -ge 20 ]]; then
   ok "node $(node -v) is new enough"
