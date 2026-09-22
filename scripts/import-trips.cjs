@@ -2,104 +2,40 @@
 /**
  * import-trips.cjs — import a trip-packer export bundle into a database.
  *
- * The counterpart to export-trips.cjs. Runs on the target machine, so the two
- * halves need no shared filesystem: export on the laptop, scp the JSON, import
- * on the server.
+ * Counterpart to export-trips.cjs. Runs on the target machine, so the two
+ * halves need no shared filesystem: export on the laptop, copy the JSON,
+ * import on the server.
  *
  * Design decisions that matter:
  *
- *   - Dry run by default. Importing touches live data, so nothing is written
- *     unless --apply is passed. The default run prints exactly what WOULD be
- *     inserted and makes no changes.
+ *   - Dry run by default. Nothing is written without --apply, because this
+ *     touches live data.
  *
- *   - New ids on every import. Trip ids are regenerated, so importing the same
- *     bundle twice yields two trips rather than an id collision or an
- *     overwrite. Re-pointing is also required because the source userId does
- *     not exist in the target.
+ *   - Fresh ids on every import. Trip ids are regenerated, so importing twice
+ *     produces two trips rather than an id collision or an overwrite. It also
+ *     has to happen, because the source userId does not exist in the target.
  *
- *   - The userId is resolved explicitly. --user <email> names the destination
- *     account. Without it, the owner account is used, and if there is no owner
- *     the run stops rather than guessing.
+ *   - The destination account is explicit. With more than one account in the
+ *     DB the run refuses rather than guessing, so a bulk import can never land
+ *     in the wrong account.
  *
- *   - Everything is wrapped in one transaction. A failure part-way through
- *     leaves the database exactly as it was.
+ *   - One transaction. A failure part-way leaves the database untouched.
+ *
+ *   - Reads back afterwards, rather than trusting the write.
  *
  * Usage:
  *   node scripts/import-trips.cjs --file trips.json --list-users
- *   node scripts/import-trips.cjs --file trips.json                  # dry run
+ *   node scripts/import-trips.cjs --file trips.json                    # dry run
  *   node scripts/import-trips.cjs --file trips.json --user me@x.com --apply
+ *
+ * Database access goes through scripts/triplib.cjs, which prefers the
+ * better-sqlite3 npm package and falls back to the sqlite3 CLI.
  */
 
 const fs = require("fs");
 const path = require("path");
-const crypto = require("crypto");
-const { execFileSync } = require("child_process");
+const { query, transaction, dbPath, uuid, fail, backend } = require("./triplib.cjs");
 
-function dbPath() {
-  return process.env.TRIP_PACKER_DB
-    ? path.resolve(process.env.TRIP_PACKER_DB)
-    : path.resolve(process.cwd(), "data", "trip-packer.db");
-}
-
-function fail(msg) {
-  console.error(`\n  ✗ ${msg}\n`);
-  process.exit(1);
-}
-
-// ── sqlite helpers ──────────────────────────────────────────────────────────
-// Writes go through a temp SQL file and `.read`, because passing a multi-line
-// script as a single argv element is fragile once it contains quotes.
-function sqliteRead(sql) {
-  const uri = `file:${dbPath()}?mode=ro`;
-  try {
-    return execFileSync("sqlite3", ["-json", uri, sql], {
-      encoding: "utf8",
-      maxBuffer: 64 * 1024 * 1024,
-    });
-  } catch (err) {
-    fail(`sqlite3 read failed: ${err.stderr || err.message}`);
-  }
-}
-
-function sqliteWrite(sql) {
-  const tmp = path.join(
-    require("os").tmpdir(),
-    `tp-import-${crypto.randomBytes(6).toString("hex")}.sql`
-  );
-  fs.writeFileSync(tmp, sql);
-  try {
-    return execFileSync("sqlite3", [dbPath(), `.read ${tmp}`], {
-      encoding: "utf8",
-      maxBuffer: 64 * 1024 * 1024,
-    });
-  } catch (err) {
-    fail(`sqlite3 write failed: ${err.stderr || err.message}`);
-  } finally {
-    fs.unlinkSync(tmp);
-  }
-}
-
-function query(sql) {
-  const out = sqliteRead(sql).trim();
-  if (!out) return [];
-  try {
-    return JSON.parse(out);
-  } catch {
-    fail(`Could not parse sqlite3 output:\n${out.slice(0, 400)}`);
-  }
-}
-
-function sq(v) {
-  if (v === null || v === undefined) return "NULL";
-  if (typeof v === "number") return String(v);
-  return "'" + String(v).replace(/'/g, "''") + "'";
-}
-
-function uuid() {
-  return crypto.randomUUID();
-}
-
-// ── Args ────────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
   const a = { file: null, user: null, apply: false, listUsers: false, help: false };
   for (let i = 0; i < argv.length; i++) {
@@ -128,17 +64,19 @@ if (args.help) {
 
 // ── Users ───────────────────────────────────────────────────────────────────
 function listUsers() {
-  const rows = query(`SELECT id, name, email, isOwner FROM users ORDER BY isOwner DESC, name;`);
+  const rows = query(
+    `SELECT id, name, email, isOwner FROM users ORDER BY isOwner DESC, name;`
+  );
   if (!rows.length) {
-    console.log(`\n  No users in ${dbPath()} — create one first:\n`);
+    console.log(`\n  No accounts in ${dbPath()} — create one first:\n`);
     console.log(`    node scripts/create-account.cjs --email you@example.com --name "Your Name"\n`);
     return;
   }
-  console.log(`\n  Users in ${dbPath()}:\n`);
+  console.log(`\n  Accounts in ${dbPath()}:\n`);
   for (const u of rows) {
     console.log(
-      `    ${(u.email || "(no email)").padEnd(34)} ${String(u.name).padEnd(16)}` +
-        `${u.isOwner ? "OWNER" : ""}  ${u.id}`
+      `    ${(u.email || "(no email)").padEnd(34)}${String(u.name).padEnd(18)}` +
+        `${u.isOwner ? "OWNER" : "     "}  ${u.id}`
     );
   }
   console.log();
@@ -169,12 +107,12 @@ if (!Array.isArray(bundle.trips) || !bundle.trips.length) {
   fail("Bundle contains no trips.");
 }
 
-// ── Resolve destination user ────────────────────────────────────────────────
+// ── Resolve destination account ─────────────────────────────────────────────
 const users = query(`SELECT id, name, email, isOwner FROM users;`);
 if (!users.length) {
   fail(
-    `No users in ${dbPath()}.\n` +
-      `      Create the account first:\n` +
+    `No accounts in ${dbPath()}.\n` +
+      `      Create one first:\n` +
       `        node scripts/create-account.cjs --email you@example.com --name "Your Name"`
   );
 }
@@ -184,15 +122,15 @@ if (args.user) {
   targetUser = users.find((u) => u.email === args.user || u.id === args.user);
   if (!targetUser) {
     fail(
-      `No user matched "${args.user}".\n` +
+      `No account matched "${args.user}".\n` +
         `      Run with --list-users to see valid emails and ids.`
     );
   }
 } else {
-  // The only unambiguous case is a single account. If more than one exists the
-  // caller must say which, so a bulk import can never land in the wrong account.
-  // An earlier revision accepted any single owner even when other accounts
-  // existed, which silently imported into the owner -- the opposite of intent.
+  // The only unambiguous case is a single account. With more than one, the
+  // caller must say which. An earlier revision accepted a single owner even
+  // when other accounts existed, which silently imported into the owner -- the
+  // opposite of the intent.
   if (users.length === 1) {
     targetUser = users[0];
   } else {
@@ -204,85 +142,70 @@ if (args.user) {
   }
 }
 
-console.log(`\n  Bundle:  ${bundlePath}`);
-console.log(`  Trips:   ${bundle.trips.length}`);
-console.log(`  Target:  ${dbPath()}`);
-console.log(`  Account: ${targetUser.email || targetUser.id} (${targetUser.name})`);
+console.log(`\n  Database: ${dbPath()}  (via ${backend()})`);
+console.log(`  Bundle:   ${bundlePath}`);
+console.log(`  Trips:    ${bundle.trips.length}`);
+console.log(`  Account:  ${targetUser.email || targetUser.id} (${targetUser.name})`);
 console.log();
 
-// ── Build statements ────────────────────────────────────────────────────────
-// Ids are regenerated and children are re-pointed via an old→new map. Column
-// lists are taken from the DB itself, and unknown columns in the bundle are
-// dropped so an older bundle still imports after a schema change.
-function columnNames(table) {
-  return query(`PRAGMA table_info(${table});`).map((r) => r.name);
-}
-
+// ── Build the work ──────────────────────────────────────────────────────────
+// Columns come from the DB, and bundle columns the DB does not have are
+// dropped, so a bundle from a slightly different schema still imports.
 const dbCols = {
-  trips: columnNames("trips"),
-  items: columnNames("items"),
-  categories: columnNames("categories"),
-  tasks: columnNames("tasks"),
-  reservations: columnNames("reservations"),
+  trips: query(`PRAGMA table_info(trips);`).map((r) => r.name),
+  items: query(`PRAGMA table_info(items);`).map((r) => r.name),
+  categories: query(`PRAGMA table_info(categories);`).map((r) => r.name),
+  tasks: query(`PRAGMA table_info(tasks);`).map((r) => r.name),
+  reservations: query(`PRAGMA table_info(reservations);`).map((r) => r.name),
 };
 
-function insert(table, row, overrides) {
-  const cols = dbCols[table];
-  const merged = { ...row, ...overrides };
-  const present = cols.filter((c) => c in merged);
-  const vals = present.map((c) => sq(merged[c]));
-  return `INSERT INTO ${table} (${present.map((c) => `"${c}"`).join(", ")}) VALUES (${vals.join(", ")});`;
-}
-
-const statements = [];
+const plan = []; // { table, row } in dependency order
 const counts = { trips: 0, items: 0, categories: 0, tasks: 0, reservations: 0 };
-const categoryIdMap = new Map();
+let skipped = 0;
 
 for (const entry of bundle.trips) {
   const srcTrip = entry.trip;
   const newTripId = uuid();
   const now = new Date().toISOString();
 
-  statements.push(
-    insert("trips", srcTrip, {
-      id: newTripId,
-      userId: targetUser.id,
-      updatedAt: now,
-    })
-  );
+  plan.push({
+    table: "trips",
+    row: { ...srcTrip, id: newTripId, userId: targetUser.id, updatedAt: now },
+  });
   counts.trips++;
 
-  // Categories first: items reference categoryId.
+  // Categories before items: items reference categoryId.
+  const catMap = new Map();
   for (const cat of entry.categories || []) {
     const newCatId = uuid();
-    categoryIdMap.set(cat.id, newCatId);
-    statements.push(insert("categories", cat, { id: newCatId, tripId: newTripId }));
+    catMap.set(cat.id, newCatId);
+    plan.push({ table: "categories", row: { ...cat, id: newCatId, tripId: newTripId } });
     counts.categories++;
   }
 
   for (const item of entry.items || []) {
-    const mappedCat = categoryIdMap.get(item.categoryId);
+    const mappedCat = catMap.get(item.categoryId);
     if (!mappedCat) {
-      // A dangling categoryId would violate the FK. Drop the item rather than
-      // writing broken data, and say so.
-      console.log(
-        `    ! skipping item "${item.name}" — its category was not in the bundle`
-      );
+      // Writing a dangling categoryId would violate the FK. Drop the item and
+      // say so rather than importing broken data.
+      console.log(`    ! skipping item "${item.name}" — its category is not in the bundle`);
+      skipped++;
       continue;
     }
-    statements.push(
-      insert("items", item, { id: uuid(), tripId: newTripId, categoryId: mappedCat })
-    );
+    plan.push({
+      table: "items",
+      row: { ...item, id: uuid(), tripId: newTripId, categoryId: mappedCat },
+    });
     counts.items++;
   }
 
   for (const task of entry.tasks || []) {
-    statements.push(insert("tasks", task, { id: uuid(), tripId: newTripId }));
+    plan.push({ table: "tasks", row: { ...task, id: uuid(), tripId: newTripId } });
     counts.tasks++;
   }
 
   for (const res of entry.reservations || []) {
-    statements.push(insert("reservations", res, { id: uuid(), tripId: newTripId }));
+    plan.push({ table: "reservations", row: { ...res, id: uuid(), tripId: newTripId } });
     counts.reservations++;
   }
 
@@ -297,27 +220,36 @@ console.log();
 
 if (!args.apply) {
   console.log("  DRY RUN — nothing written.\n");
-  console.log(`  Would insert: ${counts.trips} trips, ${counts.items} items, ` +
-    `${counts.categories} categories, ${counts.tasks} tasks, ${counts.reservations} reservations\n`);
+  console.log(
+    `  Would insert: ${counts.trips} trips, ${counts.items} items, ${counts.categories} categories, ` +
+      `${counts.tasks} tasks, ${counts.reservations} reservations\n`
+  );
+  if (skipped) console.log(`  Would skip ${skipped} orphaned item(s).\n`);
   console.log("  Re-run with --apply to write.\n");
   process.exit(0);
 }
 
 // ── Apply ───────────────────────────────────────────────────────────────────
-// One transaction: either every row lands or none does.
-const script = ["PRAGMA foreign_keys = ON;", "BEGIN;", ...statements, "COMMIT;"].join("\n");
-
-sqliteWrite(script);
+transaction((run) => {
+  for (const { table, row } of plan) {
+    const cols = dbCols[table].filter((c) => c in row);
+    const sql = `INSERT INTO ${table} (${cols.map((c) => `"${c}"`).join(", ")}) ` +
+      `VALUES (${cols.map(() => "?").join(", ")});`;
+    run(sql, cols.map((c) => row[c]));
+  }
+});
 
 console.log("  ✓ Imported\n");
-console.log(`    ${counts.trips} trips, ${counts.items} items, ${counts.categories} categories, ` +
-  `${counts.tasks} tasks, ${counts.reservations} reservations\n`);
+console.log(
+  `    ${counts.trips} trips, ${counts.items} items, ${counts.categories} categories, ` +
+    `${counts.tasks} tasks, ${counts.reservations} reservations\n`
+);
 
-// Verify by reading back, rather than trusting the write to have worked.
+// Read back from the database rather than trusting that the write landed.
 const verify = query(
   `SELECT t.name, (SELECT COUNT(*) FROM items i WHERE i.tripId = t.id) AS items
-     FROM trips t WHERE t.userId = ${sq(targetUser.id)} ORDER BY t.createdAt DESC
-     LIMIT ${counts.trips};`
+     FROM trips t WHERE t.userId = ? ORDER BY t.createdAt DESC LIMIT ${counts.trips};`,
+  [targetUser.id]
 );
 console.log("  Read back from the database:");
 for (const v of verify) {
