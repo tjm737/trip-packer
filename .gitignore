@@ -30,6 +30,19 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# Local npm cache directory
+#
+# npm creates `.npm/` in the project root for its cache when HOME is unusual
+# (notably when running as root under systemd or over SSH, where HOME may be
+# unset or point somewhere unwritable). It is a cache, never source.
+#
+# Left untracked, it made `git status` dirty and deploy/update.sh refused to
+# run — permanently. That guard exists to protect hand edits from the
+# `git reset --hard` in deploy.sh; a regenerable cache is not that. Ignoring it
+# here fixes the deploy at the source rather than teaching the guard to
+# tolerate arbitrary untracked directories.
+.npm/
+
 # env files
 #
 # `.env*` alone also matches `.env.example`, which is meant to be committed --
