@@ -60,6 +60,16 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# SwiftPM build caches.
+#
+# `swift build` inside an iOS plugin writes a `.build/` directory containing
+# checkouts of capacitor-swift-pm plus several hundred megabytes of objects and
+# build records. It is a cache, not source. Ignoring it by name (rather than
+# `/build`) catches the nested case in plugins/*/ and ios/App/*/, which the
+# root-anchored rule at the top of this file does not.
+.build/
+.swiftpm/
+
 # Local database (SQLite data + WAL sidecar files).
 #
 # /data/ is ignored wholesale rather than by extension. The earlier narrow

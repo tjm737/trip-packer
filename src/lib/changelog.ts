@@ -37,6 +37,20 @@ export interface Release {
  */
 export const RELEASES: Release[] = [
   {
+    version: "0.6.1",
+    date: "2026-09-22",
+    headline: "Groundwork for on-device suggestions",
+    groups: [
+      {
+        area: "iOS app",
+        items: [
+          "Added the plumbing that lets the app use Apple Intelligence on your iPhone, so planning help can be generated on the device itself rather than sent to a server.",
+          "Nothing to configure yet — this release only makes the capability available. On-device suggestions appear in a later update, and the app works exactly as before on browsers and older devices.",
+        ],
+      },
+    ],
+  },
+  {
     version: "0.6.0",
     date: "2026-09-22",
     headline: "Share a trip, print it, and use it in the dark",
