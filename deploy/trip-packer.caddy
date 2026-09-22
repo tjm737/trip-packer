@@ -1,0 +1,14 @@
+trips.planetracker.app {
+    reverse_proxy localhost:4100
+
+    header / {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    log {
+        output file /var/log/caddy/trip-packer.log
+    }
+}

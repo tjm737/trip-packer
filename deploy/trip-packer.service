@@ -1,0 +1,28 @@
+[Unit]
+Description=Trip Packer — trip planning web app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trip-packer
+Group=trip-packer
+WorkingDirectory=/opt/trip-packer
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=PORT=4100
+
+# Security hardening. Mirrors plane-tracker.service, with one addition:
+# ReadWritePaths covers the SQLite directory AND its WAL sidecar writes. The DB
+# runs in WAL mode, and SQLite needs to create/modify db-wal and db-shm next to
+# the .db file — if the directory is not writable the app starts and then fails
+# on the first write, which is a confusing way to discover a permissions bug.
+NoNewPrivileges=yes
+ProtectSystem=full
+ReadWritePaths=/opt/trip-packer/data /opt/trip-packer/.next
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
