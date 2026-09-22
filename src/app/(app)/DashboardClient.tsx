@@ -422,16 +422,24 @@ export default function DashboardClient() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Tooltip label="Create a trip from a saved itinerary file" side="left">
-              <Button
-                onClick={() => setImportOpen(true)}
-                variant="outline"
-                className="border-zinc-700 text-zinc-300 hover:text-white hover:bg-zinc-800 focus-ring"
-              >
-                <Upload className="w-4 h-4 mr-2" />
-                Import
-              </Button>
-            </Tooltip>
+            {/* Hidden below `sm` to keep the mobile header to a single action.
+                The wrapper carries the visibility rather than the Button: the
+                Button's cva base hardcodes `inline-flex`, and Tailwind emits
+                `inline-flex` after `hidden`, so a `hidden` class on the Button
+                itself loses the source-order tie and stays visible. Hiding the
+                parent avoids the conflict. */}
+            <div className="hidden sm:block">
+              <Tooltip label="Create a trip from a saved itinerary file" side="left">
+                <Button
+                  onClick={() => setImportOpen(true)}
+                  variant="outline"
+                  className="border-zinc-700 text-zinc-300 hover:text-white hover:bg-zinc-800 focus-ring"
+                >
+                  <Upload className="w-4 h-4 mr-2" />
+                  Import
+                </Button>
+              </Tooltip>
+            </div>
             <Tooltip label="Create a new trip" side="left">
               <Button
                 onClick={() => setCreateOpen(true)}
