@@ -260,12 +260,15 @@ if getent hosts "${DOMAIN}" >/dev/null 2>&1 || host "${DOMAIN}" >/dev/null 2>&1;
   HTTP_CODE="$(curl -s -o /dev/null -w '%{http_code}' "http://${DOMAIN}/" 2>/dev/null)"
   HTTP_CODE="${HTTP_CODE:-000}"
 
-  # Identify which app answered, not merely that something did. The x-powered-by
-  # / Server header alone cannot distinguish the two Next.js apps on this box,
-  # so match on the response body containing this app's own markup.
+  # Identify which app answered, not merely that something did. The Server
+  # header cannot distinguish the two Next.js apps on this box, so match on the
+  # rendered page instead. The brand string is "TripPlanner" (no space) as
+  # rendered by the app -- an earlier revision checked for "Trip Packer" /
+  # "trip-packer", neither of which appears in the HTML, so a perfectly good
+  # deploy was reported as "does NOT look like trip-packer".
   if [[ "${HTTP_CODE}" =~ ^(200|302|307)$ ]]; then
-    BODY="$(curl -s "http://${DOMAIN}/" 2>/dev/null | head -c 4000)"
-    if [[ "${BODY}" == *"Trip Packer"* || "${BODY}" == *"trip-packer"* ]]; then
+    BODY="$(curl -s "http://${DOMAIN}/" 2>/dev/null | head -c 6000)"
+    if [[ "${BODY}" == *"TripPlanner"* || "${BODY}" == *"No trips planned"* || "${BODY}" == *"No trips yet"* ]]; then
       ok "http://${DOMAIN} -> ${HTTP_CODE} (serving trip-packer)"
     else
       warn "http://${DOMAIN} -> ${HTTP_CODE}, but the response does NOT look like trip-packer."
