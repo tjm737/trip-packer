@@ -15,9 +15,20 @@
  * there is no other invalidation hook.
  */
 
-const VERSION = "v2";
+const VERSION = "v3";
 const SHELL_CACHE = `trip-packer-shell-${VERSION}`;
 const API_CACHE = `trip-packer-api-${VERSION}`;
+const TILE_CACHE = `trip-packer-tiles-${VERSION}`;
+
+/*
+ * Map tiles: 256px PNGs from Esri's CDN.
+ *
+ * Declared here with the other cache names because `activate` filters against
+ * it while evicting stale caches, and a `const` referenced above its
+ * declaration only works by accident of evaluation order.
+ */
+const TILE_HOSTS = ["services.arcgisonline.com"];
+const TILE_LIMIT = 600;
 
 /*
  * The minimum needed to render *something* offline. Next.js fingerprints its
@@ -102,7 +113,7 @@ self.addEventListener("activate", (event) => {
       const keys = await caches.keys();
       await Promise.all(
         keys
-          .filter((k) => k !== SHELL_CACHE && k !== API_CACHE)
+          .filter((k) => k !== SHELL_CACHE && k !== API_CACHE && k !== TILE_CACHE)
           .map((k) => caches.delete(k))
       );
       await self.clients.claim();
@@ -136,6 +147,62 @@ async function cacheFirst(request, cacheName) {
   return res;
 }
 
+/*
+ * Map tiles: 256px PNGs from Esri's CDN.
+ *
+ * Why this needs its own path rather than the same-origin guard below: tiles are
+ * cross-origin, and Leaflet loads them with `crossOrigin: false`, so the request
+ * is no-cors and the response is *opaque* -- status 0, unreadable body. A plain
+ * `if (res.ok)` check is therefore false for every tile, which is why nothing
+ * was ever cached and the map went blank offline even though the itinerary
+ * rendered.
+ *
+ * An opaque response is still storable and still re-servable, which is all the
+ * <img> tag needs. We deliberately do not read the body; there is nothing to
+ * read and nothing to validate.
+ *
+ * Keyed on the exact request URL. The Esri path is /{z}/{y}/{x} -- row before
+ * column, the reverse of the usual convention -- so any normalisation here
+ * would risk serving valid PNGs of the wrong place.
+ *
+ * Cache-first, because a tile at a given z/x/y never changes. Capped, because
+ * panning a map can request thousands of tiles and an unbounded cache would
+ * grow without limit on a device we do not control.
+ */
+async function tileFetch(request) {
+  const cache = await caches.open(TILE_CACHE);
+  const cached = await cache.match(request);
+  if (cached) return cached;
+
+  try {
+    const res = await fetch(request);
+    // Opaque tiles type as "opaque" and have status 0; both are fine to store.
+    if (res.ok || res.type === "opaque") {
+      await cache.put(request, res.clone());
+      void trimTiles(cache);
+    }
+    return res;
+  } catch (err) {
+    // Offline and never seen: let the request fail so Leaflet shows its own
+    // broken-tile state rather than us inventing a blank PNG.
+    throw err;
+  }
+}
+
+/** Drop oldest entries once the tile cache outgrows its cap. */
+async function trimTiles(cache) {
+  try {
+    const keys = await cache.keys();
+    if (keys.length <= TILE_LIMIT) return;
+    // Re-inserting a key moves it to the end, so iteration order is roughly
+    // least-recently-stored first. Evicting from the front is good enough here.
+    const excess = keys.length - TILE_LIMIT;
+    for (let i = 0; i < excess; i++) await cache.delete(keys[i]);
+  } catch {
+    // Eviction is best-effort; a failure must never break a tile response.
+  }
+}
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
 
@@ -143,7 +210,16 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
 
-  // Same-origin only. Third-party (map tiles, fonts) is left to the browser so
+  /*
+   * Map tiles are cross-origin and must be handled before the same-origin
+   * guard below, which would otherwise drop every one of them.
+   */
+  if (TILE_HOSTS.includes(url.hostname) && url.pathname.includes("/tile/")) {
+    event.respondWith(tileFetch(request));
+    return;
+  }
+
+  // Same-origin only. Third-party (fonts, analytics) is left to the browser so
   // we never serve a cross-origin response we are not allowed to hand back.
   if (url.origin !== self.location.origin) return;
 
@@ -204,7 +280,6 @@ self.addEventListener("fetch", (event) => {
 self.addEventListener("message", (event) => {
   const data = event.data;
   if (!data || data.type !== "CACHE_TRIP" || typeof data.url !== "string") return;
-
   event.waitUntil(
     (async () => {
       try {
