@@ -126,17 +126,54 @@ step "Dependencies"
 # better-sqlite3 native module. Skip it unless the lockfile actually changed
 # between the revisions we just moved across. On a clean install (no change)
 # this is the difference between a 20-second update and a 3-minute one.
+#
+# The "keep node_modules" shortcut is only safe if the tree is actually
+# complete. Existence of the directory proves nothing: a partially installed
+# tree, a hand-cleared package, or a stray `rm -rf .npm/` leaves node_modules
+# present but missing packages, and the skip then hands a broken tree straight
+# to the build.
+#
+# This is not hypothetical. `@tailwindcss/postcss` is loaded by PostCSS during
+# `next build`, and when it goes missing the build fails with a Turbopack
+# require trace pointing at postcss.config.mjs — an error that names the config
+# file and never mentions the missing package, so it reads as a config bug.
+# Sentinel-probe the packages that the build itself loads, and reinstall when any
+# is absent.
+needs_install=false
 if git diff --name-only "${BEFORE_REV}".."${AFTER_REV}" 2>/dev/null | grep -qx "package-lock.json"; then
   info "package-lock.json changed — reinstalling"
+  needs_install=true
+elif [[ ! -d node_modules ]]; then
+  info "node_modules is missing — installing"
+  needs_install=true
+else
+  # Resolve the build-critical packages through Node the same way the build
+  # does, rather than testing for a directory. `require.resolve` fails if the
+  # package is absent, which is exactly the condition that breaks `next build`.
+  #
+  # Resolve the bare specifier, NOT '<pkg>/package.json'. Packages with an
+  # `exports` map (Tailwind v4 among them) do not expose ./package.json, so the
+  # subpath form is refused even when the package is installed and the probe
+  # then reports a false positive — which would force a full `npm ci` on every
+  # deploy and, worse, mask the real missing-package signal.
+  missing=""
+  for pkg in "@tailwindcss/postcss" "tailwindcss" "next" "better-sqlite3"; do
+    if ! node -e "require.resolve('${pkg}')" >/dev/null 2>&1; then
+      missing="${missing} ${pkg}"
+    fi
+  done
+  if [[ -n "${missing}" ]]; then
+    info "node_modules is incomplete (missing:${missing}) — reinstalling"
+    needs_install=true
+  else
+    ok "lockfile unchanged and node_modules is complete — keeping it"
+  fi
+fi
+
+if [[ "${needs_install}" == true ]]; then
   npm ci || die "npm ci failed. If this is a native-module error, the box needs a
      C toolchain: apt-get install -y build-essential python3"
   ok "dependencies installed"
-elif [[ ! -d node_modules ]]; then
-  info "node_modules is missing — installing"
-  npm ci || die "npm ci failed."
-  ok "dependencies installed"
-else
-  ok "lockfile unchanged — keeping node_modules"
 fi
 
 # ── 4. Build ─────────────────────────────────────────────────────────────────
