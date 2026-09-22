@@ -10,24 +10,36 @@
  * This is a redirect layer, not the security boundary. The actual boundary is
  * in the API routes, which all check the session and return 401 — see
  * /api/state, which previously returned readState() verbatim with no session
- * check at all. Middleware can be bypassed in ways an API check cannot (a
+ * check at all. This layer can be bypassed in ways an API check cannot (a
  * direct fetch, a prefetch, a future route that forgets to call it), so it
  * exists to give a human a sensible destination, while the data itself is
  * protected at the source.
  *
- * The session cookie is only checked for presence here, not validity. Verifying
- * it means a database lookup, and middleware runs on the Edge runtime where
- * better-sqlite3 cannot run. A forged cookie therefore gets past this and is
- * rejected by the API with a 401 — the login page redirects on a valid session
- * via the server-side hasValidSession() check, so the false-positive case
- * degrades to "sees a sign-in form and is bounced to the dashboard", not to
- * "sees someone's trips".
+ * The session cookie is only checked for PRESENCE here, not validity. A forged
+ * cookie gets past this and is rejected downstream with a 401 — the login page
+ * redirects on a valid session via the server-side hasValidSession(), so the
+ * false-positive case degrades to "sees a sign-in form and is bounced to the
+ * dashboard", not to "sees someone's trips".
+ *
+ * NOTE (was middleware.ts): this file is the renamed `proxy` convention. Unlike
+ * middleware, proxy runs on the NODE runtime, so it *could* now import
+ * better-sqlite3 and validate the session properly — verified by compiling with
+ * the import present. It deliberately still does not: validating here would put
+ * a database read on the hot path of every /trips request, and it cannot remove
+ * the API-side checks that are the real boundary anyway. Presence-only is fine
+ * for a redirect hint. If you ever do add a lookup, keep the API checks too —
+ * this file is still not the boundary.
+ *
+ * The security-critical direct-DB page is NOT covered by this matcher's
+ * redirect alone: /trips/[id]/print reads SQLite itself and guards with
+ * hasValidSession() in both the page body and generateMetadata(). See the
+ * SECURITY note in that file before touching either.
  */
 
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE } from "@/lib/constants";
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const hasSessionCookie = Boolean(request.cookies.get(SESSION_COOKIE)?.value);
 
   if (!hasSessionCookie) {
