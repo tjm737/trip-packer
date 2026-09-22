@@ -16,10 +16,16 @@ import {
   ListChecks,
   Backpack,
   ExternalLink,
+  Map as MapIcon,
 } from "lucide-react";
 import type { Reservation, Task, Category, PackingItem, ReservationType } from "@/lib/types";
 import { formatDateRange, formatDate } from "@/lib/dates";
-import { noteUrl, noteLinkLabel } from "@/components/TripReservations";
+import {
+  noteUrl,
+  noteLinkLabel,
+  mappableLocation,
+  googleMapsUrl,
+} from "@/components/TripReservations";
 import { Tooltip } from "@/components/ui/tooltip";
 import type { ShareVisibility, SharedTripPayload } from "@/lib/shareVisibility";
 
@@ -171,6 +177,24 @@ export function SharedTripView({
                */
               const linkHref = noteUrl(r.notes);
               const linkLabel = noteLinkLabel(linkHref, r.title);
+              /*
+               * A Google Maps link, when the item has a usable address.
+               *
+               * Derived through the owner's mappableLocation()/googleMapsUrl()
+               * helpers rather than reimplemented here. That function encodes
+               * real decisions — which of location/locationTo to prefer, when a
+               * title genuinely names a place ("Erding") versus merely describes
+               * one ("Reykjavík hotel (not yet booked)") — and a second copy
+               * would silently disagree with the logged-in view about which
+               * items are mappable.
+               *
+               * Deliberately NOT gated behind canSee(): the location text is
+               * already rendered in full just below, so a map link derived from
+               * it discloses nothing the viewer cannot read. It is also not
+               * gated on which section this is in — the same reasoning already
+               * applied to the notes link above.
+               */
+              const mapsQuery = mappableLocation(r);
               return (
                 <li
                   key={r.id}
@@ -214,9 +238,16 @@ export function SharedTripView({
 
                       {/* Location: flights and trains have both ends. */}
                       {(r.location || r.locationTo) && (
-                        <div className="mt-1.5 inline-flex items-center gap-1.5 text-xs text-zinc-300">
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-300">
                           <MapPin className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
-                          <span className="truncate">
+                          {/*
+                           * `min-w-0` + `truncate` let a long address ellipsise
+                           * instead of pushing the Map link off the card. The
+                           * parent is flex-wrap so that on a narrow phone the
+                           * link drops to its own line rather than squeezing
+                           * the address to a few characters.
+                           */}
+                          <span className="min-w-0 max-w-full truncate">
                             {r.location}
                             {r.locationTo && (
                               <>
@@ -225,6 +256,34 @@ export function SharedTripView({
                               </>
                             )}
                           </span>
+                          {/*
+                           * Same sage pill as the notes link directly below, and
+                           * the same construction as the owner's Map control in
+                           * TripReservations: both are "go somewhere else"
+                           * actions, so they must not look like two different
+                           * kinds of thing. Solid emerald-500 border rather than
+                           * an alpha token, because an alpha border blends with
+                           * whatever surface sits behind it and lands under the
+                           * 3:1 minimum for non-text UI.
+                           *
+                           * `shrink-0` keeps the tap target from collapsing when
+                           * the address beside it is long.
+                           */}
+                          {mapsQuery && (
+                            <Tooltip label={`Open ${mapsQuery} in Google Maps`}>
+                              <a
+                                href={googleMapsUrl(mapsQuery)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                aria-label={`Open ${mapsQuery} in Google Maps`}
+                                title={`Open ${mapsQuery} in Google Maps`}
+                                className="inline-flex min-h-8 shrink-0 items-center justify-center gap-1 rounded-md border border-emerald-500 bg-emerald-500/20 px-2 py-1 text-[11px] text-emerald-300 underline underline-offset-2 transition-colors hover:border-emerald-400 hover:bg-emerald-500/30 hover:text-emerald-200 focus-ring"
+                              >
+                                <MapIcon className="h-3.5 w-3.5" strokeWidth={2} />
+                                <span>Map</span>
+                              </a>
+                            </Tooltip>
+                          )}
                         </div>
                       )}
 
