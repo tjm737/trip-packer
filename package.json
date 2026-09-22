@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "node tests/run.cjs",
     "test:types": "tsc --noEmit",
+    "create-account": "node scripts/create-account.cjs",
     "ios:sync": "cap sync ios",
     "ios:open": "cap open ios",
     "ios:build": "cd ios/App && xcodebuild -project App.xcodeproj -scheme App -sdk iphonesimulator -configuration Debug build"

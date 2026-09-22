@@ -349,6 +349,21 @@ type UserRow = {
   name: string;
   avatarColor: string;
   createdAt: string;
+  email: string | null;
+  passwordHash: string | null;
+  isOwner: number;
+};
+
+/**
+ * A user row with its credential columns included.
+ *
+ * Separate from `User` on purpose. `User` is the shape that travels to the
+ * client, and it must never carry a password hash. Login needs one, so it asks
+ * for this type instead — which makes "did I accidentally serialise the hash"
+ * a type error rather than a thing to remember.
+ */
+export type UserWithSecret = Omit<User, "passwordHash"> & {
+  passwordHash?: string | null;
 };
 
 type TripRow = {
@@ -413,6 +428,19 @@ const toUser = (r: UserRow): User => ({
   name: r.name,
   avatarColor: r.avatarColor,
   createdAt: r.createdAt,
+  // Credentials are intentionally omitted. `email` is not secret but is not
+  // needed by the client either; `passwordHash` must never leave the server.
+  ...(r.email ? { email: r.email } : {}),
+  ...(r.isOwner ? { isOwner: true } : {}),
+});
+
+/** Like toUser, but carries the password hash. Only for login. */
+const toUserWithSecret = (r: UserRow): UserWithSecret => ({
+  ...toUser(r),
+  // The hash is nullable on purpose: a companion profile has no credentials
+  // and must never be able to authenticate. verifyPassword rejects a null
+  // hash, so the login path fails closed rather than throwing.
+  passwordHash: r.passwordHash ?? undefined,
 });
 
 const toTrip = (r: TripRow): Trip => ({
@@ -568,8 +596,101 @@ export const tx = {
 
   insertUser(u: User): void {
     getDb()
-      .prepare("INSERT INTO users (id, name, avatarColor, createdAt) VALUES (@id, @name, @avatarColor, @createdAt)")
-      .run(u);
+      .prepare(
+        `INSERT INTO users (id, name, avatarColor, createdAt, email, passwordHash, isOwner)
+         VALUES (@id, @name, @avatarColor, @createdAt, @email, @passwordHash, @isOwner)`
+      )
+      .run({
+        id: u.id,
+        name: u.name,
+        avatarColor: u.avatarColor,
+        createdAt: u.createdAt,
+        // Credentials are optional: a companion profile has none, and NULL is
+        // the honest representation of "cannot log in" rather than an empty
+        // string that could be compared against a hash.
+        email: u.email ?? null,
+        passwordHash: u.passwordHash ?? null,
+        isOwner: u.isOwner ? 1 : 0,
+      });
+  },
+
+  /**
+   * Look up an account by email, for login.
+   *
+   * Emails are stored lowercased by the caller and compared with a plain
+   * equality here. Deliberately NOT a case-insensitive SQL comparison: if the
+   * column ever contains mixed-case rows from an import, a COLLATE NOCASE
+   * match would silently make two distinct rows ambiguous.
+   */
+  getUserByEmail(email: string): UserWithSecret | null {
+    const row = getDb()
+      .prepare("SELECT * FROM users WHERE email = ?")
+      .get(email) as UserRow | undefined;
+    return row ? toUserWithSecret(row) : null;
+  },
+
+  /** Set (or replace) an account's password hash. */
+  setPasswordHash(userId: string, passwordHash: string): void {
+    getDb()
+      .prepare("UPDATE users SET passwordHash = ? WHERE id = ?")
+      .run(passwordHash, userId);
+  },
+
+  /**
+   * Promote the first account to owner.
+   *
+   * Called once at bootstrap. Guarded by a WHERE that only matches when no
+   * owner exists, so calling it twice cannot demote or create a second owner.
+   */
+  promoteToOwnerIfNone(userId: string): boolean {
+    const existing = getDb()
+      .prepare("SELECT COUNT(*) AS n FROM users WHERE isOwner = 1")
+      .get() as { n: number };
+    if (existing.n > 0) return false;
+    getDb().prepare("UPDATE users SET isOwner = 1 WHERE id = ?").run(userId);
+    return true;
+  },
+
+  /* ------------------------------------------------- login rate limiting */
+
+  /** Current failure state for a key, or null when there is no record. */
+  getLoginAttempts(key: string): {
+    failures: number;
+    firstFailedAt: string;
+    lastFailedAt: string;
+  } | null {
+    const row = getDb()
+      .prepare(
+        "SELECT failures, firstFailedAt, lastFailedAt FROM login_attempts WHERE key = ?"
+      )
+      .get(key) as
+      | { failures: number; firstFailedAt: string; lastFailedAt: string }
+      | undefined;
+    return row ?? null;
+  },
+
+  /** Record a failed attempt, replacing any prior record for this key. */
+  recordLoginFailure(
+    key: string,
+    failures: number,
+    firstFailedAt: string,
+    lastFailedAt: string
+  ): void {
+    getDb()
+      .prepare(
+        `INSERT INTO login_attempts (key, failures, firstFailedAt, lastFailedAt)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET
+           failures = excluded.failures,
+           firstFailedAt = excluded.firstFailedAt,
+           lastFailedAt = excluded.lastFailedAt`
+      )
+      .run(key, failures, firstFailedAt, lastFailedAt);
+  },
+
+  /** Clear the failure record for a key — called on successful login. */
+  clearLoginAttempts(key: string): void {
+    getDb().prepare("DELETE FROM login_attempts WHERE key = ?").run(key);
   },
 
   updateUser(id: string, updates: Partial<User>): void {
