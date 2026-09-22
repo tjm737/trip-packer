@@ -80,12 +80,43 @@ ok "checkout at ${APP_DIR}"
 
 # Refuse on a dirty tree rather than resetting it. This is the whole point of
 # having this script instead of calling deploy.sh.
-if [[ -n "$(git status --porcelain)" ]]; then
+#
+# THE ONE EXCEPTION: package-lock.json churn from npm.
+#
+# `npm ci` / `npm install` rewrites package-lock.json as a side effect — it
+# reorders keys and adds platform-specific optional deps (the Tailwind v4 WASM
+# entries, for example). The file is tracked, so that rewrite shows up as a
+# modification and this guard fired on EVERY deploy, permanently blocking the
+# update with a message about "your changes" when the user had made none.
+#
+# A machine-generated artifact is not the thing this guard exists to protect.
+# The guard is here to stop `git reset --hard` from destroying HAND EDITS —
+# someone debugging a file on the server. A lockfile npm rewrote is not that:
+# discarding it loses nothing, and it must be restored to a committed state
+# anyway or the next `npm ci` inherits a doctored dependency tree.
+#
+# So: if the ONLY dirt is a modified package-lock.json, restore that one file
+# and continue. Anything else still refuses. This is deliberately narrow — a
+# glob over "generated files" would eventually swallow a real edit.
+#
+# Note the check is on a MODIFIED lockfile only. An untracked or deleted
+# package-lock.json is a different situation (a botched merge, a stray rm) and
+# still stops the deploy, because `git checkout --` cannot repair those.
+UNTRACKED_OR_DELETED="$(git status --porcelain | grep -vE '^[[:space:]]*M[[:space:]]+package-lock\.json$' || true)"
+if [[ -n "${UNTRACKED_OR_DELETED}" ]]; then
   printf '\n' >&2
   git status --short >&2
   die "Working tree is dirty. Commit, stash, or discard those changes first.
      This script will not reset the tree for you — deploy/deploy.sh does that,
-     and it is exactly why this script exists."
+     and it is exactly why this script exists.
+     (Only a modified package-lock.json is auto-restored; anything else, and
+     any untracked/deleted file, stops here.)"
+fi
+
+if [[ -n "$(git status --porcelain)" ]]; then
+  info "package-lock.json was rewritten by npm — restoring it (not a real edit)"
+  git checkout -- package-lock.json ||
+    die "Could not restore package-lock.json. Inspect it by hand."
 fi
 ok "working tree clean"
 
