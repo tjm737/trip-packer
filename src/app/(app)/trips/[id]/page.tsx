@@ -10,6 +10,8 @@ import { formatDateRange, isValidDate } from "@/lib/dates";
 import { Trip } from "@/lib/types";
 import { fetchState } from "@/lib/storage";
 import { useCacheTripPage } from "@/lib/useCacheTripPage";
+import { useCachedTripSavedAt } from "@/lib/useCachedTripSavedAt";
+import { StaleItineraryNotice } from "@/components/StaleItineraryNotice";
 import {
   MapPin,
   Calendar,
@@ -361,6 +363,13 @@ export default function TripDetail() {
   // Cache this trip page so it is reachable offline (see the hook).
   useCacheTripPage(tripId);
 
+  /*
+   * Whether the page on screen came from the cache, and since when. Drives the
+   * stale-copy notice; silent unless the device is offline AND the worker
+   * reports a saved-at time.
+   */
+  const { savedAt, offline } = useCachedTripSavedAt(tripId);
+
   // State used by all hooks — must be called unconditionally
   const [editingNotes, setEditingNotes] = useState(false);
   const [notesText, setNotesText] = useState("");
@@ -711,6 +720,15 @@ export default function TripDetail() {
            Four sections that used to be one long scroll. The header above stays
            put so the trip identity and packing progress are always visible. */}
       <main className="max-w-5xl mx-auto px-4 sm:px-8 py-4 sm:py-6">
+        {/*
+          Sits above the tabs rather than inside one. The stale-copy warning
+          applies to the whole page — flight times live on the itinerary tab,
+          but the map and notes are equally cached — so scoping it to a single
+          tab would let someone read stale data while the warning was off
+          screen.
+        */}
+        <StaleItineraryNotice savedAt={savedAt} offline={offline} />
+
         <Tabs
           value={tab}
           onChange={(id) => setTab(id as typeof tab)}

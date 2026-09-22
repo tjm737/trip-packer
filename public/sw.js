@@ -15,7 +15,7 @@
  * there is no other invalidation hook.
  */
 
-const VERSION = "v5";
+const VERSION = "v6";
 const SHELL_CACHE = `trip-packer-shell-${VERSION}`;
 const API_CACHE = `trip-packer-api-${VERSION}`;
 const TILE_CACHE = `trip-packer-tiles-${VERSION}`;
@@ -397,6 +397,61 @@ self.addEventListener("fetch", (event) => {
 self.addEventListener("message", (event) => {
   const data = event.data;
   if (!data || typeof data.type !== "string") return;
+
+  /*
+   * Report when a cached trip page was stored.
+   *
+   * The page cannot read this itself. CACHE_TRIP stamps the cached response
+   * with an X-Trip-Saved-At header, but a navigation's response headers are
+   * not exposed to page JavaScript at all, and a fetch() from the page cannot
+   * read a custom header it never asked for. The worker is the only place that
+   * can see the header, so the page asks and the worker answers.
+   *
+   * Replies on the MessageChannel port when the caller supplied one, which
+   * keeps the answer private to the asking page. Falls back to a one-way
+   * postMessage (no timestamp) so a caller that forgot the port gets a
+   * definitive "no stamp" instead of hanging forever.
+   *
+   * A missing entry or a missing header is a normal outcome, not an error: a
+   * trip that was never opened online, or one whose response could not be
+   * re-wrapped for stamping, simply has no saved-at time. Both answer with
+   * savedAt: null, and the UI says nothing rather than inventing a time.
+   */
+  if (data.type === "GET_TRIP_STAMP") {
+    const reply = (payload) => {
+      if (event.ports && event.ports[0]) event.ports[0].postMessage(payload);
+      else if (event.source) event.source.postMessage(payload);
+    };
+
+    event.waitUntil(
+      (async () => {
+        try {
+          if (typeof data.url !== "string") return reply({ savedAt: null });
+
+          const url = new URL(data.url, self.location.origin);
+          if (url.origin !== self.location.origin) return reply({ savedAt: null });
+          if (!url.pathname.startsWith("/trips/")) return reply({ savedAt: null });
+
+          const cache = await caches.open(SHELL_CACHE);
+          const hit = await cache.match(url.pathname);
+          if (!hit) return reply({ savedAt: null });
+
+          const raw = hit.headers.get("X-Trip-Saved-At");
+          if (!raw) return reply({ savedAt: null });
+
+          // Validate before handing it to the UI. A malformed stamp must not
+          // become an "Invalid Date" string rendered at the user.
+          const parsed = new Date(raw);
+          if (Number.isNaN(parsed.getTime())) return reply({ savedAt: null });
+
+          reply({ savedAt: parsed.toISOString() });
+        } catch {
+          reply({ savedAt: null });
+        }
+      })()
+    );
+    return;
+  }
 
   /*
    * Warm the tiles around a trip's stops.
