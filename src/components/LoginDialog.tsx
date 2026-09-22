@@ -11,6 +11,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { apiUrl } from "@/lib/apiUrl";
 import { AlertCircle, Loader2, Lock } from "lucide-react";
 
 /**
@@ -72,7 +73,7 @@ export function LoginDialog({
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch("/api/login", {
+      const res = await fetch(apiUrl("/api/login"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim(), password }),

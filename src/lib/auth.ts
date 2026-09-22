@@ -225,7 +225,22 @@ export function verifySessionToken(
 /* Cookies                                                             */
 /* ------------------------------------------------------------------ */
 
-export const SESSION_COOKIE = "tp_session";
+/*
+ * Imported for use within this module, then re-exported so there is a single
+ * definition.
+ *
+ * It lives in a dependency-free module because Edge middleware cannot import
+ * this file (it pulls in node:crypto), and middleware needs the cookie name to
+ * decide whether to redirect. Re-exporting keeps every existing importer
+ * working while giving middleware a safe path to the same value.
+ *
+ * The import and the export are separate statements rather than
+ * `export { SESSION_COOKIE } from "./constants"`, because a re-export does not
+ * introduce a local binding — the functions below set and clear the cookie by
+ * name, and a bare re-export leaves them referring to nothing.
+ */
+import { SESSION_COOKIE } from "./constants";
+export { SESSION_COOKIE } from "./constants";
 
 /**
  * Serialise the session cookie.
