@@ -594,7 +594,45 @@ export const tx = {
       .run(ACTIVE_USER_KEY, userId);
   },
 
+  /**
+   * Insert a PROFILE row: no credentials, never an owner.
+   *
+   * The credential columns are hard-coded to NULL rather than taken from the
+   * argument, and this is deliberate rather than defensive tidiness. The only
+   * caller that reaches this from a request is the `user.add` op, whose payload
+   * is fully client-controlled. Honouring `passwordHash` or `isOwner` from that
+   * payload would let any client (a) mint itself a login on an account it then
+   * controls, or (b) promote itself to owner — both verified as exploitable
+   * against the previous version of this function, which wrote both fields
+   * straight through from the argument.
+   *
+   * Accounts with credentials are created by `insertAccount` instead, which is
+   * only reachable from the create-account CLI.
+   */
   insertUser(u: User): void {
+    getDb()
+      .prepare(
+        `INSERT INTO users (id, name, avatarColor, createdAt, email, passwordHash, isOwner)
+         VALUES (@id, @name, @avatarColor, @createdAt, NULL, NULL, 0)`
+      )
+      .run({
+        id: u.id,
+        name: u.name,
+        avatarColor: u.avatarColor,
+        createdAt: u.createdAt,
+      });
+  },
+
+  /**
+   * Insert an ACCOUNT: credentials and ownership included.
+   *
+   * Separate from insertUser on purpose. `user.add` must not be able to reach
+   * this, and keeping the two apart makes that a property of which function is
+   * called rather than a condition someone has to remember to check.
+   *
+   * Only the create-account CLI and the bootstrap path call this.
+   */
+  insertAccount(u: User & { email: string; passwordHash: string }): void {
     getDb()
       .prepare(
         `INSERT INTO users (id, name, avatarColor, createdAt, email, passwordHash, isOwner)
@@ -605,11 +643,8 @@ export const tx = {
         name: u.name,
         avatarColor: u.avatarColor,
         createdAt: u.createdAt,
-        // Credentials are optional: a companion profile has none, and NULL is
-        // the honest representation of "cannot log in" rather than an empty
-        // string that could be compared against a hash.
-        email: u.email ?? null,
-        passwordHash: u.passwordHash ?? null,
+        email: u.email,
+        passwordHash: u.passwordHash,
         isOwner: u.isOwner ? 1 : 0,
       });
   },

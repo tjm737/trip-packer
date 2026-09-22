@@ -182,7 +182,7 @@ async function main() {
     isOwner: Boolean(args.owner),
   };
 
-  db.tx.insertUser(user);
+  db.tx.insertAccount(user);
 
   // The first account becomes the owner automatically, so a fresh install has
   // an admin without anyone having to remember --owner.
