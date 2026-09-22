@@ -37,6 +37,57 @@ export interface Release {
  */
 export const RELEASES: Release[] = [
   {
+    version: "0.6.0",
+    date: "2026-09-22",
+    headline: "Share a trip, print it, and use it in the dark",
+    groups: [
+      {
+        area: "Sharing",
+        items: [
+          "Share links now send through your device's own share sheet, so a trip can go straight to Messages or Mail instead of being copied out and pasted.",
+          "Added per-link visibility, so a shared trip can hide the parts you would rather not send — bookings and notes can be left out while the itinerary still goes.",
+          "Added a Google Maps link to each item on a shared trip, so whoever you sent it to can open a stop directly.",
+          "Links in shared notes are now tappable, rather than text the reader has to select and copy by hand.",
+        ],
+      },
+      {
+        area: "Printing",
+        items: [
+          "Added a printable itinerary, so a trip can be printed or saved as a PDF before leaving — useful when you will not have a signal.",
+        ],
+      },
+      {
+        area: "Appearance",
+        items: [
+          "Added a light theme. The app now follows your system setting by default and can be switched by hand.",
+        ],
+      },
+      {
+        area: "Accounts",
+        items: [
+          "Added a profile page, where you can rename yourself, change your avatar, and sign out.",
+          "Added in-app account deletion, so an account can be removed without asking someone else to do it on the server.",
+          "If you run the app, you can now create accounts for other people from the sidebar, giving each person their own login with trips kept private to them.",
+          "Added a limit on repeated failed sign-ins, so a stolen email address cannot be guessed at indefinitely.",
+        ],
+      },
+      {
+        area: "Offline",
+        items: [
+          "When you open a trip without a connection, the app now says so and shows when the copy you are reading was saved, instead of presenting stale details as current.",
+          "Fixed the app showing the sign-in page when a trip was opened offline, even though that trip had already been saved to the device.",
+        ],
+      },
+      {
+        area: "Trips",
+        items: [
+          "Added a public landing page, so someone opening the site for the first time sees what it does instead of a sign-in box.",
+          "Fixed the trip page failing to load on some connections, caused by the map being loaded before it was needed.",
+        ],
+      },
+    ],
+  },
+  {
     version: "0.5.0",
     date: "2026-09-20",
     headline: "Weather that actually loads, and a Status control for bookings",
