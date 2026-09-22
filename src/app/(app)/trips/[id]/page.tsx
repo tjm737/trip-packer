@@ -661,6 +661,7 @@ export default function TripDetail() {
               canShare={canShare}
               open={shareOpen}
               onOpenChange={setShareOpen}
+              tripName={tripInfo?.name}
             />
           </div>
 

@@ -21,6 +21,7 @@
     "@capacitor/core": "^8.5.2",
     "@capacitor/ios": "^8.5.2",
     "@capacitor/preferences": "^8.0.1",
+    "@capacitor/share": "^8.0.0",
     "@capacitor/status-bar": "^8.0.3",
     "airports-json": "^1.0.0",
     "better-sqlite3": "^13.0.3",

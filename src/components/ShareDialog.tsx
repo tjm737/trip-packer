@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { apiUrl } from "@/lib/apiUrl";
 import { ApiError } from "@/lib/storage";
+import { shareLink } from "@/lib/nativeShare";
 import {
   SHAREABLE_SECTIONS,
   SHARE_SECTION_LABELS,
@@ -100,11 +101,21 @@ export function ShareDialog({
   canShare,
   open,
   onOpenChange,
+  tripName,
 }: {
   tripId: string;
   canShare: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * Trip name, used as the share sheet's title and message body.
+   *
+   * Optional so the dialog still works if a caller omits it — the fallbacks
+   * inside shareViaSheet cover that — but worth passing, because a shared link
+   * arriving as "Trip itinerary" is far less useful in a text message than one
+   * arriving as "Iceland 2026 — itinerary".
+   */
+  tripName?: string;
 }) {
   const [tokens, setTokens] = useState<ShareToken[]>([]);
   const [loading, setLoading] = useState(false);
@@ -113,6 +124,14 @@ export function ShareDialog({
   const [revoking, setRevoking] = useState<string | null>(null);
   /** Token just copied, driving the Copy -> Check swap. */
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  /*
+   * Which token was just sent via the OS share sheet, for the transient
+   * "Shared" confirmation. Kept separate from copiedToken because the two mean
+   * different things to the user: "Copied" and "Shared" are not the same
+   * outcome, and collapsing them would make the button's label lie about
+   * whichever action was not taken.
+   */
+  const [sharedToken, setSharedToken] = useState<string | null>(null);
   /** "token:section" currently saving, so only that toggle shows a pending state. */
   const [savingSection, setSavingSection] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -166,6 +185,13 @@ export function ShareDialog({
     const t = setTimeout(() => setCopiedToken(null), COPY_FEEDBACK_MS);
     return () => clearTimeout(t);
   }, [copiedToken]);
+
+  // Same transient-feedback timer for the share sheet confirmation.
+  useEffect(() => {
+    if (!sharedToken) return;
+    const t = setTimeout(() => setSharedToken(null), COPY_FEEDBACK_MS);
+    return () => clearTimeout(t);
+  }, [sharedToken]);
 
   async function createLink() {
     if (creating) return;
@@ -341,6 +367,63 @@ export function ShareDialog({
     }
   }
 
+  /*
+   * Send the link through the OS share sheet.
+   *
+   * This is the action people actually want on a phone — the link usually needs
+   * to go into a text message or an email, and "Copy" then paste is three steps
+   * where the share sheet is one. It is also the feature App Review expects a
+   * travel app to have natively rather than through a wrapped website.
+   *
+   * shareLink() already owns the three-layer fallback (native plugin -> Web
+   * Share API -> clipboard) and the cancellation semantics, so this function
+   * only has to map the result onto feedback. Note the deliberate asymmetry
+   * with copyLink: a CANCELLED share shows nothing at all. The user closed the
+   * sheet on purpose; telling them "Couldn't share" would be reporting their own
+   * choice back to them as a failure.
+   */
+  async function shareViaSheet(token: string) {
+    const url = shareUrlFor(token);
+    if (!url) {
+      setError("Could not build the link on this device.");
+      return;
+    }
+
+    const result = await shareLink({
+      title: tripName || "Trip itinerary",
+      text: tripName ? `${tripName} — itinerary` : "Trip itinerary",
+      url,
+    });
+
+    if (result.ok) {
+      setSharedToken(token);
+      setError(null);
+      return;
+    }
+
+    if (result.canceled) {
+      // Their choice, not a failure. Stay silent.
+      return;
+    }
+
+    /*
+     * Anything other than an explicit share-sheet failure defers to copyLink.
+     *
+     * shareLink()'s clipboard layer is a bare modern-API write, so a DENIED
+     * permission (very common: no transient activation, or a headless/automated
+     * browser, or an insecure origin) surfaces as ok:false with a raw
+     * DOMException message like "Failed to execute 'writeText' on 'Clipboard'".
+     * Showing that string to a traveller is meaningless.
+     *
+     * copyLink is the function that already knows how to degrade — it falls back
+     * to the deprecated textarea write — so hand off to it rather than repeat
+     * that logic. The user asked to share, could not, and still ends up with the
+     * link on their clipboard, which is the useful outcome. Only if copyLink
+     * also fails does it set its own honest "could not copy" error.
+     */
+    await copyLink(token);
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -474,6 +557,50 @@ export function ShareDialog({
                                   <>
                                     <Copy className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                                     <span>Copy</span>
+                                  </>
+                                )}
+                              </button>
+                              {/*
+                                * Share, between Copy and Revoke.
+                                *
+                                * Sits in the middle deliberately: Copy and
+                                * Share are both "send this link" actions, so
+                                * grouping them keeps Revoke — which is
+                                * destructive — at the edge and away from the
+                                * button a thumb reaches for by default.
+                                *
+                                * The label swaps to "Shared" only on a
+                                * confirmed share, and a cancelled sheet leaves
+                                * it unchanged, so the button never claims an
+                                * action the user aborted.
+                                */}
+                              <button
+                                type="button"
+                                onClick={() => void shareViaSheet(t.token)}
+                                title={
+                                  sharedToken === t.token
+                                    ? "Link shared"
+                                    : "Share this link"
+                                }
+                                aria-label={
+                                  sharedToken === t.token
+                                    ? "Link shared"
+                                    : "Share this link"
+                                }
+                                className="inline-flex h-11 min-w-[44px] items-center justify-center gap-1.5 rounded-md border border-zinc-600 bg-white/5 px-2.5 text-[11px] text-zinc-200 transition-colors hover:border-zinc-500 hover:bg-white/10 focus-ring sm:h-8"
+                              >
+                                {sharedToken === t.token ? (
+                                  <>
+                                    <Check
+                                      className="h-4 w-4 sm:h-3.5 sm:w-3.5"
+                                      strokeWidth={3}
+                                    />
+                                    <span>Shared</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Share2 className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                                    <span>Share</span>
                                   </>
                                 )}
                               </button>
