@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 #
-# deploy.sh — deploy trip-packer to a VPS behind Caddy.
+# deploy.sh — deploy trip-packer to a VPS behind nginx.
 #
 # Run AS ROOT on the VPS. Mirrors plane-tracker's deploy.sh conventions:
 #   - app lives in /opt/<name>, owned by a dedicated system user
-#   - Caddy terminates HTTPS; the app listens on localhost only
+#   - nginx terminates HTTP and proxies to the app on localhost only
 #   - systemd unit with restart-on-failure
+#
+# TLS is NOT configured here. certbot --nginx issues the certificate after the
+# plain-HTTP site block is live and verified; see the final summary output.
 #
 # Differences from plane-tracker's script that are deliberate:
 #   - the app data is SQLite in WAL mode, so the pre-deploy backup uses
@@ -21,12 +24,11 @@ set -euo pipefail
 APP_NAME="trip-packer"
 APP_DIR="/opt/${APP_NAME}"
 REPO_DIR="${APP_DIR}"
-# Domain Caddy serves this app on. Override without editing this file:
+# Domain nginx serves this app on. Override without editing this file:
 #   DOMAIN=trips.mydomain.com bash deploy/deploy.sh
 DOMAIN="${DOMAIN:-trips.example.com}"
 PORT=4100
 SERVICE_USER="trip-packer"
-CADDYFILE="/etc/caddy/${APP_NAME}.caddy"
 DB_PATH="${APP_DIR}/data/trip-packer.db"
 BACKUP_DIR="/var/backups/${APP_NAME}"
 REPO_URL="${REPO_URL:-}"
@@ -190,39 +192,45 @@ else
   die "${APP_NAME} failed to start (see journal above)"
 fi
 
-# ── Caddy ───────────────────────────────────────────────────────────────────
-if command -v caddy &>/dev/null; then
-  info "Configuring Caddy for ${DOMAIN}"
+# ── nginx ───────────────────────────────────────────────────────────────────
+# This box runs nginx (it already serves plane-tracker on the same ports), so
+# nginx is the web tier here. An earlier revision of this script configured
+# Caddy instead: Caddy could never bind 80/443 while nginx held them, and the
+# install failed silently while the script still reported success.
+if command -v nginx &>/dev/null; then
+  info "Configuring nginx for ${DOMAIN}"
+  NGINXFILE="/etc/nginx/sites-available/${APP_NAME}"
   # The template carries {{DOMAIN}} rather than a literal hostname, so that no
   # real domain lives in the repository. Substituting here rather than shipping
   # a second pre-filled file keeps one source of truth for the site block.
-  sed "s/{{DOMAIN}}/${DOMAIN}/g" "${APP_DIR}/deploy/trip-packer.caddy" > "${CADDYFILE}"
-  chmod 644 "${CADDYFILE}"
-  # Fail loudly if the placeholder somehow survived: a literal {{DOMAIN}} would
-  # make Caddy reject the whole config, taking the other site on this box down
-  # with it when the reload is attempted.
-  if grep -q "{{DOMAIN}}" "${CADDYFILE}"; then
-    die "Caddy template placeholder {{DOMAIN}} was not substituted (DOMAIN='${DOMAIN}')"
-  fi
-  mkdir -p /var/log/caddy
-  chown -R caddy:caddy /var/log/caddy 2>/dev/null || true
-  caddy fmt "${CADDYFILE}" --overwrite 2>/dev/null || true
-
-  if ! grep -q "${CADDYFILE}" /etc/caddy/Caddyfile 2>/dev/null; then
-    echo "import ${CADDYFILE}" >> /etc/caddy/Caddyfile
-    ok "Added import to /etc/caddy/Caddyfile"
+  sed "s/{{DOMAIN}}/${DOMAIN}/g" "${APP_DIR}/deploy/trip-packer.nginx" > "${NGINXFILE}"
+  chmod 644 "${NGINXFILE}"
+  # Fail loudly if the placeholder survived: nginx would treat "{{DOMAIN}}" as a
+  # literal hostname, so the site would not match and requests would fall through
+  # to the default block -- serving the WRONG app on this hostname with a 200,
+  # which looks like success from outside.
+  if grep -q "{{DOMAIN}}" "${NGINXFILE}"; then
+    die "nginx template placeholder {{DOMAIN}} was not substituted (DOMAIN='${DOMAIN}')"
   fi
 
-  if caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1; then
-    systemctl reload caddy 2>/dev/null || systemctl restart caddy 2>/dev/null || true
-    ok "Caddy reloaded"
+  if [[ ! -L "/etc/nginx/sites-enabled/${APP_NAME}" ]]; then
+    ln -s "${NGINXFILE}" "/etc/nginx/sites-enabled/${APP_NAME}"
+    ok "Enabled ${APP_NAME} site"
+  fi
+
+  # `nginx -t` validates the WHOLE config, including plane-tracker. A failure
+  # here means we must NOT reload, or both sites go down.
+  if nginx -t >/dev/null 2>&1; then
+    systemctl reload nginx
+    ok "nginx reloaded"
   else
-    warn "Caddy config did not validate; NOT reloading. Check ${CADDYFILE}"
+    nginx -t || true
+    die "nginx config test failed; NOT reloading (plane-tracker is still serving). Fix ${NGINXFILE}"
   fi
 else
-  CADDY_MISSING=1
-  warn "Caddy not installed — the app is reachable only on localhost:${PORT}."
-  warn "Nothing is serving https://${DOMAIN} yet."
+  NGINX_MISSING=1
+  warn "nginx not installed — the app is reachable only on localhost:${PORT}."
+  warn "Nothing is serving http://${DOMAIN}."
 fi
 
 # ── Smoke test ──────────────────────────────────────────────────────────────
@@ -239,44 +247,68 @@ else
   warn "GET /api/state -> ${CODE} (expected 401; app may still be starting)"
 fi
 
-# ── DNS check ───────────────────────────────────────────────────────────────
+# ── DNS / routing check ─────────────────────────────────────────────────────
+# Checks plain HTTP, because this script does not configure TLS (certbot does,
+# afterwards). An earlier revision tested https:// here: it could only ever
+# report failure before a cert existed, and once one did exist it would return
+# 200 for the WRONG app -- nginx falls back to its default server block when no
+# server_name matches, so an unmatched host still answers 200. Reported success
+# while serving the wrong site.
 info "DNS check for ${DOMAIN}"
 if getent hosts "${DOMAIN}" >/dev/null 2>&1 || host "${DOMAIN}" >/dev/null 2>&1; then
   ok "${DOMAIN} resolves"
-  HTTPS_CODE="$(curl -s -o /dev/null -w '%{http_code}' "https://${DOMAIN}/" || echo "000")"
-  if [[ "${HTTPS_CODE}" =~ ^(200|302|307)$ ]]; then
-    ok "https://${DOMAIN} -> ${HTTPS_CODE}"
+  HTTP_CODE="$(curl -s -o /dev/null -w '%{http_code}' "http://${DOMAIN}/" 2>/dev/null)"
+  HTTP_CODE="${HTTP_CODE:-000}"
+
+  # Identify which app answered, not merely that something did. The x-powered-by
+  # / Server header alone cannot distinguish the two Next.js apps on this box,
+  # so match on the response body containing this app's own markup.
+  if [[ "${HTTP_CODE}" =~ ^(200|302|307)$ ]]; then
+    BODY="$(curl -s "http://${DOMAIN}/" 2>/dev/null | head -c 4000)"
+    if [[ "${BODY}" == *"Trip Packer"* || "${BODY}" == *"trip-packer"* ]]; then
+      ok "http://${DOMAIN} -> ${HTTP_CODE} (serving trip-packer)"
+    else
+      warn "http://${DOMAIN} -> ${HTTP_CODE}, but the response does NOT look like trip-packer."
+      warn "Another server block is answering this hostname. Check:"
+      warn "    ls -l /etc/nginx/sites-enabled/"
+      warn "    nginx -T | grep -A2 server_name"
+    fi
   else
-    warn "https://${DOMAIN} -> ${HTTPS_CODE} (cert may still be issuing)"
+    warn "http://${DOMAIN} -> ${HTTP_CODE}"
+    warn "If nginx was just configured, allow a moment and re-check."
   fi
 else
   warn "${DOMAIN} does NOT resolve yet. Add the record, then re-run this script:"
-  warn "    A  trips  ->  <SERVER_IP>"
+  warn "    A  ${DOMAIN%%\.*}  ->  <SERVER_IP>"
 fi
 
 echo
-if [[ "${CADDY_MISSING:-0}" -eq 1 ]]; then
+if [[ "${NGINX_MISSING:-0}" -eq 1 ]]; then
   cat <<EOF
 
 $(printf '\033[0;33m')Deploy finished WITHOUT a web server.$(printf '\033[0m')
 
   The app is running on localhost:${PORT}, but nothing serves
-  https://${DOMAIN} — Caddy is not installed. This is not a complete deploy.
+  http://${DOMAIN} — nginx is not installed. This is not a complete deploy.
 
-  Install Caddy, then re-run this script:
+  Install nginx, then re-run this script:
 
-      apt-get update && apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
-      curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \\
-        | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-      curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \\
-        | tee /etc/apt/sources.list.d/caddy-stable.list
-      apt-get update && apt-get install -y caddy
+      apt-get update && apt-get install -y nginx
 
   The re-run is idempotent and will leave the already-built app in place.
 
 EOF
 else
-  info "Done. Next steps for a fresh install:"
+  info "Done. Next steps:"
+
+  # TLS is not configured by this script. Say so explicitly, because the smoke
+  # test above uses plain HTTP and a reader could reasonably assume a working
+  # https:// URL exists once the htttp:// one does.
+  if [[ ! -d "/etc/letsencrypt/live/${DOMAIN}" ]]; then
+    echo "   No certificate for ${DOMAIN} yet. Once http://${DOMAIN} serves this"
+    echo "   app, run:"
+    echo "     certbot --nginx -d ${DOMAIN}"
+  fi
 fi
 echo "   Create the owner account (run as root, from ${APP_DIR}):"
 echo "     cd ${APP_DIR}"

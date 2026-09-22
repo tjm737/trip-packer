@@ -1,0 +1,45 @@
+# nginx site block for trip-packer.
+#
+# This is a TEMPLATE. deploy.sh replaces the double-braced token below with the
+# $DOMAIN value and installs the result at
+# /etc/nginx/sites-available/trip-packer.
+#
+# It mirrors /etc/nginx/sites-available/plane-tracker on the same box, changing
+# only the server_name, the upstream port, and nothing else. Following the
+# existing convention rather than inventing a new shape keeps the two sites
+# behaving the same way for headers, upgrades, and deny rules.
+#
+# TLS is deliberately NOT configured here. certbot rewrites this file in place
+# when it issues a certificate, and a hand-written `listen 443` block would
+# conflict with what certbot expects to manage. Run certbot after this block is
+# live and verified over plain HTTP.
+server {
+    listen 80;
+    server_name {{DOMAIN}};
+
+    location / {
+        proxy_pass http://127.0.0.1:4100;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # Mirror plane-tracker's hardening. nginx's root is not pointed at the
+    # checkout, so these are belt-and-braces rather than load-bearing -- but
+    # /data/ holds the SQLite database, and a mistaken root/alias added later
+    # would otherwise expose it.
+    location ~ /\.env {
+        deny all;
+        return 404;
+    }
+
+    location ^~ /data/ {
+        deny all;
+        return 404;
+    }
+}
