@@ -19,6 +19,7 @@
  */
 
 import Link from "next/link";
+import Image from "next/image";
 import {
   ArrowRight,
   CalendarDays,
@@ -84,18 +85,68 @@ export default function LandingPage() {
         </Link>
       </header>
 
-      <main className="mx-auto max-w-5xl px-6">
-        {/* Hero */}
-        <section className="pt-14 pb-20 sm:pt-20 sm:pb-24">
+      {/*
+        Full-bleed hero. The background photograph is portrait (3:4) but the
+        hero is wide, so the crop is handled in CSS: object-cover on a wide
+        band for desktop, and the full portrait framing on phones where the
+        viewport is itself portrait.
+
+        Legibility drove the scrim, and it is measured rather than guessed. The
+        photograph's luminance, sampled in a 3x4 grid, runs bright at the top
+        (cloud and snow, 100-200) and dark through the lower half (61 down to
+        24). The headline and body sit over the upper third, so the scrim is
+        weighted there and left almost clear below, where the photo is already
+        dark enough to carry white text on its own. An earlier pass used a flat
+        72% black and crushed the whole image to a black panel; the photo has to
+        stay visible or it is just noise.
+
+        Two <Image> elements rather than one with a breakpoint switch, because
+        art direction differs (wide band vs full portrait), not just resolution.
+      */}
+      <section className="relative isolate overflow-hidden border-b border-white/8">
+        <div className="absolute inset-0 -z-10">
+          <Image
+            src="/hero/hero-mobile.jpg"
+            alt=""
+            fill
+            priority
+            sizes="100vw"
+            className="object-cover object-center lg:hidden"
+          />
+          <Image
+            src="/hero/hero-desktop.jpg"
+            alt=""
+            fill
+            priority
+            sizes="100vw"
+            className="hidden object-cover object-[55%_45%] lg:block"
+          />
+          {/*
+            Single top-weighted scrim, deliberately light.
+
+            Measured composite luminance at the headline (y=27%) is what drives
+            this. The photo is already dark through the lower half (32-59), so a
+            heavy overlay adds nothing there but destroys the rock and snow
+            detail that makes the image worth having. Two overlapping gradients
+            (a vertical *and* a left wash) were the original mistake: they
+            multiply, landing roughly 70% black on the left third and turning
+            the photo into a flat panel. One gradient, tuned so the headline
+            zone composites near 45 while the peak stays above 70 and remains
+            legible as a photograph.
+          */}
+          <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/28 to-black/8" />
+        </div>
+
+        <div className="mx-auto max-w-5xl px-6 pt-24 pb-28 sm:pt-32 sm:pb-36">
           <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-center lg:gap-16">
             <div>
-              <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-emerald-400">
+              <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-emerald-200/90">
                 Trip planning
               </p>
-              <h1 className="mt-5 text-[34px] font-bold leading-[1.15] tracking-tight text-zinc-50 sm:text-[44px]">
+              <h1 className="mt-5 text-[34px] font-bold leading-[1.15] tracking-tight text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.55)] sm:text-[44px]">
                 Plan the trip you&rsquo;re actually going to take.
               </h1>
-              <p className="mt-6 max-w-xl text-base leading-relaxed text-zinc-400">
+              <p className="mt-6 max-w-xl text-base leading-relaxed text-zinc-200 drop-shadow-[0_1px_8px_rgba(0,0,0,0.6)]">
                 Flights, stays, trains and the drive between them, in one place — with
                 a map that shows how far apart the pieces really are.
               </p>
@@ -116,7 +167,7 @@ export default function LandingPage() {
                 </Link>
               </div>
 
-              <p className="mt-5 flex items-center gap-1.5 text-xs text-zinc-500">
+              <p className="mt-5 flex items-center gap-1.5 text-xs text-zinc-300 [text-shadow:0_1px_3px_rgb(0_0_0/0.6)]">
                 <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
                 Your trips are private to your account.
               </p>
@@ -154,8 +205,10 @@ export default function LandingPage() {
               </div>
             </div>
           </div>
-        </section>
+        </div>
+      </section>
 
+      <main className="mx-auto max-w-5xl px-6">
         {/* Features */}
         <section className="border-t border-white/8 py-16">
           <h2 className="text-[10px] font-medium uppercase tracking-[0.08em] text-zinc-500">

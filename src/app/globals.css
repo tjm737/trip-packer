@@ -131,6 +131,39 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+
+  /*
+   * Keep browser autofill on-theme.
+   *
+   * When Chrome autofills a field it paints its own background — a pale blue
+   * (#e8f0fe) that is close to white — plus dark text, via a UA-internal style.
+   * That style outranks a normal `background-color` declaration, so on this dark
+   * surface a clicked/filled field flashes white and the white text sitting on
+   * it becomes unreadable. The login form hits this hardest because its fields
+   * carry autoComplete="username" / "current-password", which is exactly what
+   * invites autofill.
+   *
+   * `background-color` is powerless here, but two properties do beat the UA
+   * rule: an inset box-shadow (painted over the field's own background) and
+   * `-webkit-text-fill-color` (which wins over `color`). The shadow uses the
+   * input's own surface token so an autofilled field is indistinguishable from
+   * a typed one, in any theme.
+   *
+   * The absurd transition delay is the standard countermeasure to Chrome's
+   * autofill animation: the browser transitions the background in over ~10min,
+   * so pinning the transition to a near-infinite delay keeps the shadow from
+   * being interpolated away.
+   */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  input:-webkit-autofill:active {
+    -webkit-text-fill-color: var(--color-foreground);
+    caret-color: var(--color-foreground);
+    -webkit-box-shadow: 0 0 0 1000px var(--surface-2) inset;
+    box-shadow: 0 0 0 1000px var(--surface-2) inset;
+    transition: background-color 600000s 0s, color 600000s 0s;
+  }
 }
 
 /*

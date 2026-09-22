@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { useApp } from "@/lib/AppContext";
 import { User, Trip } from "@/lib/types";
@@ -32,6 +33,8 @@ import {
   Check,
   X,
   ArrowRight,
+  UserRound,
+  LogOut,
 } from "lucide-react";
 
 function UserAvatar({ user, size = "md" }: { user: User; size?: "sm" | "md" | "lg" }) {
@@ -54,6 +57,76 @@ function UserAvatar({ user, size = "md" }: { user: User; size?: "sm" | "md" | "l
     >
       {initials}
     </div>
+  );
+}
+
+/**
+ * Sidebar entry that ends the session.
+ *
+ * Same square icon-button shape as SignInButton and ProfileButton so the footer
+ * row stays visually even. Like ProfileButton, `data-keep-drawer-open` is NOT
+ * set: this navigates away from the current page, so the mobile drawer should
+ * close rather than stay open on top of the login screen.
+ *
+ * The request is a POST because logging out mutates server state — it deletes
+ * the session row, not just the cookie. A GET would be prefetchable by the
+ * browser and could silently sign the user out while they are reading a page.
+ *
+ * A full reload on success is deliberate and matches the sign-IN path: the
+ * client caches trips per account, so starting fresh is the only way to
+ * guarantee no data from the ended session survives in a store. The reload
+ * happens even if the request failed, because the route always clears the
+ * cookie and reporting a stuck state would strand the user in a shell they can
+ * no longer authenticate against.
+ */
+function SignOutButton() {
+  const [busy, setBusy] = useState(false);
+
+  async function signOut() {
+    setBusy(true);
+    try {
+      await fetch("/api/logout", { method: "POST" });
+    } catch {
+      // Ignored on purpose: see the comment above. The cookie is cleared
+      // server-side either way, so the reload below is still the right move.
+    }
+    window.location.href = "/login";
+  }
+
+  return (
+    <button
+      onClick={signOut}
+      disabled={busy}
+      title="Sign out"
+      aria-label="Sign out"
+      className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200 focus-ring disabled:opacity-50"
+    >
+      <LogOut className="h-4 w-4" />
+    </button>
+  );
+}
+
+/**
+ * Sidebar entry for the profile screen.
+ *
+ * A link rather than a dialog, so it navigates and needs no open/close state.
+ * `data-keep-drawer-open` is deliberately NOT set: unlike the dialog buttons
+ * this one SHOULD close the mobile drawer, because the user is leaving the
+ * current page. Keeping it open would show the drawer over the profile screen.
+ *
+ * The icon container is identical to SignInButton's so the footer row stays
+ * visually even.
+ */
+function ProfileButton() {
+  return (
+    <Link
+      href="/profile"
+      title="Your profile"
+      aria-label="Profile"
+      className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200 focus-ring"
+    >
+      <UserRound className="h-4 w-4" />
+    </Link>
   );
 }
 
@@ -658,6 +731,8 @@ export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
           New Trip
         </Button>
         <SignInButton onClick={() => setLoginOpen(true)} />
+        <ProfileButton />
+        <SignOutButton />
         <AboutButton onClick={() => setAboutOpen(true)} />
       </div>
 

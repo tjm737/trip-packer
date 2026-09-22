@@ -30,6 +30,14 @@
  *
  *   { kind: "self" }              acts on the acting user's own record.
  *
+ *   { kind: "selfOrAdmin" }       editing an account record: an owner may edit
+ *                                 anyone, everyone else only themselves. Used
+ *                                 for user.update, where both are legitimate —
+ *                                 the sidebar's traveler editor is owner-only,
+ *                                 while the profile screen is self-service.
+ *                                 The route checks the target id, because this
+ *                                 op names its user in the payload.
+ *
  *   { kind: "session" }           no data access; affects the session only.
  *
  * Anything not listed here must still be listed explicitly — there is no
@@ -45,6 +53,7 @@ export type Permission =
   | { kind: "byId"; entity: EntityKind }
   | { kind: "admin" }
   | { kind: "self" }
+  | { kind: "selfOrAdmin" }
   | { kind: "session" };
 
 /*
@@ -73,8 +82,15 @@ export const OP_PERMISSIONS = {
    * instance is an invitation.
    */
   "user.add": { kind: "admin" },
-  "user.update": { kind: "admin" },
   "user.delete": { kind: "admin" },
+  /*
+   * Editing an account is the one account op that is not purely administrative.
+   * The sidebar's traveler editor (owner-only) and the profile screen
+   * (self-service) share it, so the permission permits both and the route
+   * enforces the target. Adding or deleting accounts stays admin-only: those
+   * change who can log in, which is not a self-service action.
+   */
+  "user.update": { kind: "selfOrAdmin" },
 
   /*
    * Trips.

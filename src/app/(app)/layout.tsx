@@ -12,30 +12,22 @@
  * A route group is the right tool because it changes the layout boundary without
  * changing any URL. /trips/new is still /trips/new.
  *
+ * The dashboard at "/" is NOT covered by this file, because "/" is outside the
+ * group by necessity — it doubles as the public landing page. That route wraps
+ * itself in the same AppShell, so both render identical chrome.
+ *
  * What this does NOT do is admit or reject anyone. It renders chrome; the
  * middleware redirects on a missing session and the API routes return 401. That
  * separation is deliberate — a layout cannot enforce anything, since it wraps
  * whatever the router has already decided to render.
  */
 
-import { Sidebar } from "@/components/Sidebar";
-import { MobileNav } from "@/components/MobileNav";
-import { OfflineBanner } from "@/components/OfflineBanner";
+import { AppShell } from "@/components/AppShell";
 
 export default function AppLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  return (
-    <div className="flex">
-      <Sidebar />
-      <div className="flex-1 min-w-0 flex flex-col">
-        <MobileNav />
-        {/* Above the content, below the nav — never covers the itinerary. */}
-        <OfflineBanner />
-        <main className="flex-1 min-w-0">{children}</main>
-      </div>
-    </div>
-  );
+  return <AppShell>{children}</AppShell>;
 }

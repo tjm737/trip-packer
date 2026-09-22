@@ -186,6 +186,27 @@ export function applyMutation(
       break;
     }
 
+    case "selfOrAdmin": {
+      /*
+       * Account records are not trip-scoped, so there is no entity to resolve
+       * through canMutateEntityById — the target has to be checked here against
+       * the payload's id.
+       *
+       * Without this, relaxing user.update from admin would let any signed-in
+       * user rename any other account by passing its id, and the store layer
+       * would not catch it: updateUser's allow-list constrains which COLUMNS can
+       * be written, not which ROW.
+       */
+      const targetUserId = body.op === "user.update" ? body.id : null;
+      if (!targetUserId) {
+        return { ok: false, status: 400, error: "Missing user id" };
+      }
+      if (targetUserId !== actor.id && !actor.isOwner) {
+        return { ok: false, status: 403, error: "Not permitted on that user" };
+      }
+      break;
+    }
+
     case "session": {
       break;
     }

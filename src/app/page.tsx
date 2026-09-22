@@ -18,9 +18,16 @@
  * for, so sending them to /welcome (or anywhere else) would add a hop to the
  * most common first impression. Only /trips/* redirects, because those routes
  * have no meaningful logged-out rendering — see src/middleware.ts.
+ *
+ * The dashboard branch wraps itself in AppShell because this route is outside
+ * the (app) route group — it has to be, since "/" is also the public landing
+ * page. Without that explicit wrapper the signed-in dashboard rendered with no
+ * sidebar at all: the shell lives in (app)/layout.tsx, and importing a component
+ * from the group does not apply the group's layout. See the AppShell doc.
  */
 
 import { hasValidSession } from "@/lib/session";
+import { AppShell } from "@/components/AppShell";
 import DashboardClient from "./(app)/DashboardClient";
 import LandingPage from "@/components/LandingPage";
 
@@ -36,5 +43,9 @@ export default async function Home() {
     return <LandingPage />;
   }
 
-  return <DashboardClient />;
+  return (
+    <AppShell>
+      <DashboardClient />
+    </AppShell>
+  );
 }
