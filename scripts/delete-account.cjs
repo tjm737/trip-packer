@@ -12,16 +12,23 @@
  *
  * WHY THIS REFUSES TO DELETE THE LAST OWNER
  *
- * `isOwner` is not cosmetic: mutate/route.ts gates the "admin" op class on it,
- * and account creation lives in that class. Removing the final owner therefore
- * removes the ability to mint accounts *permanently* — there is no endpoint that
- * can restore it, because restoring it is itself an admin op. The
- * promoteToOwnerIfNone() helper in db.ts only runs on the account-creation path,
- * so it cannot rescue a database that can no longer create accounts.
+ * `isOwner` gates the "admin" op class in mutate/route.ts, and `user.add` —
+ * adding an account from inside the app — lives in that class (opPermissions.ts
+ * marks user.add, user.delete and state.replace as admin). Removing the final
+ * owner therefore breaks in-app account administration: user.add starts
+ * returning 403 "Owner only".
  *
- * That failure is unrecoverable through the app and is reachable by a single
- * mistyped command, so the check is not a warning — it is a hard stop, and
- * --force does not bypass it. Promote someone else first, then delete.
+ * This is NOT unrecoverable, and an earlier version of this comment wrongly said
+ * it was. create-account.cjs writes straight through db.tx.insertAccount, which
+ * bypasses the op-permission layer entirely, and then calls
+ * promoteToOwnerIfNone() — so running it on the server mints a working account
+ * AND restores the owner flag. The guard here is still worth having, because the
+ * breakage is invisible until someone next tries to add a user and the recovery
+ * needs shell access. But it is a guard against an awkward state, not against a
+ * dead end, and the message below used to overstate the stakes.
+ *
+ * A raw DELETE that skips this script can still land you in that state, which is
+ * exactly the case the guard exists to prevent.
  *
  * Deletion cascades: db.ts sets `foreign_keys = ON` and the trips/categories/
  * items/members tables all reference users with ON DELETE CASCADE. So this
@@ -176,23 +183,32 @@ function main() {
 
   /*
    * The load-bearing guard. Refuse when this account is the only owner, because
-   * deleting it makes account creation impossible with no in-app recovery path.
-   * Deliberately not bypassable by --force or --yes: the point is that no flag
-   * should let a mistyped command strand the deployment.
+   * the "admin" op class gates user.add — the in-app way to add an account — so
+   * deleting the last owner leaves the app unable to administer accounts.
+   *
+   * Stated accurately: this is recoverable from the server, since create-account
+   * .cjs bypasses the permission layer and promoteToOwnerIfNone restores the
+   * flag. So the guard prevents an awkward, silent state rather than a dead end.
+   * Deliberately not bypassable by --force or --yes, because the state is
+   * invisible until someone next adds a user.
    */
   if (user.isOwner && ownerCount <= 1) {
     console.error(
       `\nRefusing: ${user.email || user.id} is the only owner in this database.`
     );
     console.error(
-      "Owner rights gate account creation (mutate/route.ts, the \"admin\" op class),\n" +
-        "so removing the last owner makes it impossible to create any further account,\n" +
-        "and no endpoint can restore the flag — restoring it is itself an owner-gated\n" +
-        "operation. This is unrecoverable through the app.\n"
+      "Owner rights gate in-app account administration (user.add is an \"admin\"\n" +
+        "op), so removing the last owner makes the app unable to add or delete\n" +
+        "accounts, and nothing in the UI reports why.\n"
     );
-    console.error("Promote a different account to owner first, then re-run:");
+    console.error("Either promote a different account to owner first:");
     console.error(
       `  sqlite3 ${targetDb} "UPDATE users SET isOwner=1 WHERE email='<other>';"\n`
+    );
+    console.error("Or delete it and restore the flag afterwards by creating an account,");
+    console.error("which is auto-promoted when no owner exists:");
+    console.error(
+      "  npm run create-account -- --email <you> --name <you>\n"
     );
     process.exit(1);
   }
