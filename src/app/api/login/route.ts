@@ -3,10 +3,13 @@ import { NextResponse } from "next/server";
 import { tx } from "@/lib/db";
 import {
   SESSION_TTL_MS,
+  clientIpFrom,
   createSessionToken,
   isLockedOut,
   nextFailureState,
+  retryAfterSeconds,
   serializeSessionCookie,
+  takeLoginToken,
   verifyPassword,
 } from "@/lib/auth";
 
@@ -15,7 +18,7 @@ export const dynamic = "force-dynamic";
 /*
  * POST /api/login — exchange email + password for a session cookie.
  *
- * Two properties this endpoint is responsible for:
+ * Three properties this endpoint is responsible for:
  *
  * 1. It must not reveal whether an email is registered. "No such account" and
  *    "wrong password" return the same body and status, so the endpoint cannot
@@ -26,6 +29,12 @@ export const dynamic = "force-dynamic";
  * 2. Failure counting is per email, not per IP. A per-IP counter would let one
  *    attacker lock out everyone behind a shared address, and would not stop a
  *    distributed attempt against a single account.
+ *
+ * 3. There is ALSO a per-IP token bucket (see takeLoginToken in lib/auth).
+ *    Those two limits do different jobs and both are needed: per-email caps
+ *    guesses against one account, per-IP caps total request volume. Without the
+ *    second, an attacker sprays one guess across thousands of addresses and
+ *    never trips a per-email counter.
  */
 
 /** The single response for every authentication failure. */
@@ -48,6 +57,22 @@ export async function POST(request: Request) {
   }
 
   try {
+    /*
+     * Global per-IP limit, checked BEFORE the per-email counter and before
+     * PBKDF2 runs. Ordering matters: this is the cheap check, and putting it
+     * first means a flood costs a Map lookup instead of a 600,000-iteration
+     * hash. It also means an attacker cannot use the endpoint as a CPU
+     * amplifier by pricing each request in milliseconds of server work.
+     */
+    const ip = clientIpFrom(request.headers);
+    if (!takeLoginToken(ip)) {
+      const retry = retryAfterSeconds(ip);
+      return NextResponse.json(
+        { error: "Too many requests. Try again shortly." },
+        { status: 429, headers: { "Retry-After": String(Math.max(retry, 1)) } }
+      );
+    }
+
     const attempts = tx.getLoginAttempts(email);
     if (attempts && isLockedOut(attempts.failures, attempts.lastFailedAt)) {
       return NextResponse.json(

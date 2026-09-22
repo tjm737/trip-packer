@@ -353,3 +353,177 @@ export function nextFailureState(
 
   return { failures: prev.failures + 1, firstFailedAt: prev.firstFailedAt };
 }
+
+/* ------------------------------------------------------------------ */
+/* Global request limiting (per client IP)                             */
+/* ------------------------------------------------------------------ */
+
+/*
+ * WHY THIS EXISTS ON TOP OF THE PER-EMAIL LOCKOUT
+ *
+ * The per-email counter above stops a targeted brute force: five guesses
+ * against one address and that address is frozen for 15 minutes. What it does
+ * not stop is SPRAYING — an attacker with a wordlist walks a list of addresses,
+ * takes five free guesses at each, and never trips a single counter, because
+ * every address has its own budget. Nothing in the per-email design caps the
+ * TOTAL rate of attempts.
+ *
+ * This is the ceiling on that total. It is a token bucket per client IP:
+ * a bucket holds BURST tokens and refills at RATE tokens per second, so a
+ * short spike is allowed (a person fat-fingering a password is not punished)
+ * but sustained hammering empties the bucket and starts collecting 429s.
+ *
+ * SIZING. LOGIN_BURST = 10, refilling one token every 3 seconds. That is:
+ *   - generous for a human: 10 attempts immediately, then 20/minute steady.
+ *     Someone who genuinely cannot remember which password they used never
+ *     notices this.
+ *   - ruinous for a script: 20/minute/IP is ~29k guesses/day, and the attacker
+ *     must hold thousands of IPs to make a wordlist run worthwhile — at which
+ *     point they are paying for a botnet to attack a personal trip planner.
+ *
+ * IN-MEMORY, DELIBERATELY. The service is a single `next start` process
+ * (`deploy/trip-packer.service`: ExecStart=/usr/bin/npm start, no cluster, no
+ * PM2), so one map genuinely is the whole world. A DB-backed counter would
+ * survive restarts, but it would also add a write on every login attempt and
+ * make this file depend on the database — the opposite of what it is for.
+ * The consequence to accept honestly: a restart clears the buckets, so an
+ * attacker who can crash the service resets their budget. Losing this against
+ * an attacker who can already crash your server is not the weak link.
+ *
+ * IP RESOLUTION. Behind nginx, `request` has no useful socket address; the
+ * real client is in X-Forwarded-For (see clientIpFrom below). That header is
+ * attacker-controlled unless a trusted proxy overwrites it, which is why the
+ * parsing takes the RIGHTMOST value nginx appended rather than the leftmost
+ * one the client can forge — see the comment there.
+ */
+
+export const LOGIN_BURST = 10;
+export const LOGIN_REFILL_MS = 3_000;
+
+type Bucket = { tokens: number; updatedAt: number };
+
+/*
+ * The bucket store.
+ *
+ * Module-level so it survives across requests within the process. Keyed by
+ * client IP. Values are plain {tokens, updatedAt} so the whole thing is trivially
+ * inspectable in a debugger and has no hidden lifecycle.
+ */
+const buckets = new Map<string, Bucket>();
+
+/*
+ * Cap on tracked keys. Without this, an attacker rotating source addresses
+ * grows the map without bound — a memory-exhaustion vector that would be a
+ * worse bug than the one being fixed. On overflow the oldest-touched entries
+ * are dropped: they are, by construction, the least recently active, and
+ * evicting them only forgives an attacker who stopped attacking.
+ */
+const MAX_BUCKETS = 10_000;
+
+/**
+ * Pull one token from `key`'s bucket.
+ *
+ * Returns true when the request is allowed. Pure with respect to time: `now`
+ * is injected so tests can simulate a refill without sleeping for real.
+ *
+ * A missing bucket starts FULL, so a first-time visitor is never penalised for
+ * the people who share their NAT.
+ */
+export function takeLoginToken(
+  key: string,
+  now: number = Date.now()
+): boolean {
+  const existing = buckets.get(key);
+  const bucket: Bucket = existing ?? { tokens: LOGIN_BURST, updatedAt: now };
+
+  // Refill proportionally to elapsed time, capped at the burst size so tokens
+  // cannot bank up during inactivity and be spent as a larger flood later.
+  const elapsed = now - bucket.updatedAt;
+  if (elapsed > 0) {
+    const refilled = bucket.tokens + elapsed / LOGIN_REFILL_MS;
+    bucket.tokens = Math.min(LOGIN_BURST, refilled);
+    bucket.updatedAt = now;
+  }
+
+  if (bucket.tokens < 1) {
+    // Still record the touch so idle eviction sees this key as recent.
+    buckets.set(key, bucket);
+    return false;
+  }
+
+  bucket.tokens -= 1;
+  buckets.set(key, bucket);
+
+  if (buckets.size > MAX_BUCKETS) evictOldest();
+
+  return true;
+}
+
+/** Seconds until `key` may retry, or 0 when it has a token available. */
+export function retryAfterSeconds(
+  key: string,
+  now: number = Date.now()
+): number {
+  const bucket = buckets.get(key);
+  if (!bucket) return 0;
+  const elapsed = now - bucket.updatedAt;
+  const tokens = Math.min(
+    LOGIN_BURST,
+    bucket.tokens + Math.max(0, elapsed) / LOGIN_REFILL_MS
+  );
+  if (tokens >= 1) return 0;
+  return Math.ceil(((1 - tokens) * LOGIN_REFILL_MS) / 1000);
+}
+
+/** Drop the least-recently-updated buckets until under the cap. */
+function evictOldest(): void {
+  // Array.from rather than spread: the project's tsconfig target does not
+  // enable downlevelIteration, so `[...map]` does not typecheck here.
+  const entries = Array.from(buckets.entries()).sort(
+    (a, b) => a[1].updatedAt - b[1].updatedAt
+  );
+  const excess = buckets.size - MAX_BUCKETS;
+  for (let i = 0; i < excess; i++) buckets.delete(entries[i][0]);
+}
+
+/** Test seam: forget every bucket. Never called in production code. */
+export function resetLoginBuckets(): void {
+  buckets.clear();
+}
+
+/**
+ * The client IP to rate-limit on, given the request headers.
+ *
+ * X-Forwarded-For is a comma-separated chain, and only the entries appended by
+ * a proxy you control can be trusted. nginx with `proxy_set_header
+ * X-Forwarded-For $proxy_add_x_forwarded_for` appends the address it actually
+ * saw, so:
+ *
+ *     client-forged:  "1.2.3.4"        + nginx appends real -> "1.2.3.4, 9.9.9.9"
+ *     genuine:        (nothing)        + nginx appends real -> "9.9.9.9"
+ *
+ * Reading the LEFTMOST value would let any attacker choose their own bucket key
+ * by sending a fresh fake header on every request, defeating the limiter
+ * entirely. Reading the RIGHTMOST value is the one nginx added, so it is the
+ * address that cannot be spoofed from outside.
+ *
+ * Caveat, stated plainly: this is only true because nginx is the sole ingress.
+ * If this app is ever exposed directly, the header becomes fully attacker-
+ * controlled and the rightmost value is equal to the leftmost. The fix at that
+ * point is to drop the header at the edge, not to change this function.
+ *
+ * Falls back to "unknown" so a missing header still shares one bucket rather
+ * than bypassing the limiter.
+ */
+export function clientIpFrom(headers: Headers): string {
+  const forwarded = headers.get("x-forwarded-for");
+  if (forwarded) {
+    const parts = forwarded
+      .split(",")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (parts.length > 0) return parts[parts.length - 1];
+  }
+  // Vercel and some other hosts use this single-value header.
+  return headers.get("x-real-ip")?.trim() || "unknown";
+}
