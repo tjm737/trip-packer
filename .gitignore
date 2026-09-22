@@ -30,8 +30,15 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files
+#
+# `.env*` alone also matches `.env.example`, which is meant to be committed --
+# it is documentation, not a secret. deploy/.env.example was silently untracked
+# because of this, so the file existed on disk and never reached the server.
+# Un-ignore the examples explicitly.
 .env*
+!.env.example
+!*.env.example
 
 # vercel
 .vercel
