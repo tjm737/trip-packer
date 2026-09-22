@@ -158,11 +158,22 @@ if [[ -f "${DB_PATH}" ]]; then
 fi
 
 # ── Ownership ───────────────────────────────────────────────────────────────
-# data/ must be writable by the service user: SQLite in WAL mode creates
-# db-wal and db-shm files beside the database, so a read-only directory fails
-# on first write rather than at startup.
+# data/ must exist before `systemctl start`, and before the unit is installed.
+# The unit declares ReadWritePaths=/opt/trip-packer/data, and systemd resolves
+# that path when it builds the mount namespace -- a missing directory fails the
+# unit with status=226/NAMESPACE before the app is ever executed. The error
+# names the path but not the reason, so it reads like a systemd problem rather
+# than a missing mkdir.
+#
+# It must also be writable by the service user: SQLite in WAL mode creates
+# db-wal and db-shm files beside the database, so a read-only directory fails on
+# first write rather than at startup.
+mkdir -p "${APP_DIR}/data"
 chown -R "${SERVICE_USER}:${SERVICE_USER}" "${APP_DIR}"
-chmod 750 "${APP_DIR}/data" 2>/dev/null || true
+# No 2>/dev/null and no || true here. Silencing this is what let a missing
+# directory look like a success in the first place.
+chmod 750 "${APP_DIR}/data"
+[[ -d "${APP_DIR}/data" ]] || die "${APP_DIR}/data does not exist; systemd would fail with 226/NAMESPACE"
 ok "Ownership set"
 
 # ── systemd ─────────────────────────────────────────────────────────────────

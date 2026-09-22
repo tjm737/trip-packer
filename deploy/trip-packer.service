@@ -19,6 +19,12 @@ Environment=PORT=4100
 # runs in WAL mode, and SQLite needs to create/modify db-wal and db-shm next to
 # the .db file — if the directory is not writable the app starts and then fails
 # on the first write, which is a confusing way to discover a permissions bug.
+#
+# ReadWritePaths targets must EXIST before this unit starts. systemd resolves
+# them while setting up the mount namespace, which happens before ExecStart and
+# before ExecStartPre, so a missing /opt/trip-packer/data fails the unit with
+# status=226/NAMESPACE. An ExecStartPre mkdir cannot fix that — it runs too
+# late. deploy.sh creates the directory instead.
 NoNewPrivileges=yes
 ProtectSystem=full
 ReadWritePaths=/opt/trip-packer/data /opt/trip-packer/.next
