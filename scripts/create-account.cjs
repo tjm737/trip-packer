@@ -201,7 +201,20 @@ async function main() {
   console.log(`\nCreated account:`);
   console.log(`  id       ${user.id}`);
   console.log(`  email    ${email}`);
-  console.log(`  name     ${name}`);
+  console.log(`  name     ${user.name}`);
+  // Print the target database unambiguously. This exists because it was already
+  // got wrong once: the script was run expecting a throwaway copy while
+  // TRIP_PACKER_DB was unset, so it silently wrote to the default
+  // data/trip-packer.db and made an unintended account the owner. Naming the
+  // file that was written is the cheapest guard against repeating that.
+  //
+  // Resolved here rather than imported from db.ts, which keeps DB_PATH private.
+  // The formula must stay in step with db.ts: TRIP_PACKER_DB, else
+  // <cwd>/data/trip-packer.db.
+  const targetDb = process.env.TRIP_PACKER_DB
+    ? path.resolve(process.env.TRIP_PACKER_DB)
+    : path.resolve(process.cwd(), "data", "trip-packer.db");
+  console.log(`  db       ${targetDb}`);
   console.log(`  owner    ${isOwner ? "yes" : "no"}`);
   console.log(`  login    ${canLogIn && verified ? "verified (hash round-trips)" : "PROBLEM — check password"}`);
 

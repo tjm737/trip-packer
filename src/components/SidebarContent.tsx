@@ -18,6 +18,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AboutButton, AboutDialog } from "@/components/AboutDialog";
+import { SignInButton, LoginDialog } from "@/components/LoginDialog";
+import { toast } from "@/components/ui/toast";
 import {
   Plus,
   Users,
@@ -636,6 +638,7 @@ function TripList() {
 
 export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [loginOpen, setLoginOpen] = useState(false);
 
   return (
     <>
@@ -658,7 +661,7 @@ export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
 
       <TripList />
 
-      {/* New Trip, with About alongside it */}
+      {/* New Trip, with sign-in and About alongside it */}
       <div className="flex items-center gap-2 border-t border-white/8 p-3">
         <Button
           onClick={onNewTrip}
@@ -668,10 +671,27 @@ export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
           <Plus className="mr-1.5 h-4 w-4" />
           New Trip
         </Button>
+        <SignInButton onClick={() => setLoginOpen(true)} />
         <AboutButton onClick={() => setAboutOpen(true)} />
       </div>
 
       <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
+      <LoginDialog
+        open={loginOpen}
+        onOpenChange={setLoginOpen}
+        onSuccess={(user) => {
+          toast.add({
+            title: `Signed in as ${user.name}`,
+            type: "success",
+          });
+          // A full reload is deliberate. Signing in changes which user every
+          // client-side cache belongs to, and the simplest way to guarantee no
+          // stale data from the previous session survives is to start the app
+          // fresh rather than trying to invalidate each store by hand. Getting
+          // that wrong would show one account's trips to another.
+          window.location.reload();
+        }}
+      />
     </>
   );
 }
