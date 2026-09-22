@@ -10,6 +10,7 @@ import { Reservation, ReservationType } from "@/lib/types";
 import { formatDate } from "@/lib/dates";
 import { readCachedCoords, writeCachedCoords } from "@/lib/geoCache";
 import { apiUrl } from "@/lib/apiUrl";
+import { useWhenServiceWorkerReady } from "@/lib/serviceWorker";
 import { Tooltip } from "@/components/ui/tooltip";
 import { StopEditor } from "@/components/StopEditor";
 import { cn } from "cn";
@@ -910,6 +911,36 @@ export function TripMap({ tripId }: { tripId: string }) {
   // OSRM has no coverage. Surfaced so a missing line reads as "not drivable"
   // rather than as a bug.
   const skippedLegs = Math.max(0, visibleStops.length - 1 - allLegs.length);
+
+  /*
+   * Tell the service worker where this trip goes, so it can warm the tiles.
+   *
+   * Runs only once every stop has resolved: sending a partial list would cache
+   * the wrong region and leave the map half-blank offline, which is worse than
+   * not prefetching at all because it looks like it worked.
+   *
+   * Keyed on stopsKey (the same stable identity the map effect uses) rather
+   * than on the stops array, which is rebuilt on every render.
+   */
+  const prefetchReady =
+    process.env.NODE_ENV === "production" &&
+    typeof navigator !== "undefined" &&
+    "serviceWorker" in navigator &&
+    unresolved.length === 0 &&
+    visibleStops.length > 0;
+
+  useWhenServiceWorkerReady(
+    () => {
+      navigator.serviceWorker.controller?.postMessage({
+        type: "PREFETCH_TRIP",
+        stops: visibleStops.map((s) => ({
+          lat: s.point.lat,
+          lng: s.point.lng,
+        })),
+      });
+    },
+    [prefetchReady, stopsKey]
+  );
 
   /*
    * --- Reordering ---------------------------------------------------------

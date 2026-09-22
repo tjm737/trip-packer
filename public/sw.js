@@ -15,7 +15,7 @@
  * there is no other invalidation hook.
  */
 
-const VERSION = "v3";
+const VERSION = "v4";
 const SHELL_CACHE = `trip-packer-shell-${VERSION}`;
 const API_CACHE = `trip-packer-api-${VERSION}`;
 const TILE_CACHE = `trip-packer-tiles-${VERSION}`;
@@ -27,7 +27,25 @@ const TILE_CACHE = `trip-packer-tiles-${VERSION}`;
  * it while evicting stale caches, and a `const` referenced above its
  * declaration only works by accident of evaluation order.
  */
-const TILE_HOSTS = ["services.arcgisonline.com"];
+const TILE_HOST = "services.arcgisonline.com";
+
+/*
+ * Esri layer paths, in draw order. Kept here rather than inline in the fetch
+ * handler so the prefetcher warms exactly the layers the map renders -- if one
+ * list drifts from the other, prefetched tiles go unused and the map is blank
+ * offline despite the cache looking healthy.
+ *
+ * CAUTION: Esri's path is /{z}/{y}/{x} -- row before column, the reverse of the
+ * usual slippy-map convention. Swapping them serves valid PNGs of the wrong
+ * places rather than erroring.
+ */
+const TILE_LAYERS = [
+  "Canvas/World_Dark_Gray_Base",
+  "Canvas/World_Dark_Gray_Reference",
+];
+/** Shared prefix so the prefetcher builds byte-identical URLs to Leaflet's. */
+const TILE_PATH_PREFIX = "ArcGIS/rest/services";
+const TILE_HOSTS = [TILE_HOST];
 const TILE_LIMIT = 600;
 
 /*
@@ -203,6 +221,90 @@ async function trimTiles(cache) {
   }
 }
 
+/*
+ * Tile prefetch.
+ *
+ * On-view caching only covers ground the user has actually looked at, which is
+ * no help at all the first time a trip is opened with no signal. This warms the
+ * tiles around the trip's stops so the map has real geography offline on a
+ * first-ever offline open.
+ *
+ * The page sends stop coordinates; the tile maths lives here because this is
+ * where the cache and its limits are known.
+ *
+ * Deliberately bounded. Prefetching a whole country at every zoom level would
+ * be thousands of requests against a third-party CDN that we do not own, so
+ * this covers a fixed zoom range around each stop. Lower zooms give the
+ * regional context; higher zooms give the detail around each pin. Requests are
+ * serialised in small batches to avoid bursting the CDN.
+ */
+const PREFETCH_ZOOMS = [6, 8, 10, 11, 12];
+const PREFETCH_RADIUS = 1; // tiles either side of the point, per zoom
+const PREFETCH_CONCURRENCY = 6;
+
+/** Standard slippy-map tile index for a coordinate at a zoom. */
+function tileIndexFor(lat, lng, z) {
+  const n = 2 ** z;
+  const latRad = (lat * Math.PI) / 180;
+  const x = Math.floor(((lng + 180) / 360) * n);
+  const y = Math.floor(
+    ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n
+  );
+  // Clamp at the poles/wraps; an out-of-range index is a guaranteed 404.
+  return { x: Math.min(n - 1, Math.max(0, x)), y: Math.min(n - 1, Math.max(0, y)) };
+}
+
+async function prefetchTiles(stops) {
+  const cache = await caches.open(TILE_CACHE);
+
+  // Dedupe: stops cluster, so adjacent stops often need identical tiles.
+  const wanted = new Map();
+  for (const stop of stops) {
+    if (typeof stop?.lat !== "number" || typeof stop?.lng !== "number") continue;
+    if (!Number.isFinite(stop.lat) || !Number.isFinite(stop.lng)) continue;
+
+    for (const z of PREFETCH_ZOOMS) {
+      const { x, y } = tileIndexFor(stop.lat, stop.lng, z);
+      for (let dx = -PREFETCH_RADIUS; dx <= PREFETCH_RADIUS; dx++) {
+        for (let dy = -PREFETCH_RADIUS; dy <= PREFETCH_RADIUS; dy++) {
+          const tx = x + dx;
+          const ty = y + dy;
+          if (tx < 0 || ty < 0 || tx >= 2 ** z || ty >= 2 ** z) continue;
+          for (const layer of TILE_LAYERS) {
+            const url = `https://${TILE_HOST}/${TILE_PATH_PREFIX}/${layer}/MapServer/tile/${z}/${ty}/${tx}`;
+            wanted.set(url, url);
+          }
+        }
+      }
+    }
+  }
+
+  const urls = [...wanted.values()];
+  let added = 0;
+
+  for (let i = 0; i < urls.length; i += PREFETCH_CONCURRENCY) {
+    const batch = urls.slice(i, i + PREFETCH_CONCURRENCY);
+    await Promise.all(
+      batch.map(async (url) => {
+        try {
+          // Already have it? Leave it alone rather than re-fetching.
+          if (await cache.match(url)) return;
+          const res = await fetch(url, { mode: "no-cors" });
+          if (res.ok || res.type === "opaque") {
+            await cache.put(url, res);
+            added++;
+          }
+        } catch {
+          // Offline, or the CDN refused. Prefetch is best-effort by definition.
+        }
+      })
+    );
+  }
+
+  await trimTiles(cache);
+  return { requested: urls.length, added };
+}
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
 
@@ -279,7 +381,25 @@ self.addEventListener("fetch", (event) => {
  */
 self.addEventListener("message", (event) => {
   const data = event.data;
-  if (!data || data.type !== "CACHE_TRIP" || typeof data.url !== "string") return;
+  if (!data || typeof data.type !== "string") return;
+
+  /*
+   * Warm the tiles around a trip's stops.
+   *
+   * Separate from CACHE_TRIP because the page's stop coordinates are only known
+   * once the map has resolved them, which happens after the trip HTML is
+   * fetched. Runs in its own waitUntil so a slow CDN cannot delay anything else.
+   */
+  if (data.type === "PREFETCH_TRIP") {
+    if (!Array.isArray(data.stops)) return;
+    // Bound the input: a malformed payload should not spawn thousands of
+    // requests. A trip with more stops than this is not a real itinerary.
+    const stops = data.stops.slice(0, 100);
+    event.waitUntil(prefetchTiles(stops).catch(() => {}));
+    return;
+  }
+
+  if (data.type !== "CACHE_TRIP" || typeof data.url !== "string") return;
   event.waitUntil(
     (async () => {
       try {
