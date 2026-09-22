@@ -121,6 +121,17 @@ npm ci || npm install
 ok "Dependencies installed"
 
 info "Building"
+# Remove .next first. It is gitignored, so the `git clean -fd` above skips it
+# (that flag leaves ignored files alone), and nothing else clears it -- so a
+# stale artifact here survives every deploy. The one that bites is a
+# prerendered server/app/index.html for a route that is now force-dynamic:
+# Next finds the existing prerender, keeps serving it, and the route reports
+# x-nextjs-prerender: 1 with a year-long s-maxage. The deploy looks clean and
+# reports success while the browser is served a build from several commits
+# ago. Clearing the directory also drops stale generated types in
+# .next/types, which otherwise produce confusing typecheck errors against
+# files that no longer exist.
+rm -rf "${APP_DIR}/.next"
 npm run build
 ok "Build complete"
 
