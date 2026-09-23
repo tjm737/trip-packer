@@ -11,11 +11,29 @@
  * not a feature.
  */
 
+import type { Reservation } from "./types";
+
 /** A single candidate the user may choose to add. */
 export interface PackingSuggestion {
   name: string;
   /** Short reason, shown under the name. Optional -- the model may omit it. */
   reason?: string;
+}
+
+/**
+ * A booked activity, reduced to the few facts worth spending context on.
+ *
+ * Deliberately not the whole Reservation: confirmation codes, costs and ids
+ * are noise to a packing model and each one costs context on a small window.
+ */
+export interface PlannedActivity {
+  /** Venue or event, e.g. "Noma", "Blue Lagoon". */
+  title: string;
+  /** "HH:MM" 24h, or "" when unknown. A time is a strong signal: 19:30 reads
+   *  as dinner, 07:00 as an early start that needs layers. */
+  time?: string;
+  /** Free text the user wrote, e.g. "jacket required". */
+  notes?: string;
 }
 
 export interface SuggestContext {
@@ -25,12 +43,33 @@ export interface SuggestContext {
   days?: number;
   /** Month the trip starts, 1-12, when known. Drives climate reasoning. */
   month?: number;
+  /**
+   * Booked activities and other non-transport plans. Grounds the model in what
+   * the trip will actually involve, so a dinner reservation can pull in a
+   * formal outfit rather than the model guessing from the destination alone.
+   */
+  activities?: PlannedActivity[];
   /** Names already on the list, so the model avoids re-suggesting them. */
   existing?: string[];
 }
 
 /** How many suggestions to ask for. Enough to be useful, few enough to scan. */
 export const MAX_SUGGESTIONS = 12;
+
+/**
+ * How many booked activities to describe in the prompt.
+ *
+ * Capped because the on-device model has a small context window: a long tail of
+ * activities pushes the output-format instruction out, and a malformed reply
+ * costs more than the extra grounding is worth. Eight covers a normal trip and
+ * keeps the prompt in the same size class as the weather-only version.
+ */
+export const MAX_ACTIVITIES_IN_PROMPT = 8;
+
+/** Characters of user notes per activity. Notes are free text and can be
+ *  paragraphs; a sentence is enough to carry "jacket required". */
+const MAX_NOTE_CHARS = 80;
+
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -59,12 +98,100 @@ export function describeTrip(ctx: SuggestContext): string {
 }
 
 /**
+ * Turn booked activities into compact lines for the prompt.
+ *
+ * Returns [] when there is nothing usable, so the caller can omit the section
+ * entirely rather than emit an empty heading that wastes context and invites
+ * the model to fill the gap by inventing.
+ *
+ * Order is preserved (the caller sorts by trip order) because a dinner on the
+ * last night and a hike on the first carry different packing weight, and the
+ * model has no other way to tell them apart. Blank titles are dropped: an
+ * activity with no name is not something the model can reason about.
+ */
+export function describeActivities(activities: PlannedActivity[] = []): string[] {
+  return activities
+    .map((a) => {
+      const title = (a?.title ?? "").trim();
+      if (!title) return null;
+
+      const bits: string[] = [];
+      const time = (a?.time ?? "").trim();
+      if (time) bits.push(`at ${time}`);
+
+      const notes = (a?.notes ?? "").replace(/\s+/g, " ").trim();
+      if (notes) {
+        const clipped =
+          notes.length > MAX_NOTE_CHARS
+            ? `${notes.slice(0, MAX_NOTE_CHARS).trimEnd()}…`
+            : notes;
+        bits.push(`(${clipped})`);
+      }
+
+      return bits.length > 0 ? `${title} ${bits.join(" ")}` : title;
+    })
+    .filter((line): line is string => line !== null)
+    .slice(0, MAX_ACTIVITIES_IN_PROMPT);
+}
+
+/**
+ * Which reservation types count as "activities" for packing purposes.
+ *
+ * Transport is excluded on purpose. A flight, train, ferry or car booking says
+ * how you arrive, not what you do when you get there -- and a flight's
+ * location/locationTo fields would otherwise read as an event name and pull in
+ * suggestions for the airport rather than for the trip.
+ *
+ * "lodging" is excluded for the same reason: where you sleep is already
+ * implied by a multi-day trip, and including it tends to produce a generic
+ * "hotel toiletries" cluster that crowds out the specific items we want.
+ *
+ * "other" is INCLUDED because it is the catch-all users reach for when a plan
+ * does not fit the listed types -- a spa day, a wine tasting, a wedding. That
+ * is exactly the signal worth having.
+ */
+const ACTIVITY_TYPES = new Set(["activity", "other"]);
+
+/**
+ * Reduce a trip's reservations to the activities worth telling the model about.
+ *
+ * Confirmed and unconfirmed bookings are both included: a reservation held
+ * without a confirmation code is still a plan the user is packing for, and
+ * `confirmed` answers "is this settled", not "is this happening". Dropping the
+ * unconfirmed ones would hide exactly the tentative dinner that needs an
+ * outfit decision.
+ *
+ * Reservations are assumed already filtered and date-ordered by the caller
+ * (getReservationsForTrip), so the most chronologically relevant land first
+ * when the cap truncates.
+ */
+export function activitiesFromReservations(
+  reservations: Array<Pick<Reservation, "type" | "title" | "startTime" | "notes">>
+): PlannedActivity[] {
+  return reservations
+    .filter((r) => ACTIVITY_TYPES.has(r.type))
+    .map((r) => ({
+      title: r.title,
+      time: r.startTime,
+      notes: r.notes,
+    }));
+}
+
+/**
  * Build the prompt for the on-device model.
  *
  * Two constraints are stated explicitly because the model otherwise ignores
  * them: do not repeat what is already packed, and return JSON only. The
  * existing-item list is capped -- a long list pushes the instruction out of
  * the small context window, so the tail is dropped rather than the rule.
+ *
+ * Booked activities are included when present. They are what lets a dinner
+ * reservation pull in a formal outfit: without them the model only knows
+ * WHERE and WHEN the trip is, not what it involves, so it can only reach for
+ * climate and generic travel items. When there are none we say nothing about
+ * activities at all -- an explicit "do not invent activities" guard was
+ * removed here, because with real bookings supplied it suppressed exactly the
+ * reasoning we want, and an empty section would invite invention anyway.
  */
 export function buildPackingPrompt(ctx: SuggestContext, existing: string[] = []): string {
   const trip = describeTrip(ctx) || "an unspecified trip";
@@ -72,13 +199,21 @@ export function buildPackingPrompt(ctx: SuggestContext, existing: string[] = [])
     .map((s) => s.trim())
     .filter(Boolean)
     .slice(0, 40);
+  const activities = describeActivities(ctx.activities);
 
   const lines = [
     `Suggest ${MAX_SUGGESTIONS} things to pack for a trip to ${trip}.`,
     "Prefer specific, useful items over generic ones.",
     `Return JSON only, shaped exactly like: {"items":[{"name":"...","reason":"..."}]}`,
-    `Include at most ${MAX_SUGGESTIONS} items. Do not invent activities.`,
+    `Include at most ${MAX_SUGGESTIONS} items.`,
   ];
+
+  if (activities.length > 0) {
+    lines.push(
+      "Planned activities -- pack for what these require:",
+      ...activities.map((a) => `- ${a}`)
+    );
+  }
 
   if (seen.length > 0) {
     lines.push(`Do not suggest any of these, already packed: ${seen.join(", ")}.`);

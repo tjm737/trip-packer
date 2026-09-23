@@ -21,6 +21,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { useApp } from "@/lib/AppContext";
 import { checkAvailability, generateObject, type AvailabilityReport } from "@/lib/foundationModels";
 import {
+  activitiesFromReservations,
   addableRowCount,
   buildPackingPrompt,
   buildSuggestionRows,
@@ -32,6 +33,7 @@ import {
   type AddPayload,
   type PackingSuggestion,
 } from "@/lib/packingSuggestions";
+import { getReservationsForTrip } from "@/lib/storage";
 
 /** Category the generated items land in, created on first use. */
 const CATEGORY_NAME = "Suggested";
@@ -91,11 +93,24 @@ export function PackingSuggestions({
       .filter(Boolean);
   }, [state.items, tripId]);
 
+  /**
+   * Booked activities on this trip, in trip order.
+   *
+   * Reuses getReservationsForTrip so the itinerary tab and the model see the
+   * same sequence -- if the user has hand-dragged the itinerary, that
+   * deliberate order is what governs which activities survive the prompt cap.
+   */
+  const activities = useCallback(() => {
+    return activitiesFromReservations(
+      getReservationsForTrip(tripId, state.reservations ?? [])
+    );
+  }, [state.reservations, tripId]);
+
   const generate = useCallback(async () => {
     setGenerating(true);
     try {
       const prompt = buildPackingPrompt(
-        { destination, days, month },
+        { destination, days, month, activities: activities() },
         existingNames()
       );
       const raw = await generateObject<Record<string, unknown>>(prompt, ["items"]);
@@ -108,7 +123,7 @@ export function PackingSuggestions({
     } finally {
       setGenerating(false);
     }
-  }, [destination, days, month, existingNames]);
+  }, [destination, days, month, existingNames, activities]);
 
   /*
    * Add one suggestion. Deliberately per-item and click-driven: this is the

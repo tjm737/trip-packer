@@ -37,6 +37,20 @@ export interface Release {
  */
 export const RELEASES: Release[] = [
   {
+    version: "0.7.1",
+    date: "2026-09-23",
+    headline: "Suggestions that know what you have booked",
+    groups: [
+      {
+        area: "Packing",
+        items: [
+          "Suggestions now take your booked activities into account. A dinner reservation or an event on your itinerary pulls in the right things for it — a formal outfit for a smart restaurant, walking shoes for a hike.",
+          "Flights, hotels and car hire are not treated as activities, so they no longer skew what gets suggested.",
+        ],
+      },
+    ],
+  },
+  {
     version: "0.7.0",
     date: "2026-09-22",
     headline: "Packing suggestions you choose from",
