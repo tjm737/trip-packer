@@ -37,6 +37,21 @@ export interface Release {
  */
 export const RELEASES: Release[] = [
   {
+    version: "0.7.2",
+    date: "2026-09-23",
+    headline: "Support and privacy pages",
+    groups: [
+      {
+        area: "App",
+        items: [
+          "Added a support page with answers to common questions and a way to get in touch.",
+          "Added a privacy policy explaining what the app stores and how on-device packing suggestions work.",
+          "The sign-in screen now explains that accounts are invite-only and how to request one.",
+        ],
+      },
+    ],
+  },
+  {
     version: "0.7.1",
     date: "2026-09-23",
     headline: "Suggestions that know what you have booked",

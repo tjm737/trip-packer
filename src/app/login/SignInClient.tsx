@@ -80,6 +80,24 @@ export function SignInClient() {
           <p className="mt-2 text-sm leading-relaxed text-zinc-400">
             Your trips are private to your account.
           </p>
+          {/*
+            Accounts are created by the owner, not through a public form, so a
+            visitor with no account has no obvious next step -- and a dead end
+            reads as a broken app rather than a deliberate one. Saying so here
+            is also what stops an App Store reviewer concluding the app is
+            unreviewable: they are told the situation and pointed at support
+            instead of being left to guess.
+          */}
+          <p className="mt-4 text-sm leading-relaxed text-zinc-400">
+            TripPlanner is invite-only. If you do not have an account yet,{" "}
+            <Link
+              href="/support"
+              className="focus-ring rounded font-medium text-emerald-400 underline underline-offset-2 hover:text-emerald-300"
+            >
+              get in touch
+            </Link>{" "}
+            and we will set one up for you.
+          </p>
         </div>
       </main>
 
