@@ -6,7 +6,7 @@
 # setting, so it can be written directly.
 require "xcodeproj"
 
-TEAM = "XQBRZ94BTS"   # Brenda Morgan (Personal Team)
+TEAM = ENV.fetch("DEVELOPMENT_TEAM_ID", "XQBRZ94BTS")   # default: Brenda Morgan (Personal Team)
 
 path = "ios/App/App.xcodeproj"
 proj = Xcodeproj::Project.open(path)
