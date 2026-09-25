@@ -35,6 +35,7 @@ import {
   Umbrella,
   RefreshCw,
   CalendarDays,
+  Luggage,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -51,8 +52,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { TripTasks } from "@/components/TripTasks";
 import { TripReservations } from "@/components/TripReservations";
+import { TripBags } from "@/components/TripBags";
 import { TripMap } from "@/components/TripMap";
 import { Tabs } from "@/components/Tabs";
 import { PackingSuggestions } from "@/components/PackingSuggestions";
@@ -79,6 +89,17 @@ const ITEM_EMOJIS = [
 
 function PackingItemRow({ item }: { item: any }) {
   const { item: itemActions, state } = useApp();
+
+  /*
+   * Bags are looked up from state rather than passed down as a prop: the row is
+   * rendered inside CategorySection for every item, and threading a bag list
+   * through that boundary would put it in scope for a component that has no
+   * other use for it.
+   */
+  const tripBags = (state.bags ?? []).filter((b) => b.tripId === item.tripId);
+  const assignedBag = item.bagId
+    ? (state.bags ?? []).find((b) => b.id === item.bagId)
+    : undefined;
 
   return (
     <motion.div
@@ -112,6 +133,68 @@ function PackingItemRow({ item }: { item: any }) {
           {item.name}
         </span>
       </div>
+
+      {/* Bag assignment. Always rendered once the trip has any bags, because a
+          control that only appears on hover is invisible on touch -- which is
+          where most of these get ticked off. */}
+      {tripBags.length > 0 && (
+        <DropdownMenu>
+          <Tooltip
+            label={assignedBag ? `In ${assignedBag.name}` : "Assign to a bag"}
+            side="top"
+          >
+            <DropdownMenuTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={
+                    assignedBag
+                      ? `${item.name} is in ${assignedBag.name}. Change bag`
+                      : `Assign ${item.name} to a bag`
+                  }
+                  className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] transition-colors focus-ring ${
+                    assignedBag
+                      ? "bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25"
+                      : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"
+                  }`}
+                >
+                  {assignedBag ? assignedBag.name : <Luggage className="w-3.5 h-3.5" />}
+                </button>
+              }
+            />
+          </Tooltip>
+          <DropdownMenuContent align="end" className="bg-zinc-900 border-zinc-700">
+            <DropdownMenuLabel className="text-[10px] uppercase tracking-[0.08em] text-zinc-500">
+              Bag
+            </DropdownMenuLabel>
+            {tripBags.map((b: any) => (
+              <DropdownMenuItem
+                key={b.id}
+                onClick={() => itemActions.assignToBag(item.id, b.id)}
+                className="text-zinc-300 focus:bg-zinc-800 focus:text-white"
+              >
+                <Luggage className="w-3.5 h-3.5 mr-2 text-zinc-500" />
+                {b.name}
+                {b.id === item.bagId && (
+                  <Check className="w-3.5 h-3.5 ml-auto text-emerald-400" />
+                )}
+              </DropdownMenuItem>
+            ))}
+            {item.bagId && (
+              <>
+                <DropdownMenuSeparator className="bg-zinc-800" />
+                <DropdownMenuItem
+                  onClick={() => itemActions.assignToBag(item.id, null)}
+                  className="text-zinc-400 focus:bg-zinc-800 focus:text-white"
+                >
+                  <X className="w-3.5 h-3.5 mr-2 text-zinc-500" />
+                  Remove from bag
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
 
       <div className="flex items-center gap-1 transition-opacity md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100">
         <Tooltip label="Decrease quantity" side="top">
@@ -1074,6 +1157,12 @@ export default function TripDetail() {
               icon: <Cloud className="w-3.5 h-3.5" />,
               content: (
                 <>
+
+                    {/* Bags. Sits at the top of the Packing tab because it is the
+                        container the rows below are sorted into -- a bag chip on
+                        an item is only meaningful once bags exist. */}
+                    <TripBags tripId={tripInfo.id} />
+
                     {/* Packing list.
                      Categories flow into two columns at lg: as a single column this
                      block alone ran ~1850px (nearly 3 screens), because each category
