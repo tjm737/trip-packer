@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { readState } from "@/lib/db";
-import { hasValidSession } from "@/lib/session";
+import { getActingUser } from "@/lib/session";
+import { canReadEntityById } from "@/lib/access";
 import { PrintableItinerary } from "@/components/PrintableItinerary";
 import { PrintNowButton } from "@/components/PrintNowButton";
 import { normalizeTheme } from "@/lib/theme";
@@ -23,7 +24,8 @@ import { normalizeTheme } from "@/lib/theme";
  * the user prints, not whatever a build cached.
  *
  * ---------------------------------------------------------------------------
- * SECURITY: this page checks the session itself, and it must keep doing so.
+ * SECURITY: this page checks the session AND the trip's ownership itself, and
+ * it must keep doing both.
  *
  * Middleware matches /trips/:path* and redirects a request with NO cookie at
  * all, which makes a bare curl test look like this route is protected. It is
@@ -34,10 +36,19 @@ import { normalizeTheme } from "@/lib/theme";
  * Every other page under (app)/ is a client component that fetches through
  * fetchState() → the session-checked API, so that boundary catches a forged
  * cookie. This page reads the database directly, so no handler ever runs and
- * nothing else would reject it. Without the guard below, any caller who knows
- * a trip id could print the full itinerary — including booking confirmation
- * codes, which exist for no other purpose than to identify the traveller to an
- * airline or hotel.
+ * nothing else would reject it.
+ *
+ * A SESSION CHECK ALONE IS NOT ENOUGH, and this page used to stop there. That
+ * was exploitable: `readState()` is unscoped — it returns every account's rows —
+ * so any signed-in user who knew or guessed another user's trip id could print
+ * the whole itinerary, booking confirmation codes included. `getActingUser()`
+ * answers "who is this", and `canReadEntityById(..., "trip", id)` answers "may
+ * they read THIS trip", resolving the owner server-side rather than trusting
+ * the id in the URL. Both are required; neither is redundant with the other.
+ *
+ * Verified by forging a session for a second account and requesting a trip it
+ * did not own: the request returned 200 with a fully rendered document. See
+ * docs/security/print-trip-authorization.md.
  *
  * If this page is ever moved under (app)/, re-verify: the route group supplies
  * chrome, not auth. Middleware matches on PATH, and `(app)` is not a path
@@ -64,7 +75,19 @@ export async function generateMetadata({
    *
    * Verified by probing the forged-cookie response's <title> directly.
    */
-  if (!(await hasValidSession())) {
+  const actor = await getActingUser();
+  if (!actor) {
+    return { title: "Trip not available", robots: { index: false, follow: false } };
+  }
+
+  /*
+   * Ownership, not just identity. See the SECURITY note above: without this,
+   * any signed-in user could have their own account name reflected into the
+   * <title> of someone else's trip. Resolve the trip's owner from the database
+   * rather than trusting the id in the URL.
+   */
+  const state = readState();
+  if (!state || !canReadEntityById(state, actor.id, "trip", id)) {
     return { title: "Trip not available", robots: { index: false, follow: false } };
   }
 
@@ -93,14 +116,37 @@ export default async function PrintTripPage({
    * error, so a signed-out visitor with a stale bookmark lands on the sign-in
    * form and continues to where they were headed.
    */
-  if (!(await hasValidSession())) {
+  const actor = await getActingUser();
+  if (!actor) {
     redirect(`/login?from=${encodeURIComponent(`/trips/${id}/print`)}`);
   }
 
+  /*
+   * Identity is not permission. `readState()` returns every account's rows, so
+   * rendering from it without this check disclosed any trip to any signed-in
+   * user. Resolve ownership server-side from the bare id.
+   *
+   * A 404-shaped "Trip not available" rather than a redirect: redirecting would
+   * tell an unauthorised caller that the trip exists and that someone else owns
+   * it. The two must be indistinguishable to a caller who may not read it.
+   */
   const state = readState();
-  const trip = state?.trips.find((t) => t.id === id);
+  if (!state || !canReadEntityById(state, actor.id, "trip", id)) {
+    return (
+      <main className="print-sheet">
+        <h1>Trip not available</h1>
+        <p className="print-empty">
+          This itinerary either does not exist or is not shared with your account.
+          <br />
+          <Link href="/">Back to trips</Link>
+        </p>
+      </main>
+    );
+  }
 
-  if (!state || !trip) {
+  const trip = state.trips.find((t) => t.id === id);
+
+  if (!trip) {
     return (
       <main className="print-sheet">
         <h1>Trip not available</h1>
