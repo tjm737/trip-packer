@@ -20,8 +20,15 @@ import {
   Package,
   CheckCircle2,
   Upload,
+  Luggage,
 } from "lucide-react";
 import { ImportTripModal } from "@/components/ImportTripModal";
+import {
+  bagSourceTrips,
+  bagImportCandidates,
+  bagImportSummary,
+  type BagImportSelection,
+} from "@/lib/bagImport";
 import { cn } from "cn";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
@@ -224,6 +231,30 @@ function CreateTripModal({ open, onOpenChange }: { open: boolean; onOpenChange: 
   const [notes, setNotes] = useState("");
   const [icon, setIcon] = useState("✈️");
   const [step, setStep] = useState(1);
+  const [importTripId, setImportTripId] = useState<string | null>(null);
+  const [importItemIds, setImportItemIds] = useState<string[] | null>(null);
+
+  /*
+   * Sources are recomputed from live state on every render, so a bag created in
+   * another tab while this dialog is open is offered rather than hidden behind a
+   * snapshot taken when the dialog mounted.
+   */
+  const sources = bagSourceTrips(state);
+  const selection: BagImportSelection = { tripId: importTripId, itemIds: importItemIds };
+  const summary = bagImportSummary(state, selection);
+  const candidates = bagImportCandidates(state, selection);
+
+  const reset = () => {
+    setName("");
+    setDestination("");
+    setStartDate("");
+    setEndDate("");
+    setNotes("");
+    setIcon("✈️");
+    setStep(1);
+    setImportTripId(null);
+    setImportItemIds(null);
+  };
 
   const handleCreate = async () => {
     if (!name.trim()) return;
@@ -236,24 +267,33 @@ function CreateTripModal({ open, onOpenChange }: { open: boolean; onOpenChange: 
     // The trip is written to SQLite by the server, so wait for that to resolve
     // and navigate on the id it returns. The old localStorage poll-and-redirect
     // raced the write and had nothing to read once persistence moved server-side.
-    const createdId = await trip.create({
-      name: name.trim(),
-      destination: destination.trim(),
-      startDate: start,
-      endDate: end,
-      notes,
-      icon,
-    });
+    const createdId = await trip.create(
+      {
+        name: name.trim(),
+        destination: destination.trim(),
+        startDate: start,
+        endDate: end,
+        notes,
+        icon,
+      },
+      importTripId ? selection : undefined
+    );
     if (createdId) router.push(`/trips/${createdId}`);
-    setName("");
-    setDestination("");
-    setStartDate("");
-    setEndDate("");
-    setNotes("");
-    setIcon("✈️");
-    setStep(1);
+    reset();
     onOpenChange(false);
   };
+
+  /*
+   * Three steps only when there is something to import. A user with no bags
+   * anywhere should not be walked through an empty picker to get to the icon
+   * grid, so the wizard collapses back to two steps and step 2 keeps its old
+   * meaning (choose icon) in that case.
+   */
+  const hasSources = sources.length > 0;
+  const totalSteps = hasSources ? 3 : 2;
+  const stepTitles = hasSources
+    ? ["Trip Details", "Import Bags", "Pick an Icon"]
+    : ["Trip Details", "Pick an Icon"];
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -264,7 +304,7 @@ function CreateTripModal({ open, onOpenChange }: { open: boolean; onOpenChange: 
             Plan Your Next Adventure
           </DialogTitle>
           <DialogDescription className="text-zinc-400">
-            Step {step} of 2 — {step === 1 ? "Trip Details" : "Pick an Icon"}
+            Step {step} of {totalSteps} — {stepTitles[step - 1]}
           </DialogDescription>
         </DialogHeader>
 
@@ -322,6 +362,104 @@ function CreateTripModal({ open, onOpenChange }: { open: boolean; onOpenChange: 
               />
             </div>
           </div>
+        ) : step === 2 && hasSources ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Luggage className="w-4 h-4 text-emerald-400" />
+              <Label className="text-zinc-300">Bring bags from a previous trip</Label>
+            </div>
+            <p className="text-xs text-zinc-500">
+              Copies the bags and their contents. Nothing is removed from the original trip.
+            </p>
+            <div className="space-y-2 max-h-[240px] overflow-y-auto pr-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setImportTripId(null);
+                  setImportItemIds(null);
+                }}
+                aria-pressed={importTripId === null}
+                title="Start with an empty bag list"
+                className={`w-full text-left rounded-lg px-3 py-2.5 text-sm transition-colors focus-ring ${
+                  importTripId === null
+                    ? "bg-emerald-600/20 ring-1 ring-emerald-500 text-white"
+                    : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                }`}
+              >
+                Don&apos;t import anything
+              </button>
+              {sources.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => {
+                    setImportTripId(s.id);
+                    // null itemIds = every item already in that trip's bags.
+                    setImportItemIds(null);
+                  }}
+                  aria-pressed={importTripId === s.id}
+                  title={`Import ${s.bagCount} bag${s.bagCount === 1 ? "" : "s"} from ${s.name}`}
+                  className={`w-full text-left rounded-lg px-3 py-2.5 text-sm transition-colors focus-ring ${
+                    importTripId === s.id
+                      ? "bg-emerald-600/20 ring-1 ring-emerald-500 text-white"
+                      : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                  }`}
+                >
+                  <span className="block truncate">{s.name}</span>
+                  <span className="text-[11px] text-zinc-500">
+                    {s.bagCount} {s.bagCount === 1 ? "bag" : "bags"}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {/* Contents refinement, only once a source is chosen and it actually
+                carries items. Picking bags is the point; this is an escape hatch
+                for the case where the user wants the bag but not last trip's
+                contents. */}
+            {importTripId && candidates.length > 0 && (
+              <div className="rounded-lg bg-zinc-800/60 px-3 py-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase tracking-[0.08em] text-zinc-500">
+                    Contents
+                  </span>
+                  <span className="text-[11px] text-zinc-500">{summary}</span>
+                </div>
+                <div className="mt-2 space-y-1 max-h-[150px] overflow-y-auto">
+                  {candidates.map((i) => {
+                    const on = importItemIds === null || importItemIds.includes(i.id);
+                    return (
+                      <label
+                        key={i.id}
+                        className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer"
+                        title={`Include ${i.name}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          onChange={() => {
+                            // Materialise the implicit "all" into an explicit
+                            // list on first un-tick, so partial selection works
+                            // without a separate mode flag.
+                            const current =
+                              importItemIds === null ? candidates.map((c) => c.id) : importItemIds;
+                            const next = on
+                              ? current.filter((id) => id !== i.id)
+                              : [...current, i.id];
+                            setImportItemIds(next);
+                          }}
+                          className="accent-emerald-500"
+                        />
+                        <span className="truncate">
+                          {i.icon} {i.name}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         ) : (
           <div className="space-y-3">
             <Label className="text-zinc-300">Choose an Icon</Label>
@@ -348,11 +486,11 @@ function CreateTripModal({ open, onOpenChange }: { open: boolean; onOpenChange: 
         )}
 
         <DialogFooter className="gap-2 sm:gap-0">
-          {step === 2 && (
+          {step > 1 && (
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setStep(1)}
+              onClick={() => setStep(step - 1)}
               className="text-zinc-400"
             >
               Back
@@ -367,14 +505,24 @@ function CreateTripModal({ open, onOpenChange }: { open: boolean; onOpenChange: 
           >
             Cancel
           </Button>
-          <Button
-            onClick={handleCreate}
-            className="bg-primary hover:bg-emerald-700 text-white"
-            disabled={step === 1 && !name.trim()}
-          >
-            {step === 1 ? "Continue" : "Create Trip"}
-            {step === 1 ? <ArrowRight className="w-4 h-4 ml-2" /> : <Sparkles className="w-4 h-4 ml-2" />}
-          </Button>
+          {step < totalSteps ? (
+            <Button
+              onClick={() => setStep(step + 1)}
+              className="bg-primary hover:bg-emerald-700 text-white"
+              disabled={step === 1 && !name.trim()}
+            >
+              Continue
+              <ArrowRight className="w-4 h-4 ml-2" />
+            </Button>
+          ) : (
+            <Button
+              onClick={handleCreate}
+              className="bg-primary hover:bg-emerald-700 text-white"
+            >
+              Create Trip
+              <Sparkles className="w-4 h-4 ml-2" />
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -1,14 +1,20 @@
 import {
-  AppState,
-  User,
-  Trip,
-  Category,
-  PackingItem,
-  Task,
-  Reservation,
-  ReservationType,
-} from "./types";
+    AppState,
+    Bag,
+    BagKind,
+    User,
+    Trip,
+    Category,
+    PackingItem,
+    Task,
+    Reservation,
+    ReservationType,
+  } from "./types";
 import { compareByDate, daysUntilDate, isValidDate } from "./dates";
+import {
+  buildBagImport,
+  type BagImportSelection,
+} from "./bagImport";
 import { readCachedState, writeCachedState } from "./offlineCache";
 import {
   clearQueue,
@@ -286,7 +292,15 @@ export async function createTrip(
     endDate: string;
     notes: string;
     icon: string;
-  }
+  },
+  /**
+   * Optional bag import from a previous trip.
+   *
+   * Resolved to concrete rows here rather than passed as a selection, so the
+   * caller cannot smuggle an arbitrary bag payload through: buildBagImport both
+   * mints the new ids and drops anything whose bag is not among the copies.
+   */
+  bagImport?: { state: Pick<AppState, "bags" | "items">; selection: BagImportSelection }
 ): Promise<{ state: AppState; trip: Trip; categories: Category[]; items: PackingItem[] }> {
   const now = new Date().toISOString();
   const trip: Trip = {
@@ -386,7 +400,17 @@ export async function createTrip(
     items: [],
     tasks: [],
     reservations: [],
+    bags: [],
   };
+
+  /*
+   * Bags imported from a previous trip, if any. Resolved against the state we
+   * just read, so the copies reflect the source trip as it is now rather than
+   * as it was when the dialog opened.
+   */
+  const imported = bagImport
+    ? buildBagImport(base, trip.id, bagImport.selection, generateId, now)
+    : { bags: [], items: [] };
 
   const state = await mutate({
     op: "state.replace",
@@ -394,11 +418,22 @@ export async function createTrip(
       ...base,
       trips: [...base.trips, trip],
       categories: [...base.categories, ...categories],
-      items: [...base.items, ...items],
+      /*
+       * Imported items are concatenated BEFORE the default packing list, so a
+       * user who imported their own contents sees them at the top of the fresh
+       * trip rather than buried under the generic starter list.
+       */
+      items: [...base.items, ...imported.items, ...items],
+      bags: [...(base.bags ?? []), ...imported.bags],
     },
   });
 
-  return { state, trip, categories, items };
+  return {
+    state,
+    trip,
+    categories,
+    items: [...imported.items, ...items],
+  };
 }
 
 export async function updateTrip(id: string, data: Partial<Trip>): Promise<AppState> {
@@ -435,6 +470,65 @@ export async function updateCategory(
 
 export async function deleteCategory(id: string): Promise<AppState> {
   return mutate({ op: "category.delete", id });
+}
+
+/* ------------------------------------------------------------------ */
+/* Bags                                                                */
+/* ------------------------------------------------------------------ */
+
+export async function createBag(
+  tripId: string,
+  data: { name: string; kind?: BagKind; tagNumber?: string; notes?: string }
+): Promise<{ state: AppState; bag: Bag }> {
+  const now = new Date().toISOString();
+  const bag: Bag = {
+    id: generateId(),
+    tripId,
+    name: data.name,
+    kind: data.kind ?? "other",
+    tagNumber: data.tagNumber ?? "",
+    notes: data.notes ?? "",
+    createdAt: now,
+    updatedAt: now,
+  };
+  const state = await mutate({ op: "bag.create", bag });
+  return { state, bag };
+}
+
+export async function updateBag(
+  id: string,
+  data: { name?: string; kind?: BagKind; tagNumber?: string; notes?: string }
+): Promise<AppState> {
+  /*
+   * updatedAt is set here rather than server-side so the client's optimistic
+   * copy and the persisted row agree without a second round trip. The server
+   * would otherwise have to stamp it, and the two copies would disagree until
+   * the next read.
+   */
+  return mutate({
+    op: "bag.update",
+    id,
+    updates: { ...data, updatedAt: new Date().toISOString() },
+  });
+}
+
+export async function deleteBag(id: string): Promise<AppState> {
+  return mutate({ op: "bag.delete", id });
+}
+
+/**
+ * Assign an item to a bag, or remove it from its bag with `bagId: null`.
+ *
+ * A thin wrapper over itemUpdate rather than a dedicated op, because the
+ * assignment IS an item field -- it travels with the item in the offline queue
+ * and reconciles the same way. Passing an explicit null is how unassignment is
+ * expressed; passing undefined would be read as "leave unchanged".
+ */
+export async function assignItemToBag(
+  itemId: string,
+  bagId: string | null
+): Promise<AppState> {
+  return mutate({ op: "item.update", id: itemId, updates: { bagId } });
 }
 
 export async function createItem(

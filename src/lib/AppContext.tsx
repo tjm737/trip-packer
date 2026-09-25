@@ -10,6 +10,7 @@ import {
   ReactNode,
 } from "react";
 import { AppState, User, Trip, Category, PackingItem, Task, Reservation } from "@/lib/types";
+import type { BagKind } from "@/lib/types";
 import {
   fetchState,
   initializeRemoteState,
@@ -23,9 +24,13 @@ import {
   createCategory,
   updateCategory,
   deleteCategory,
-  createItem,
-  updateItem,
-  deleteItem,
+    createItem,
+    updateItem,
+    deleteItem,
+    assignItemToBag,
+    createBag,
+    updateBag,
+    deleteBag,
   createTask,
   updateTask,
   deleteTask,
@@ -48,6 +53,7 @@ import {
 import { readCachedState, writeCachedState } from "@/lib/offlineCache";
 import { importItinerary } from "@/lib/importItinerary";
 import type { ParsedItinerary } from "@/lib/itineraryImport";
+import type { BagImportSelection } from "@/lib/bagImport";
 
 /*
  * Client store.
@@ -81,7 +87,8 @@ interface AppContextType {
   };
   trip: {
     create: (
-      data: Omit<Trip, "id" | "userId" | "archived" | "createdAt" | "updatedAt">
+      data: Omit<Trip, "id" | "userId" | "archived" | "createdAt" | "updatedAt">,
+      bagImport?: BagImportSelection
     ) => Promise<string>;
     update: (id: string, data: Partial<Trip>) => Promise<void>;
     archive: (id: string, archived: boolean) => Promise<void>;
@@ -110,6 +117,19 @@ interface AppContextType {
       id: string,
       data: { name?: string; quantity?: number; checked?: boolean; icon?: string }
     ) => Promise<void>;
+    delete: (id: string) => Promise<void>;
+    /**
+     * Assign an item to a bag, or clear it with null.
+     *
+     * Separate from `update` because `update` merges { ...item, ...data } and
+     * would therefore leave bagId intact -- the right default for a partial
+     * edit, but the wrong tool for an explicit unassign.
+     */
+    assignToBag: (id: string, bagId: string | null) => Promise<void>;
+  };
+  bag: {
+    create: (tripId: string, name: string, kind: BagKind) => Promise<string>;
+    update: (id: string, data: { name?: string; kind?: BagKind }) => Promise<void>;
     delete: (id: string) => Promise<void>;
   };
   task: {
@@ -159,6 +179,7 @@ const EMPTY: AppState = {
   items: [],
   tasks: [],
   reservations: [],
+  bags: [],
 };
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -292,7 +313,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const tripActions = {
     create: async (
-      data: Omit<Trip, "id" | "userId" | "archived" | "createdAt" | "updatedAt">
+      data: Omit<Trip, "id" | "userId" | "archived" | "createdAt" | "updatedAt">,
+      bagImport?: BagImportSelection
     ): Promise<string> => {
       // Resolve the owner server-side: React state may be stale pre-hydration,
       // and picking the wrong owner would orphan the trip.
@@ -302,9 +324,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ? current.activeUserId
           : (current?.users[0]?.id ?? state.activeUserId);
 
+      /*
+       * The import selection is resolved server-side from the freshly fetched
+       * state rather than from the component's copy, for the same reason the
+       * owner is: a bag created or deleted while the dialog sat open would
+       * otherwise be imported from a stale view.
+       */
+      const resolved =
+        bagImport && current
+          ? { state: { bags: current.bags ?? [], items: current.items }, selection: bagImport }
+          : undefined;
+
       const result = await run(
         (prev) => prev,
-        async () => (await createTrip(ownerId, data)).state
+        async () => (await createTrip(ownerId, data, resolved)).state
       );
       return result ? (result.trips.at(-1)?.id ?? "") : "";
     },
@@ -451,6 +484,50 @@ export function AppProvider({ children }: { children: ReactNode }) {
         () => deleteItem(id)
       );
     },
+    assignToBag: async (id: string, bagId: string | null) => {
+      await run(
+        (prev) => ({
+          ...prev,
+          items: prev.items.map((i) => (i.id === id ? { ...i, bagId } : i)),
+        }),
+        () => assignItemToBag(id, bagId)
+      );
+    },
+  };
+
+  const bagActions = {
+    create: async (tripId: string, name: string, kind: BagKind) => {
+      const result = await run(
+        (prev) => prev,
+        async () => (await createBag(tripId, { name, kind })).state
+      );
+      return result ? (result.bags?.at(-1)?.id ?? "") : "";
+    },
+    update: async (id: string, data: { name?: string; kind?: BagKind }) => {
+      await run(
+        (prev) => ({
+          ...prev,
+          bags: (prev.bags ?? []).map((b) => (b.id === id ? { ...b, ...data } : b)),
+        }),
+        () => updateBag(id, data)
+      );
+    },
+    delete: async (id: string) => {
+      /*
+       * Delete the bag and clear it off any items in the same optimistic step.
+       * The server does this too; doing it here keeps the two views from
+       * disagreeing in the window between the click and the response, where a
+       * row would otherwise still render a chip for a bag that no longer exists.
+       */
+      await run(
+        (prev) => ({
+          ...prev,
+          bags: (prev.bags ?? []).filter((b) => b.id !== id),
+          items: prev.items.map((i) => (i.bagId === id ? { ...i, bagId: null } : i)),
+        }),
+        () => deleteBag(id)
+      );
+    },
   };
 
   const taskActions = {
@@ -560,6 +637,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         trip: tripActions,
         category: categoryActions,
         item: itemActions,
+        bag: bagActions,
         task: taskActions,
         reservation: reservationActions,
         helpers,
