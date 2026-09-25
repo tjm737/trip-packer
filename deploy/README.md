@@ -136,6 +136,70 @@ same SQLite file. The deploy script sets this.
 
 ---
 
+## Backups
+
+Hourly, retained for 30 days. Two files, both under `deploy/`:
+
+```bash
+bash deploy/install-backup-cron.sh     # run once, as root, from /opt/trip-packer
+```
+
+That installs `/etc/cron.d/trip-packer-backup` and then **runs one backup
+immediately to prove it works** — scheduling a job that has never executed is how
+you discover a broken backup a month later, at the moment you need it. The
+install fails loudly if that first run does not succeed.
+
+It is idempotent. Re-run it after editing `backup-db.sh`; the cron entry is
+replaced rather than appended, so runs cannot stack into N backups per hour.
+
+| | |
+|---|---|
+| Schedule | hourly at `:17` |
+| Retention | 30 days, by age |
+| Location | `/var/backups/trip-packer/` |
+| Log | `/var/log/trip-packer-backup.log` |
+
+```bash
+ls -lh /var/backups/trip-packer/                    # list backups
+tail -20 /var/log/trip-packer-backup.log            # recent runs
+sudo -u trip-packer /opt/trip-packer/deploy/backup-db.sh   # run one now
+```
+
+**Why not `cp`.** The database is in WAL mode, so `trip-packer.db` alone is not
+a complete snapshot — recent commits may live only in the `-wal` file. The script
+uses `sqlite3 .backup`, which is the only safe copy method for a live WAL
+database, and the same method `deploy.sh` already uses before a deploy.
+
+**The service is not stopped.** `deploy.sh` stops it because it is about to
+replace the binary and wants a frozen target. Here the opposite applies:
+interrupting writes every hour would be a self-inflicted outage. SQLite's backup
+API takes a consistent snapshot without blocking the writer.
+
+**Backups are verified by querying them, not by checking they exist.** A
+truncated or empty file can still be a file. The script counts rows in `users`,
+`trips`, and `items` and runs `PRAGMA integrity_check`, and if either fails it
+**discards the copy and leaves the live database untouched**. A backup that
+cannot be read is worse than no backup, because it is trusted.
+
+**Restoring.** The backups are plain SQLite files, so restoring is a copy:
+
+```bash
+systemctl stop trip-packer
+cp /var/backups/trip-packer/trip-packer-<stamp>.db /opt/trip-packer/data/trip-packer.db
+chown trip-packer:trip-packer /opt/trip-packer/data/trip-packer.db
+systemctl start trip-packer
+```
+
+The `.db` files are self-contained single files; they do not need their `-wal`
+or `-shm` companions, and the script removes those so a partial pair is never
+mistaken for something that must travel together.
+
+> These backups live on the same host as the database. They cover a bad deploy,
+> an accidental delete, or a corrupt write — **not** the loss of the machine
+> itself. Off-host replication is a separate job and is not set up.
+
+---
+
 ## Notes / gotchas
 
 **`deploy/.env.example` is optional.** The app reads only `NODE_ENV` and
