@@ -91,7 +91,23 @@ function loadModule(file, parentCache = new Map()) {
   const mod = { exports: {} };
   parentCache.set(file, mod);
 
+  /*
+   * `server-only` is a Next.js virtual module, not a real package, so it cannot
+   * be resolved with require() here. Its whole purpose is to throw at BUILD time
+   * if a module that should only run on the server gets pulled into a client
+   * bundle. That check is meaningless in this harness -- everything already runs
+   * on the server -- so stub it as a no-op.
+   *
+   * src/lib/db.ts imports it, so without this any test that loads db.ts (or
+   * anything that imports it, such as access.ts -> scopeStateForUser) dies with
+   * "Cannot find module 'server-only'".
+   */
+  const VIRTUAL_MODULES = { "server-only": {} };
+
   const localRequire = (spec) => {
+    if (Object.prototype.hasOwnProperty.call(VIRTUAL_MODULES, spec)) {
+      return VIRTUAL_MODULES[spec];
+    }
     const resolved = resolveSpecifier(spec, file);
     if (resolved && fs.existsSync(resolved)) {
       return loadModule(resolved, parentCache);

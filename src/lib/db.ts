@@ -359,6 +359,66 @@ function migrate(db: SqliteDb): void {
   `);
 
   /*
+   * Bags — the physical containers a trip's items travel in.
+   *
+   * `items.bagId` answers "where is this thing right now", which is a DIFFERENT
+   * question from `items.categoryId` ("what kind of thing is it"). The same
+   * t-shirt is Clothing AND in the black carry-on, so a bag is a second axis
+   * rather than another category. Items carry a nullable bagId, because a
+   * specific physical object is in exactly one bag at a time, and null honestly
+   * means "not assigned yet" — which is how every existing trip reads until a
+   * user opts in. That choice keeps this change additive: no existing row has
+   * to be rewritten, and nothing breaks for trips that never use bags.
+   *
+   * `tripId` is NULLABLE ON PURPOSE, and this is load-bearing for a future
+   * feature rather than an oversight. A bag with a tripId is a bag taken on that
+   * trip. A bag with tripId NULL is a REGISTERED bag: a physical object with a
+   * tag number and a standing contents list that travels across trips, which is
+   * what an airline asks for when a claim is filed. Modelling it this way now
+   * means "registered bags" become an additive migration plus UI, NOT a
+   * restructure of data users have already entered. The alternative — a NOT
+   * NULL tripId — would force every registered bag to be re-keyed and every
+   * contents assignment to be rewritten.
+   *
+   * Deliberately NOT stored here: photos. See docs/bags/photo-storage-options.md
+   * for why photo storage needs its own decision before it gets a column.
+   *
+   * ON DELETE CASCADE matches trip_members: deleting a trip removes its bags
+   * rather than leaving rows that reference a trip that no longer exists. Note
+   * that items.bagId is a plain column with no FK, so deleting a bag does NOT
+   * delete its items — it must leave them behind with bagId pointing at a
+   * missing bag. The application layer clears bagId on delete (see the bag.delete
+   * op) so items survive as unassigned rather than silently vanishing from the
+   * packing list.
+   */
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS bags (
+      id         TEXT PRIMARY KEY,
+      tripId     TEXT REFERENCES trips(id) ON DELETE CASCADE,
+      name       TEXT NOT NULL,
+      kind       TEXT NOT NULL DEFAULT 'checked'
+                   CHECK (kind IN ('checked', 'carry_on', 'personal', 'other')),
+      tagNumber  TEXT,
+      notes      TEXT,
+      createdAt  TEXT NOT NULL,
+      updatedAt  TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_bags_trip ON bags(tripId);
+  `);
+
+  /*
+   * Which bag an item is packed in. Nullable, so this is a pure addition: an
+   * existing item reads as "no bag yet" and every read path that ignores the
+   * column keeps working unchanged.
+   *
+   * No FOREIGN KEY, intentionally, for the same reason items.categoryId is a
+   * plain column: SQLite cannot add a FK to an existing table with ALTER TABLE,
+   * and the delete path has to clear this to NULL rather than cascade anyway.
+   */
+  addColumnIfMissing(db, "items", "bagId", "TEXT");
+
+  /*
    * Login attempts, for rate limiting.
    *
    * Only FAILED attempts are recorded. A successful login clears the counter,
