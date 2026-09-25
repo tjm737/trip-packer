@@ -83,13 +83,37 @@ App Store Connect metadata (not code — these are hard blocks in the web form):
 
 Verify in the binary:
 
-- [ ] `fcd7f98` and `48f4f36` are **deployed to production** — the app is a
-      shell over the live URL, so a new native build alone changes nothing
+- [x] `fcd7f98` and `48f4f36` are **deployed to production** — verified 23 Sep 2026:
+      `/support` and `/privacy` both return 200, and chunk
+      `421x_dnabo9kg.js` (containing the on-device prompt string "Planned
+      activities") is served at 200 with 3.3 MB
 - [ ] Packing suggestions work on a real device on shipping iOS
-- [ ] App icon present and correct (1024×1024, no alpha) — confirmed
-- [ ] `PrivacyInfo.xcprivacy` included in the target — confirmed
-- [ ] Account deletion reachable from Profile — present
+- [x] App icon present and correct (1024×1024, no alpha) — confirmed
+- [x] `PrivacyInfo.xcprivacy` included in the target — confirmed
+- [x] Account deletion reachable from Profile — present
 - [ ] Version string bumped for the submission build
+
+### Signing gotcha — the paid account does NOT upgrade the personal team
+
+Confirmed 23 Sep 2026, after the membership was purchased:
+
+- Xcode still reports `XQBRZ94BTS` as `"Brenda Morgan (Personal Team)"`,
+  `isFreeProvisioningTeam = 1`, `teamType = "Personal Team"`
+- The only provisioning profile on disk is a **personal-team development**
+  profile for `com.tylermorgan.tripplanner`
+- `ios/App/App.xcodeproj/project.pbxproj` hardcodes
+  `DEVELOPMENT_TEAM = XQBRZ94BTS`
+
+Apple keeps personal and paid teams as **separate entities**. Paying creates a
+*new* team with a **different Team ID**; it does not convert the free one.
+Before archiving for submission, `DEVELOPMENT_TEAM` must be changed to the new
+paid Team ID, and the bundle ID must be registered under that team. Signing with
+the personal team cannot produce an App Store distribution build.
+
+Find the new Team ID at developer.apple.com → Membership, then confirm Xcode has
+picked it up via Settings → Accounts. The cached record can lag behind the
+purchase, sometimes by hours.
+
 
 Not blockers, but worth knowing:
 
