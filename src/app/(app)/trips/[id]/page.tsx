@@ -56,6 +56,7 @@ import { TripReservations } from "@/components/TripReservations";
 import { TripMap } from "@/components/TripMap";
 import { Tabs } from "@/components/Tabs";
 import { PackingSuggestions } from "@/components/PackingSuggestions";
+import { NativePackingButton } from "@/components/NativePackingButton";
 import { ShareButton } from "@/components/ShareButton";
 import { PrintButton } from "@/components/PrintButton";
 import { ShareDialog } from "@/components/ShareDialog";
@@ -1088,6 +1089,13 @@ export default function TripDetail() {
                       days={tripDurationDays(tripInfo.startDate, tripInfo.endDate) ?? undefined}
                       month={tripStartMonth(tripInfo.startDate) ?? undefined}
                     />
+
+                    {/* Native SwiftUI list. Renders only inside the iOS app --
+                        on the web the component returns null, so this is inert
+                        in a browser rather than a button that errors. Sits
+                        beside the web list it mirrors, since the two show the
+                        same items and are alternatives, not a hierarchy. */}
+                    <NativePackingButton tripId={tripId} />
 
                     {categories.length === 0 ? (
                       <div className="text-center py-16">
