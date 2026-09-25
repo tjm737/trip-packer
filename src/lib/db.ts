@@ -6,6 +6,8 @@ import * as path from "node:path";
 
 import type {
   AppState,
+  Bag,
+  BagKind,
   Category,
   PackingItem,
   Reservation,
@@ -520,6 +522,27 @@ type ItemRow = {
   checked: number;
   icon: string;
   order: number;
+  /*
+   * Nullable, and typed as such rather than `string | null` collapsed to
+   * string, because the distinction is load-bearing: SQLite returns NULL for an
+   * item in no bag, and the mapper turns that into null so the client can tell
+   * "unassigned" from "assigned to a bag whose id happens to be undefined".
+   *
+   * Optional as well as nullable so a row read before the column existed (or a
+   * hand-built test fixture) still type-checks.
+   */
+  bagId?: string | null;
+};
+
+type BagRow = {
+  id: string;
+  tripId: string;
+  name: string;
+  kind: string;
+  tagNumber: string;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 type TaskRow = {
@@ -613,6 +636,35 @@ const toItem = (r: ItemRow): PackingItem => ({
   checked: r.checked === 1,
   icon: r.icon,
   order: r.order,
+  /*
+   * Normalised to null rather than passed through raw.
+   *
+   * SQLite gives NULL for an item in no bag, but a row inserted before the
+   * column existed gives `undefined`, and the two would otherwise both reach the
+   * client as distinct values meaning the same thing. Collapsing here means the
+   * UI only ever has to handle null.
+   */
+  bagId: r.bagId ?? null,
+});
+
+/** Narrows a stored kind to the BagKind union, defaulting to "other". */
+const BAG_KIND_VALUES: readonly string[] = ["checked", "carry_on", "personal", "other"];
+
+const toBag = (r: BagRow): Bag => ({
+  id: r.id,
+  tripId: r.tripId,
+  name: r.name,
+  /*
+   * Validated on read as well as constrained by the table's CHECK, mirroring
+   * how toReservation treats its type and tripMembers treats its role: a
+   * hand-edited database must not be able to introduce a fourth kind that the
+   * UI's label lookup would render as undefined.
+   */
+  kind: (BAG_KIND_VALUES.includes(r.kind) ? r.kind : "other") as BagKind,
+  tagNumber: r.tagNumber ?? "",
+  notes: r.notes ?? "",
+  createdAt: r.createdAt,
+  updatedAt: r.updatedAt,
 });
 
 const toTask = (r: TaskRow): Task => ({
@@ -696,6 +748,16 @@ export function readState(): AppState | null {
   ).map(toReservation);
 
   /*
+   * Bags. Ordered by creation so the list is stable across reloads -- there is
+   * no user-facing reorder for bags, so unlike items and reservations there is
+   * no `order` column to sort by, and rowid would change if a row were ever
+   * rewritten. createdAt is the honest stable key.
+   */
+  const bags = (db.prepare("SELECT * FROM bags ORDER BY createdAt, rowid").all() as BagRow[]).map(
+    toBag
+  );
+
+  /*
    * Non-owner membership grants.
    *
    * Loaded eagerly, not lazily. lib/access.ts answers every permission question
@@ -731,7 +793,17 @@ export function readState(): AppState | null {
   const activeUserId =
     activeRow && users.some((u) => u.id === activeRow.value) ? activeRow.value : users[0].id;
 
-  return { users, activeUserId, trips, categories, items, tasks, reservations, tripMembers };
+  return {
+    users,
+    activeUserId,
+    trips,
+    categories,
+    items,
+    tasks,
+    reservations,
+    bags,
+    tripMembers,
+  };
 }
 
 /**
@@ -1062,19 +1134,27 @@ export const tx = {
   insertItem(i: PackingItem): void {
     getDb()
       .prepare(
-        `INSERT INTO items (id, tripId, categoryId, name, quantity, checked, icon, "order")
-         VALUES (@id, @tripId, @categoryId, @name, @quantity, @checked, @icon, @order)`
+        `INSERT INTO items (id, tripId, categoryId, name, quantity, checked, icon, "order", bagId)
+         VALUES (@id, @tripId, @categoryId, @name, @quantity, @checked, @icon, @order, @bagId)`
       )
-      .run({ ...i, checked: i.checked ? 1 : 0 });
+      .run({ ...i, checked: i.checked ? 1 : 0, bagId: i.bagId ?? null });
   },
 
   updateItem(id: string, updates: Partial<PackingItem>): void {
-    const allowed = ["name", "quantity", "checked", "icon", "order", "categoryId", "tripId"] as const;
+    const allowed = ["name", "quantity", "checked", "icon", "order", "categoryId", "tripId", "bagId"] as const;
     const keys = allowed.filter((k) => updates[k] !== undefined);
     if (keys.length === 0) return;
     const set = keys.map((k) => (k === "order" ? `"order" = @order` : `${k} = @${k}`)).join(", ");
     const payload: Record<string, unknown> = { id };
     for (const k of keys) {
+      /*
+       * `checked` is the only boolean column, so it needs the 0/1 coercion.
+       * `bagId` is passed through as-is INCLUDING null -- that is the whole
+       * point of allowing it here, since unassigning an item (moving it out of
+       * a bag) is expressed as bagId: null, and the `!== undefined` filter above
+       * deliberately keeps null while dropping undefined. Conflating the two
+       * would make "unassign" impossible to express.
+       */
       payload[k] = k === "checked" ? (updates.checked ? 1 : 0) : updates[k];
     }
     getDb()
@@ -1084,6 +1164,52 @@ export const tx = {
 
   deleteItem(id: string): void {
     getDb().prepare("DELETE FROM items WHERE id = ?").run(id);
+  },
+
+  insertBag(b: Bag): void {
+    getDb()
+      .prepare(
+        `INSERT INTO bags (id, tripId, name, kind, tagNumber, notes, createdAt, updatedAt)
+         VALUES (@id, @tripId, @name, @kind, @tagNumber, @notes, @createdAt, @updatedAt)`
+      )
+      .run(b);
+  },
+
+  updateBag(id: string, updates: Partial<Bag>): void {
+    /*
+     * `tripId` is deliberately NOT updatable, mirroring updateTask: a bag
+     * belongs to the trip it was created under. Moving a bag between trips is
+     * not a rename, it is a different bag, and allowing it here would let a
+     * caller reassign a bag into a trip they cannot write -- the authorisation
+     * check resolves the owning trip from the bag's CURRENT tripId, so a
+     * tripId update would slip past it.
+     */
+    const allowed = ["name", "kind", "tagNumber", "notes", "updatedAt"] as const;
+    const keys = allowed.filter((k) => updates[k] !== undefined);
+    if (keys.length === 0) return;
+    const set = keys.map((k) => `${k} = @${k}`).join(", ");
+    const payload: Record<string, unknown> = { id };
+    for (const k of keys) payload[k] = updates[k];
+    getDb()
+      .prepare(`UPDATE bags SET ${set} WHERE id = @id`)
+      .run(payload);
+  },
+
+  deleteBag(id: string): void {
+    /*
+     * Clearing the assignment inside the same transaction as the delete.
+     *
+     * The schema declares `bagId ... ON DELETE SET NULL`, which would normally
+     * do this for us -- but SQLite only enforces foreign keys when
+     * `PRAGMA foreign_keys = ON` is set on the connection, which is a
+     * per-connection setting this app does not enable. So the cascade is
+     * mirrored explicitly here rather than trusted. Done in one transaction so
+     * a crash between the two statements cannot leave items pointing at a bag
+     * that no longer exists.
+     */
+    const db = getDb();
+    db.prepare("UPDATE items SET bagId = NULL WHERE bagId = ?").run(id);
+    db.prepare("DELETE FROM bags WHERE id = ?").run(id);
   },
 
   insertTask(t: Task): void {
@@ -1241,7 +1367,7 @@ export const tx = {
      */
     scoped: Pick<
       AppState,
-      "trips" | "categories" | "items" | "tasks" | "reservations"
+      "trips" | "categories" | "items" | "tasks" | "reservations" | "bags"
     >
   ): void {
     const db = getDb();
@@ -1251,7 +1377,7 @@ export const tx = {
         uid: string,
         s: Pick<
           AppState,
-          "trips" | "categories" | "items" | "tasks" | "reservations"
+          "trips" | "categories" | "items" | "tasks" | "reservations" | "bags"
         >
       ) => {
       const ownedTripIds = (
@@ -1280,6 +1406,16 @@ export const tx = {
       db.prepare(`DELETE FROM reservations WHERE tripId IN (${placeholders})`).run(
         ...ownedTripIds
       );
+      /*
+       * Bags before items, and this ordering is load-bearing in a way the other
+       * deletes are not: items carry a bagId, so deleting bags first means the
+       * explicit bagId clear in deleteBag (or the FK's SET NULL, where enabled)
+       * applies to rows that are about to be deleted anyway. Doing it the other
+       * way would leave a window where items still referenced bags mid-transaction.
+       */
+      db.prepare(`DELETE FROM bags WHERE tripId IN (${placeholders})`).run(
+        ...ownedTripIds
+      );
       db.prepare(`DELETE FROM categories WHERE tripId IN (${placeholders})`).run(
         ...ownedTripIds
       );
@@ -1301,6 +1437,17 @@ export const tx = {
       }
       for (const c of s.categories ?? []) {
         if (ownedSet.has(c.tripId)) tx.insertCategory(c);
+      }
+      /*
+       * Bags before items. Mirrors the delete ordering above: items carry a
+       * bagId, so the bags they point at must exist first or the snapshot would
+       * re-insert items referencing bags that are not there yet. A stale bagId
+       * for a bag missing from the snapshot is left as-is rather than nulled --
+       * the client's snapshot is the authority on its own data, and silently
+       * rewriting a reference here would hide a client-side bug.
+       */
+      for (const b of s.bags ?? []) {
+        if (ownedSet.has(b.tripId)) tx.insertBag(b);
       }
       for (const i of s.items ?? []) {
         const owning = i.tripId ?? null;

@@ -6,10 +6,12 @@ import {
   canMutateEntityById,
   scopeStateForUser,
 } from "@/lib/access";
+import type { EntityKind } from "@/lib/access";
 import { permissionFor } from "@/lib/opPermissions";
 import type { ActingUser } from "@/lib/session";
 import type {
   AppState,
+  Bag,
   Category,
   PackingItem,
   Reservation,
@@ -68,6 +70,9 @@ type Body =
   | { op: "item.create"; item: PackingItem }
   | { op: "item.update"; id: string; updates: Partial<PackingItem> }
   | { op: "item.delete"; id: string }
+  | { op: "bag.create"; bag: Bag }
+  | { op: "bag.update"; id: string; updates: Partial<Bag> }
+  | { op: "bag.delete"; id: string }
   | { op: "task.create"; task: Task }
   | { op: "task.update"; id: string; updates: Partial<Task> }
   | { op: "task.delete"; id: string }
@@ -95,6 +100,8 @@ function parentTripIdOf(body: Body): string | null {
       return body.task?.tripId ?? null;
     case "reservation.create":
       return body.reservation?.tripId ?? null;
+    case "bag.create":
+      return body.bag?.tripId ?? null;
     case "reservation.reorder":
       return body.tripId ?? null;
     default:
@@ -108,15 +115,25 @@ function entityIdOf(body: Body): string | null {
   return null;
 }
 
-/** The entity kind a byId op acts on, from its op name prefix. */
-function entityKindOf(body: Body): "trip" | "category" | "item" | "task" | "reservation" | null {
+/**
+ * The entity kind a byId op acts on, from its op name prefix.
+ *
+ * This is a whitelist, not a parse-and-trust: an op whose prefix is not named
+ * here returns null, and the caller treats null as "cannot resolve a parent
+ * trip", which fails closed. Adding a bag case is what lets bag.update and
+ * bag.delete be authorised at all -- without it they would 403 for everyone,
+ * including the trip's owner, which reads as a permissions bug rather than a
+ * missing case.
+ */
+function entityKindOf(body: Body): EntityKind | null {
   const prefix = body.op.split(".")[0];
   if (
     prefix === "trip" ||
     prefix === "category" ||
     prefix === "item" ||
     prefix === "task" ||
-    prefix === "reservation"
+    prefix === "reservation" ||
+    prefix === "bag"
   ) {
     return prefix;
   }
@@ -386,6 +403,18 @@ export function applyMutation(
         t.deleteReservation(body.id);
         break;
 
+      case "bag.create":
+        t.insertBag(body.bag);
+        break;
+
+      case "bag.update":
+        t.updateBag(body.id, body.updates);
+        break;
+
+      case "bag.delete":
+        t.deleteBag(body.id);
+        break;
+
       case "state.replace": {
         /*
          * state.replace rewrites the whole dataset, so it is admin-only AND
@@ -411,7 +440,7 @@ export function applyMutation(
       // asserted.
       scoped as unknown as Pick<
         AppState,
-        "trips" | "categories" | "items" | "tasks" | "reservations"
+        "trips" | "categories" | "items" | "tasks" | "reservations" | "bags"
       >
     );
         break;

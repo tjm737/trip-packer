@@ -65,6 +65,68 @@ export type PackingItem = {
   checked: boolean;
   icon: string;
   order: number;
+  /*
+   * Which bag this item is packed in, or null when unassigned.
+   *
+   * Optional in the type as well as nullable in the schema so that every
+   * existing construction site keeps compiling: a missing bagId and a null
+   * bagId both mean "not in a bag yet", which is the honest default for the
+   * trips that existed before bags did.
+   *
+   * This is deliberately NOT a foreign key at the type level either — nothing
+   * guarantees the bag still exists after a delete, so read paths must tolerate
+   * a dangling id rather than assume it resolves. bag.delete clears it, but a
+   * client holding a stale snapshot could still send one.
+   */
+  bagId?: string | null;
+};
+
+/**
+ * A bag: a physical container the trip's items travel in.
+ *
+ * Bags answer "where is this thing right now", which is a DIFFERENT question
+ * from Category ("what kind of thing is it"). The same t-shirt is Clothing AND
+ * in the black carry-on, so a bag is a second axis rather than another category.
+ *
+ * Not to be confused with a "registered bag" — a persistent object with a tag
+ * number that travels across trips. This type is deliberately trip-scoped
+ * (`tripId` is a plain required string), and the schema's nullable column is
+ * what leaves room for registered bags later without a data migration.
+ */
+export type Bag = {
+  id: string;
+  tripId: string;
+  name: string;
+  kind: BagKind;
+  /** Airline tag number, when the bag has one. Free text; "" when unknown. */
+  tagNumber: string;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/**
+ * What sort of container this is.
+ *
+ * `carry_on` and `personal` matter beyond labelling: a bag that never leaves
+ * your side is not exposed to the same loss risk as a checked bag, and a claim
+ * export needs to distinguish them.
+ */
+export type BagKind = "checked" | "carry_on" | "personal" | "other";
+
+export const BAG_KINDS: readonly BagKind[] = [
+  "checked",
+  "carry_on",
+  "personal",
+  "other",
+] as const;
+
+/** Human labels for the UI. Kept next to the values so they cannot drift. */
+export const BAG_KIND_LABELS: Record<BagKind, string> = {
+  checked: "Checked",
+  carry_on: "Carry-on",
+  personal: "Personal item",
+  other: "Other",
 };
 
 /**
@@ -192,6 +254,14 @@ export type AppState = {
   items: PackingItem[];
   tasks: Task[];
   reservations: Reservation[];
+  /*
+   * Bags for each trip.
+   *
+   * Optional like `tripMembers` so that any construction site holding a state
+   * without bags keeps compiling, and so a client on an older build does not
+   * crash on a state that has them. Read paths must tolerate `undefined`.
+   */
+  bags?: Bag[];
   /*
    * Non-owner grants, loaded by readState().
    *

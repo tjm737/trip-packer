@@ -33,6 +33,7 @@
 
 import type {
   AppState,
+  Bag,
   Category,
   PackingItem,
   Reservation,
@@ -61,6 +62,9 @@ type OpBody =
   | { op: "item.create"; item: PackingItem }
   | { op: "item.update"; id: string; updates: Partial<PackingItem> }
   | { op: "item.delete"; id: string }
+  | { op: "bag.create"; bag: Bag }
+  | { op: "bag.update"; id: string; updates: Partial<Bag> }
+  | { op: "bag.delete"; id: string }
   | { op: "task.create"; task: Task }
   | { op: "task.update"; id: string; updates: Partial<Task> }
   | { op: "task.delete"; id: string }
@@ -135,6 +139,7 @@ export function applyOpToState(state: AppState, body: unknown): AppState {
         items: state.items.filter((i) => i.tripId !== op.id),
         tasks: state.tasks.filter((t) => t.tripId !== op.id),
         reservations: state.reservations.filter((r) => r.tripId !== op.id),
+        bags: (state.bags ?? []).filter((b) => b.tripId !== op.id),
       };
 
     case "category.create":
@@ -158,6 +163,31 @@ export function applyOpToState(state: AppState, body: unknown): AppState {
 
     case "item.delete":
       return { ...state, items: state.items.filter((i) => i.id !== op.id) };
+
+    case "bag.create":
+      return { ...state, bags: upsert(state.bags ?? [], op.bag) };
+
+    case "bag.update":
+      return { ...state, bags: patch(state.bags ?? [], op.id, op.updates) };
+
+    case "bag.delete":
+      /*
+       * Deleting a bag does NOT delete its items, and this is the one place in
+       * this file that deliberately diverges from category.delete above.
+       *
+       * A category IS its items -- an item without a category is meaningless,
+       * and the packing list is organised by category, so removing one removes
+       * the rows. A bag is only a container. An item's existence does not depend
+       * on where it happens to be packed, and a user who deletes "the blue
+       * suitcase" expects their things to become unpacked, not to vanish from
+       * the list. Deleting them here would silently destroy data the user never
+       * asked to delete.
+       */
+      return {
+        ...state,
+        bags: (state.bags ?? []).filter((b) => b.id !== op.id),
+        items: state.items.map((i) => (i.bagId === op.id ? { ...i, bagId: null } : i)),
+      };
 
     case "task.create":
       return { ...state, tasks: upsert(state.tasks, op.task) };

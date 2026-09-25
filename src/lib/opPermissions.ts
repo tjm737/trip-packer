@@ -127,6 +127,18 @@ export const OP_PERMISSIONS = {
   "item.update": { kind: "byId", entity: "item" },
   "item.delete": { kind: "byId", entity: "item" },
 
+  /*
+   * Bags. Same shape as item: a bag is created under a payload-supplied trip
+   * and mutated by bare id, so `create` validates the parent trip from the
+   * payload and `byId` resolves the owning trip server-side from the bag
+   * itself. Registering these here is what makes them runnable at all --
+   * permissionFor() returns null for an unregistered op and the route turns
+   * that into a 400, so an op missing from this table is simply dead.
+   */
+  "bag.create": { kind: "create", entity: "bag" },
+  "bag.update": { kind: "byId", entity: "bag" },
+  "bag.delete": { kind: "byId", entity: "bag" },
+
   "task.create": { kind: "create", entity: "task" },
   "task.update": { kind: "byId", entity: "task" },
   "task.delete": { kind: "byId", entity: "task" },

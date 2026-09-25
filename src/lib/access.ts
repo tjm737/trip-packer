@@ -46,14 +46,21 @@ export type TripMember = {
 type AccessState = {
   trips: { id: string; userId: string }[];
   categories?: { id: string; tripId: string }[];
-  items?: { id: string; tripId?: string; categoryId?: string }[];
+  items?: { id: string; tripId?: string; categoryId?: string; bagId?: string | null }[];
   tasks?: { id: string; tripId: string }[];
   reservations?: { id: string; tripId: string }[];
+  bags?: { id: string; tripId: string }[];
   tripMembers?: TripMember[];
 };
 
 /** Entity kinds whose membership we can resolve back to a trip. */
-export type EntityKind = "trip" | "category" | "item" | "task" | "reservation";
+export type EntityKind =
+  | "trip"
+  | "category"
+  | "item"
+  | "task"
+  | "reservation"
+  | "bag";
 
 /* ------------------------------------------------------------------ */
 /* Identity resolution                                                 */
@@ -169,6 +176,20 @@ export function owningTripId(
   if (kind === "reservation") {
     const res = (state.reservations ?? []).find((r) => r.id === entityId);
     return res ? res.tripId : null;
+  }
+
+  /*
+   * Bags. A bag always belongs to exactly one trip in this model, so its own
+   * tripId is the answer. Note the `?? []` guard matters more here than
+   * elsewhere: state.bags is optional, so a client on an older build -- or a
+   * snapshot taken before bags existed -- has the field absent, and an
+   * unguarded `.find` would throw inside the authorisation path. Throwing there
+   * would fail closed, but as a 500 rather than a 403, which is a worse
+   * experience for a case that is not actually an attack.
+   */
+  if (kind === "bag") {
+    const bag = (state.bags ?? []).find((b) => b.id === entityId);
+    return bag ? bag.tripId : null;
   }
 
   return null;
@@ -312,6 +333,22 @@ export function scopeStateForUser(
   );
   const visibleTripIds = new Set(visibleTrips.map((t) => t.id));
 
+  /*
+   * Bags visible to this user, and the ids thereof.
+   *
+   * Computed before items are filtered because item.bagId has to be validated
+   * against it. An item and its bag can disagree about which trip they are in --
+   * nothing in the schema forbids an item in trip A pointing at a bag in trip B
+   * -- so filtering the two lists independently would hand the client an item
+   * whose bagId refers to a bag it never received. That is a cross-account
+   * reference leak: the raw id alone discloses that a bag with that id exists
+   * and is in use, and the id is stable, so it can be correlated across
+   * requests. The id is nulled rather than the item dropped, because the item's
+   * own visibility is legitimate and dropping it would lose real data.
+   */
+  const visibleBags = (state.bags ?? []).filter((b) => visibleTripIds.has(b.tripId));
+  const visibleBagIds = new Set(visibleBags.map((b) => b.id));
+
     return {
       /*
        * Fall back to a minimal record for the authenticated user rather than to an
@@ -341,15 +378,29 @@ export function scopeStateForUser(
     activeUserId: userId,
     trips: visibleTrips,
     categories: (state.categories ?? []).filter((c) => visibleTripIds.has(c.tripId)),
-    items: (state.items ?? []).filter((i) => {
-      const owning =
-        i.tripId ?? owningTripIdViaCategory(state, i.categoryId);
-      return owning !== null && visibleTripIds.has(owning as string);
-    }),
+    items: (state.items ?? [])
+      .filter((i) => {
+        const owning =
+          i.tripId ?? owningTripIdViaCategory(state, i.categoryId);
+        return owning !== null && visibleTripIds.has(owning as string);
+      })
+      .map((i) => {
+        // Only strip bagId when it points at a bag this user cannot see; a
+        // legitimately-visible assignment must survive the scope unchanged.
+        const bagId = (i as { bagId?: string | null }).bagId ?? null;
+        if (bagId === null || visibleBagIds.has(bagId)) return i;
+        return { ...i, bagId: null };
+      }),
     tasks: (state.tasks ?? []).filter((t) => visibleTripIds.has(t.tripId)),
     reservations: (state.reservations ?? []).filter((r) =>
       visibleTripIds.has(r.tripId)
     ),
+    /*
+     * Already computed above, because items needed the id set to validate their
+     * bagId against. Reusing the same list here rather than filtering twice
+     * keeps the two views impossible to diverge.
+     */
+    bags: visibleBags,
     tripMembers: (state.tripMembers ?? []).filter((m) =>
       visibleTripIds.has(m.tripId)
     ),
