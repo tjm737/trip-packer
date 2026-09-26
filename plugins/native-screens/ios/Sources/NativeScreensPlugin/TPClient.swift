@@ -40,6 +40,7 @@ struct TPTrip: Codable, Identifiable, Hashable {
 struct TPCategory: Codable, Identifiable, Hashable {
     var id: String
     var name: String
+    var icon: String?
     var order: Int?
 }
 
@@ -50,6 +51,9 @@ struct TPItem: Codable, Identifiable, Hashable {
     var name: String
     var quantity: Int
     var checked: Bool
+    /// Per-item emoji, e.g. "🛂". Present in the API payload and shown by the
+    /// web app, so it is decoded here too rather than guessed at.
+    var icon: String?
     var order: Int
 }
 
