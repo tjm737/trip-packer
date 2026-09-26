@@ -43,6 +43,26 @@
       </array>
     </dict>
 	</dict>
+	<!--
+		Export compliance: no non-exempt encryption.
+
+		The app ships no cryptography of its own. The only crypto in the
+		codebase is src/lib/auth.ts (pbkdf2Sync / createHash / randomBytes),
+		which runs server-side on Node and is never part of this bundle. What
+		actually executes on device is crypto.randomUUID() for local ids, which
+		is not encryption. Transport to https://trips.planetracker.app is
+		standard TLS, which is exempt.
+
+		Setting this removes the export-compliance prompt from every upload.
+		Without it a build sits in "Missing Compliance" in App Store Connect
+		and cannot be tested in TestFlight until answered.
+
+		If this app ever gains encrypted local storage (offline credentials,
+		a documents vault), this answer changes to true and the annual
+		self-classification report applies.
+	-->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
