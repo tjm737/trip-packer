@@ -246,6 +246,40 @@ for i in $(seq 1 15); do
 done
 ok "listening on :${PORT}"
 
+# ── 5b. Re-seed the App Review demo account ──────────────────────────────────
+#
+# The review account holds its demo content as DISPOSABLE state: the credentials
+# are in the App Review notes, so the URL plus a guessable password is a public
+# login on a production database, and anyone who reads the notes can sign in and
+# edit things. Re-seeding on every deploy means a stranger poking at the demo
+# cannot leave it degraded for the reviewer who matters.
+#
+# Runs AFTER the restart on purpose: migrations run on boot, so the tables must
+# exist before this writes to them. Failure here is a warning, not a die -- a
+# failed re-seed leaves a working app with a stale demo, which is strictly
+# better than refusing to deploy.
+#
+# The password is deliberately NOT rotated here. App Store Connect holds the
+# password you entered in the review notes, and rotating it on deploy would
+# silently invalidate that. Re-run `npm run seed-demo -- --password '...'` by
+# hand if you want to change it, and update the notes.
+step "Re-seeding the review account"
+
+if [[ -f "${APP_DIR}/scripts/seed-demo.cjs" ]]; then
+  if runuser -u "${SERVICE_USER}" -- env TRIP_PACKER_DB="${APP_DIR}/data/trip-packer.db" \
+       bash -lc "cd '${APP_DIR}' && npm run --silent seed-demo" >/tmp/seed-demo.log 2>&1; then
+    ok "review account re-seeded"
+    # Print only the content summary -- never the password, which would land in
+    # the deploy log and in journalctl.
+    grep -E "trips|items|login|owner" /tmp/seed-demo.log | sed 's/^/    /' || true
+  else
+    warn "re-seed failed (see /tmp/seed-demo.log) -- the app is up, demo content may be stale"
+    tail -5 /tmp/seed-demo.log | sed 's/^/    /' || true
+  fi
+else
+  warn "scripts/seed-demo.cjs not found -- skipping (expected on older revisions)"
+fi
+
 # ── 6. Route checks ──────────────────────────────────────────────────────────
 step "Checking routes"
 
@@ -262,7 +296,56 @@ for p in "${CHECK_PATHS[@]}"; do
   fi
 done
 
-# ── 7. Security canary ───────────────────────────────────────────────────────
+# ── 7b. App Review login check ───────────────────────────────────────────────
+#
+# A seeded row proves the fixture was written; it does NOT prove a reviewer can
+# sign in. If the account were locked out, or the password hash did not
+# round-trip through the running build, the app would look fine here and be
+# rejected for "we could not access the app."
+#
+# This signs in for real, over HTTP, against the running service, with the same
+# credentials that go in the App Review notes. It only runs when REVIEW_EMAIL
+# and REVIEW_PASSWORD are exported, so the password is never stored in this
+# script -- App Store Connect is the only place it lives.
+#
+# Uses a throwaway cookie jar and never prints the token.
+step "App Review login check"
+
+if [[ -n "${REVIEW_EMAIL:-}" && -n "${REVIEW_PASSWORD:-}" ]]; then
+  LOGIN_BODY="$(printf '{"email":"%s","password":"%s"}' \
+    "${REVIEW_EMAIL}" "${REVIEW_PASSWORD}")"
+  LOGIN_CODE="$(curl -s -o /dev/null -m 20 -w '%{http_code}' \
+    -X POST -H 'content-type: application/json' \
+    -c /tmp/review-jar.txt \
+    -d "${LOGIN_BODY}" \
+    "${BASE_URL}/api/login" || echo "000")"
+
+  if [[ "${LOGIN_CODE}" == "200" ]]; then
+    ok "review account signs in (POST /api/login → 200)"
+
+    # Signed in, the state endpoint must serve that account rather than 401.
+    STATE_CODE="$(curl -s -o /dev/null -m 20 -w '%{http_code}' \
+      -b /tmp/review-jar.txt "${BASE_URL}/api/state" || echo "000")"
+    if [[ "${STATE_CODE}" == "200" ]]; then
+      ok "review session can read /api/state → 200"
+    else
+      warn "review session got /api/state → ${STATE_CODE}, expected 200"
+    fi
+  else
+    # Not a die: the deploy itself succeeded, and the reviewer is not here yet.
+    # But it is exactly the failure that gets the app rejected, so say so loudly.
+    warn "review account sign-in FAILED (POST /api/login → ${LOGIN_CODE})"
+    warn "Fix before submitting: re-run 'npm run seed-demo' on the server, or"
+    warn "check the credentials in App Store Connect match this deployment."
+  fi
+  rm -f /tmp/review-jar.txt
+else
+  # Not silently skipped: an unset pair is the normal state on most deploys, but
+  # it is also how this check quietly stops running, so name which case it is.
+  ok "skipped (export REVIEW_EMAIL and REVIEW_PASSWORD to check sign-in)"
+fi
+
+# ── 8. Security canary ───────────────────────────────────────────────────────
 step "Security canary"
 
 CANARY_CODE="$(curl -s -o /dev/null -m 15 -w '%{http_code}' "${BASE_URL}${CANARY_PATH}" || echo "000")"

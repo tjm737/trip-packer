@@ -13,7 +13,8 @@
     "delete-account": "node scripts/delete-account.cjs",
     "ios:sync": "cap sync ios",
     "ios:open": "cap open ios",
-    "ios:build": "cd ios/App && xcodebuild -project App.xcodeproj -scheme App -sdk iphonesimulator -configuration Debug build"
+    "ios:build": "cd ios/App && xcodebuild -project App.xcodeproj -scheme App -sdk iphonesimulator -configuration Debug build",
+    "seed-demo": "node scripts/seed-demo.cjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
