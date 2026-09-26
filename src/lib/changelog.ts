@@ -37,6 +37,21 @@ export interface Release {
  */
 export const RELEASES: Release[] = [
   {
+    version: "0.7.3",
+    date: "2026-09-26",
+    headline: "Pull down to refresh",
+    groups: [
+      {
+        area: "App",
+        items: [
+          "Pull down from the top of any screen to check for the latest changes.",
+          "If you have no signal, the pull tells you instead of silently leaving old data on screen.",
+          "Works on every screen, including the trips dashboard.",
+        ],
+      },
+    ],
+  },
+  {
     version: "0.7.2",
     date: "2026-09-23",
     headline: "Support and privacy pages",
