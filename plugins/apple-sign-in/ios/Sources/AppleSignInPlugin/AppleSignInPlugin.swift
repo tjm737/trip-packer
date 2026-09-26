@@ -132,7 +132,12 @@ public class AppleSignInPlugin: CAPPlugin, CAPBridgedPlugin, ASAuthorizationCont
             return
         }
 
-        let result = JSObject()
+        /*
+         * `var`, not `let`: this project's JSObject is a value type, so
+         * subscript assignment mutates the local copy rather than a reference
+         * and cannot be done through a `let`.
+         */
+        var result = JSObject()
         result["identityToken"] = identityToken
         // Present only on first authorisation; absent on every sign-in after.
         result["user"] = credential.user
