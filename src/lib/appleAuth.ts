@@ -23,6 +23,9 @@ import { createPublicKey, createVerify } from "node:crypto";
 /** Apple's issuer claim. Exact match required. */
 export const APPLE_ISSUER = "https://appleid.apple.com";
 
+/** Apple's public key set. Rotated by Apple; always fetch fresh. */
+export const APPLE_KEYS_URL = "https://appleid.apple.com/auth/keys";
+
 /** A JWK, narrowed to the fields this module actually reads. */
 export type ApplePublicKey = {
   kty?: string;
@@ -175,4 +178,63 @@ export function claimIsTrue(value: boolean | string | undefined): boolean {
   if (value === true) return true;
   if (value === "true") return true;
   return false;
+}
+
+/* ------------------------------------------------------------- key fetch */
+
+/*
+ * The I/O half. Kept out of the verification logic so the security-critical
+ * part stays pure and testable without a network.
+ */
+
+let keyCache: { keys: ApplePublicKey[]; fetchedAt: number } | null = null;
+const KEY_CACHE_MS = 5 * 60 * 1000;
+
+/**
+ * Fetch Apple's current public keys.
+ *
+ * Cache policy is deliberately short and the failure mode is deliberate:
+ * Apple rotates its key set and retires old keys, and a key we have cached
+ * past its retirement means a legitimate user cannot sign in. Five minutes
+ * means a rotation is picked up quickly while still absorbing a burst of
+ * concurrent sign-ins into a single upstream request.
+ *
+ * A fetch failure THROWS rather than returning an empty key set. An empty set
+ * already fails verification closed (no key matches the token's kid), but
+ * throwing keeps the distinction between "Apple is unreachable" and "this
+ * token is not signed by Apple" in the logs, which is the difference between
+ * an outage and an attack.
+ */
+export async function fetchAppleKeys(force = false): Promise<ApplePublicKey[]> {
+  const now = Date.now();
+  if (!force && keyCache && now - keyCache.fetchedAt < KEY_CACHE_MS) {
+    return keyCache.keys;
+  }
+
+  const res = await fetch(APPLE_KEYS_URL, {
+    // Never serve a stale key set from an intermediary cache; a rotated-away
+    // key would let an old token keep verifying.
+    cache: "no-store",
+    headers: { accept: "application/json" },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Apple key fetch failed: HTTP ${res.status}`);
+  }
+
+  const body = (await res.json()) as { keys?: ApplePublicKey[] };
+  if (!body || !Array.isArray(body.keys) || body.keys.length === 0) {
+    throw new Error("Apple key fetch returned no keys");
+  }
+
+  keyCache = { keys: body.keys, fetchedAt: now };
+  return body.keys;
+}
+
+/** The name the verification function is known by to callers. */
+export const verifyAppleIdentityToken = verifyIdentityToken;
+
+/** Test seam: drop the cached key set. */
+export function clearAppleKeyCache(): void {
+  keyCache = null;
 }

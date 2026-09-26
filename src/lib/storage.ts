@@ -23,6 +23,7 @@ import {
   removeQueuedOp,
 } from "./offlineQueue";
 import { apiUrl } from "./apiUrl";
+import { AVATAR_COLORS } from "./constants";
 import { reconcile } from "./reconcile";
 import { DEFAULT_THEME } from "./theme";
 
@@ -57,16 +58,13 @@ function generateId(): string {
  * exactly the colours the auto-assignment can produce - a picker with its own
  * hardcoded list would drift the moment either side changed.
  */
-export const AVATAR_COLORS = [
-  "bg-blue-500",
-  "bg-emerald-500",
-  "bg-violet-500",
-  "bg-amber-500",
-  "bg-rose-500",
-  "bg-cyan-500",
-  "bg-fuchsia-500",
-  "bg-lime-500",
-];
+/**
+ * Avatar colours now live in lib/constants, so server code can use them
+ * without pulling in this client module. Imported for local use and
+ * re-exported because this is where callers already import them from; the
+ * definition is single-sourced, so the two cannot drift.
+ */
+export { AVATAR_COLORS };
 
 function hashString(str: string): number {
   let hash = 0;

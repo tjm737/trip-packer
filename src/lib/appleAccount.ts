@@ -28,18 +28,29 @@
  * user can still be reached via rule 3 with a fresh account.
  */
 
-export type AccountRow = {
+/**
+ * The subset of an account row the resolver needs.
+ *
+ * `email` is `string | null | undefined` because the two callers disagree by
+ * accident of history: the database row types say `null`, while the
+ * server-side `UserWithSecret` shape omits the field entirely rather than
+ * setting it to null. Accepting both here is deliberate — the resolver only
+ * ever tests the email for equality to a normalised string, so `undefined` and
+ * `null` behave identically, and widening the input is better than forcing a
+ * lossy conversion at one of the two call sites.
+ */
+export type AccountLike = {
   id: string;
   name: string;
-  email: string | null;
-  /** null means "cannot log in with a password" — an Apple-only account. */
-  passwordHash: string | null;
-  appleUserId: string | null;
+  email?: string | null;
+  passwordHash?: string | null;
+  appleUserId?: string | null;
+  isOwner?: number | boolean;
 };
 
 export type ResolveOutcome =
   /** An existing account matched; sign in as it. */
-  | { action: "sign-in"; account: AccountRow; via: "apple-sub" | "verified-email" }
+  | { action: "sign-in"; account: AccountLike; via: "apple-sub" | "verified-email" }
   /** No match; create an account with these fields. */
   | { action: "create"; name: string; email: string | null; appleUserId: string }
   /** The request is well-formed but must not be honoured. */
@@ -49,7 +60,7 @@ export type ResolveOutcome =
 export const DEFAULT_APPLE_NAME = "Traveler";
 
 export function resolveAccount(
-  accounts: AccountRow[],
+  accounts: AccountLike[],
   appleUserId: string,
   email: string | null,
   emailVerified: boolean,

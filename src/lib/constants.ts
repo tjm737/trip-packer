@@ -28,3 +28,26 @@
  * middleware should import from here.
  */
 export const SESSION_COOKIE = "tp_session";
+
+/**
+ * Avatar colours, indexed by a stable hash of the account id.
+ *
+ * Lives here rather than in lib/storage so server code -- the Sign in with
+ * Apple route, in particular -- can assign a colour without importing the
+ * client bundle. It was moved out of storage.ts when that route needed it;
+ * storage.ts re-exports it so existing importers are unaffected.
+ *
+ * These are Tailwind classes, so the values have to appear literally (Tailwind
+ * cannot see a computed class name at build time). Keep the list in step with
+ * the safelist in tailwind.config if one is ever added.
+ */
+export const AVATAR_COLORS = [
+  "bg-blue-500",
+  "bg-emerald-500",
+  "bg-violet-500",
+  "bg-amber-500",
+  "bg-rose-500",
+  "bg-cyan-500",
+  "bg-fuchsia-500",
+  "bg-lime-500",
+];
