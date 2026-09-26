@@ -126,6 +126,27 @@
   * {
     @apply border-border;
   }
+
+  /*
+   * Suppress the platform's own pull-to-refresh.
+   *
+   * iOS Safari and Chrome Android both implement pull-to-refresh at the document
+   * level. Without this, pulling at the top of the page runs the OS spinner at
+   * the same time as the app's own indicator: two spinners, two different
+   * completion moments, and a page that rubber-bands the whole viewport behind
+   * the content. `contain` keeps the overscroll inside the page instead of
+   * chaining to the browser chrome, which is what makes the in-app gesture the
+   * only visible one.
+   *
+   * This is the load-bearing half of PullToRefresh — the component's
+   * preventDefault is a second line of defence for gestures that begin as a
+   * pull, not the primary one.
+   */
+  html,
+  body {
+    overscroll-behavior-y: contain;
+  }
+
   body {
     @apply bg-background text-foreground;
     -webkit-font-smoothing: antialiased;
@@ -830,6 +851,40 @@
     /* Never expose URL text after link labels on paper; the itinerary is a
        document, not a bibliography. */
     content: none !important;
+  }
+}
+
+/*
+ * Pull-to-refresh spinner.
+ *
+ * Declared here rather than inline because a @keyframes rule cannot be expressed
+ * as an inline style. The component applies it by name while a refresh is in
+ * flight and removes it otherwise, so the icon only spins when a request is
+ * genuinely outstanding -- during the drag itself the rotation is driven
+ * directly by how far the user has pulled, which is what makes the icon track
+ * the finger rather than spin meaninglessly.
+ *
+ * `prefers-reduced-motion` is honoured: the spinner is a status indicator, and
+ * its message is already carried by the adjacent label, so suppressing the
+ * rotation loses nothing for a user who has asked for less movement.
+ */
+@keyframes ptr-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes ptr-spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(0deg);
+    }
   }
 }
 

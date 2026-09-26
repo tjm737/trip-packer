@@ -79,6 +79,18 @@ interface AppContextType {
   /** Non-null when the last write failed; cleared on the next success. */
   error: string | null;
   clearError: () => void;
+  /**
+   * Re-read state from the server, for pull-to-refresh.
+   *
+   * Resolves `true` when fresh state was applied, `false` when the fetch failed
+   * (offline, or the server refused). Callers surface the false case rather than
+   * showing a success tick, because a refresh that silently did nothing is worse
+   * than one that says so.
+   *
+   * Queued optimistic writes are replayed on top of the response, so pulling
+   * mid-save cannot discard a change the user just made.
+   */
+  refresh: () => Promise<boolean>;
   activeUser: User | undefined;
   user: {
     add: (name: string) => Promise<void>;
@@ -230,6 +242,50 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  /**
+   * Pull-to-refresh.
+   *
+   * Deliberately not a second `page.load()`. That path seeds from the cache
+   * first and treats a failed fetch as benign when a cached copy exists, both of
+   * which are right for a cold boot and wrong for a deliberate pull: the user has
+   * just asked for live data, so a failure must be reported rather than
+   * papered over with the stale copy already on screen.
+   *
+   * Two orderings matter and mirror `run`:
+   *
+   *  - `++seq.current` FIRST, so an in-flight write that resolves after this
+   *    fetch cannot publish stale state over newer state.
+   *  - `reconcilePending` on the response, so an offline edit still sitting in
+   *    the queue is not erased by a server copy that predates it.
+   *
+   * Returns whether fresh state was applied, so the gesture can end on an honest
+   * message instead of a success tick over a no-op.
+   */
+  const refresh = useCallback(async (): Promise<boolean> => {
+    const ticket = ++seq.current;
+    try {
+      const loaded = await fetchState();
+      // A null here means the request was refused or unreachable; there is no
+      // fresh state to apply, so say so rather than pretending.
+      if (!loaded) return false;
+
+      const reconciled = reconcilePending(loaded);
+      if (ticket === seq.current) {
+        setState(reconciled);
+        setError(null);
+      }
+      // Keep the offline copy current even when superseded, for the same reason
+      // `run` does: the server copy is authoritative either way.
+      writeCachedState(reconciled);
+      return true;
+    } catch (err) {
+      if (ticket === seq.current) {
+        setError(err instanceof Error ? err.message : "Could not refresh");
+      }
+      return false;
+    }
   }, []);
 
   /**
@@ -632,6 +688,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         hydrated,
         error,
         clearError: () => setError(null),
+        refresh,
         activeUser,
         user: userActions,
         trip: tripActions,

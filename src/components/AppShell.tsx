@@ -3,6 +3,7 @@
 import { Sidebar } from "@/components/Sidebar";
 import { MobileNav } from "@/components/MobileNav";
 import { OfflineBanner } from "@/components/OfflineBanner";
+import { PullToRefresh } from "@/components/PullToRefresh";
 
 /**
  * The authenticated app shell: sidebar, mobile nav, offline banner.
@@ -31,6 +32,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <Sidebar />
       <div className="flex-1 min-w-0 flex flex-col">
         <MobileNav />
+        {/*
+          Above the content and below the nav, mirroring OfflineBanner. It sits
+          here rather than inside <main> so a refresh on a short page still has
+          the indicator visible, and it is mounted once for every authenticated
+          screen including the dashboard at "/".
+        */}
+        <PullToRefresh />
         {/* Above the content, below the nav — never covers the itinerary. */}
         <OfflineBanner />
         <main className="flex-1 min-w-0">{children}</main>
