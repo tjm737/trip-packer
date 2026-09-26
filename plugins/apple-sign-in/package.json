@@ -1,0 +1,20 @@
+{
+  "name": "apple-sign-in-plugin",
+  "version": "0.1.0",
+  "description": "Capacitor bridge to Sign in with Apple (AuthenticationServices).",
+  "private": true,
+  "main": "dist/plugin.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "ios/Sources",
+    "Package.swift"
+  ],
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    }
+  },
+  "peerDependencies": {
+    "@capacitor/core": "^8.0.0"
+  }
+}

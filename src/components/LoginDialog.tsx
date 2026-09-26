@@ -12,7 +12,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { apiUrl } from "@/lib/apiUrl";
-import { AlertCircle, Loader2, Lock } from "lucide-react";
+import {
+  isAppleSignInAvailable,
+  signInWithApple,
+} from "@/lib/appleSignIn";
+import { AlertCircle, Apple, Loader2, Lock } from "lucide-react";
 
 /**
  * Sign-in dialog.
@@ -45,6 +49,18 @@ export function LoginDialog({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  /*
+   * Whether the native Sign in with Apple sheet can be presented. Resolved once
+   * when the dialog opens, not on mount, because the answer depends on the
+   * Capacitor bridge being ready and the dialog is the first thing that needs
+   * it.
+   *
+   * Starts `false` so the button does not flash on the web, where it can never
+   * work. The cost is that on iOS the button appears a beat after the dialog;
+   * the alternative is offering a control that fails for most visitors.
+   */
+  const [appleAvailable, setAppleAvailable] = useState(false);
+
   // Focus the email field when the dialog opens, so the form is usable from the
   // keyboard immediately. A dialog that opens with focus on the close button
   // makes the first Tab land somewhere useless.
@@ -58,6 +74,48 @@ export function LoginDialog({
       return () => clearTimeout(t);
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void isAppleSignInAvailable().then((report) => {
+      // Guard the late resolve: the dialog may have closed while the bridge was
+      // answering, and setting state after that is a no-op at best.
+      if (!cancelled) setAppleAvailable(report.available);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  /**
+   * Run Sign in with Apple.
+   *
+   * Cancelling resolves rather than rejects, so it is handled by simply doing
+   * nothing: the user dismissed the sheet and the form is still there. Showing
+   * an error for a deliberate cancellation would be wrong.
+   */
+  async function submitApple() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const outcome = await signInWithApple();
+      if (outcome.ok) {
+        // `isOwner` is not in the Apple response. The server owns that decision
+        // and the shell re-reads it from /api/state on load, so an Apple
+        // sign-in reports `false` here rather than guessing — a guess that
+        // defaulted to true would be a privilege escalation in the UI.
+        onSuccess({ id: outcome.user.id, name: outcome.user.name, isOwner: false });
+        onOpenChange(false);
+        return;
+      }
+      if ("cancelled" in outcome && outcome.cancelled) return;
+      setError("error" in outcome ? outcome.error : "Sign in with Apple failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -131,6 +189,27 @@ export function LoginDialog({
             </div>
           </div>
         </DialogHeader>
+
+        {/* Native Sign in with Apple, when the platform can present it. */}
+        {appleAvailable ? (
+          <div className="border-b border-white/8 px-5 py-4">
+            <button
+              type="button"
+              onClick={submitApple}
+              disabled={busy}
+              title="Sign in with Apple"
+              aria-label="Sign in with Apple"
+              className="flex h-10 w-full items-center justify-center gap-2 rounded-md bg-white text-sm font-semibold text-black transition-opacity hover:opacity-90 disabled:opacity-60 focus-ring"
+            >
+              {busy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Apple className="h-4 w-4" />
+              )}
+              Sign in with Apple
+            </button>
+          </div>
+        ) : null}
 
         <form onSubmit={submit} className="px-5 py-4">
           <div className="space-y-3">

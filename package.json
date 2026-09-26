@@ -24,6 +24,7 @@
     "@capacitor/share": "^8.0.0",
     "@capacitor/status-bar": "^8.0.3",
     "airports-json": "^1.0.0",
+    "apple-sign-in-plugin": "file:plugins/apple-sign-in",
     "better-sqlite3": "^13.0.3",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.3.0",
