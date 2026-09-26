@@ -250,6 +250,39 @@ function migrate(db: SqliteDb): void {
   addColumnIfMissing(db, "users", "passwordHash", "TEXT");
   addColumnIfMissing(db, "users", "isOwner", "INTEGER NOT NULL DEFAULT 0");
   /*
+   * Sign in with Apple binding.
+   *
+   * Holds the `sub` from a verified Apple identity token — the stable,
+   * per-team user identifier Apple issues. NULL means the account has never
+   * been linked.
+   *
+   * Three things worth stating explicitly, because each is load-bearing:
+   *
+   *  - It is NOT the email. Apple lets a user change the address on their
+   *    Apple ID, and the private-relay addresses rotate. `sub` is the only
+   *    value Apple guarantees stays put, so it is the join key. Matching on
+   *    email alone would silently lose an account the first time someone
+   *    changed their address.
+   *
+   *  - It is nullable, so an existing password account is unchanged and can
+   *    be linked later by signing in with Apple against the same email.
+   *
+   *  - It is UNIQUE. Two accounts bound to one Apple ID would make login
+   *    nondeterministic, and the collision would most likely be the exact
+   *    scenario we care about: an account-takeover attempt. UNIQUE makes
+   *    that a write failure instead of a coin flip. Multiple NULLs are
+   *    permitted by SQLite, so unlinked accounts coexist freely.
+   *
+   * Added via addColumnIfMissing for the column, then a separate partial
+   * index for the uniqueness, because SQLite cannot add a UNIQUE constraint
+   * to an existing table in place.
+   */
+  addColumnIfMissing(db, "users", "appleUserId", "TEXT");
+  db.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_appleUserId
+       ON users(appleUserId) WHERE appleUserId IS NOT NULL`
+  );
+  /*
    * Theme preference.
    *
    * On `users`, not on `settings`, even though `settings` exists and is the
@@ -483,6 +516,10 @@ type UserRow = {
   /* Nullable: NULL means "never chose a theme", which is not the same as "chose
      dark". Normalised to a real theme by `toUser`. */
   theme: string | null;
+  /* Nullable: NULL means the account has never been linked to Sign in with
+     Apple. This is the stable per-team identifier Apple issues, and the only
+     durable key for an Apple account — email can change, sub cannot. */
+  appleUserId: string | null;
 };
 
 /**
@@ -495,6 +532,15 @@ type UserRow = {
  */
 export type UserWithSecret = Omit<User, "passwordHash"> & {
   passwordHash?: string | null;
+  /**
+   * The Apple `sub` for a Sign in with Apple account, absent otherwise.
+   *
+   * Deliberately here and not on `User`: this identifies an account to Apple
+   * and must not reach the client. Same reasoning as `passwordHash` — the type
+   * is the boundary, so leaking it is a compile error rather than a review
+   * miss.
+   */
+  appleUserId?: string | null;
 };
 
 type TripRow = {
@@ -603,6 +649,16 @@ const toUserWithSecret = (r: UserRow): UserWithSecret => ({
   // and must never be able to authenticate. verifyPassword rejects a null
   // hash, so the login path fails closed rather than throwing.
   passwordHash: r.passwordHash ?? undefined,
+  /*
+   * The Apple subject is carried here, NOT on `User`.
+   *
+   * It is a stable identifier for an account and has no business travelling to
+   * the client: exposing it would let any script enumerate which accounts use
+   * Sign in with Apple and correlate them across apps from the same team. Like
+   * `passwordHash`, this type is the "server-side only" shape, so reaching for
+   * it is a deliberate act rather than an accident.
+   */
+  appleUserId: r.appleUserId ?? undefined,
 });
 
 const toTrip = (r: TripRow): Trip => ({
@@ -919,6 +975,75 @@ export const tx = {
     getDb()
       .prepare("UPDATE users SET passwordHash = ? WHERE id = ?")
       .run(passwordHash, userId);
+  },
+
+  /**
+   * Look up an account by its Apple subject.
+   *
+   * Exact match, no normalisation: `sub` is an opaque identifier Apple issued,
+   * not user input, so there is no case or whitespace to fold. Folding it would
+   * be inventing a match rule Apple does not have.
+   */
+  getUserByAppleId(appleUserId: string): UserWithSecret | null {
+    const row = getDb()
+      .prepare("SELECT * FROM users WHERE appleUserId = ?")
+      .get(appleUserId) as UserRow | undefined;
+    return row ? toUserWithSecret(row) : null;
+  },
+
+  /**
+   * Every account, for the resolver.
+   *
+   * `resolveAccount` needs to consider the whole table to decide between
+   * binding, linking, and creating, and the table is small (this is a
+   * self-hosted app with a handful of accounts). Reading it wholesale keeps the
+   * decide-then-write sequence in one place instead of scattering three
+   * lookups through a request handler, where the pieces could disagree.
+   */
+  listAccounts(): UserWithSecret[] {
+    const rows = getDb()
+      .prepare("SELECT * FROM users")
+      .all() as UserRow[];
+    return rows.map(toUserWithSecret);
+  },
+
+  /**
+   * Insert an Apple-only account: a verified `sub`, no password.
+   *
+   * Mirrors `insertAccount`'s safety property — `isOwner` and any credential
+   * are decided here, never taken from the caller — for the same reason: this
+   * is reachable from a request. An account created this way has
+   * `passwordHash = NULL`, which `verifyPassword` rejects, so it cannot be
+   * logged into with a password until one is deliberately set.
+   */
+  insertAppleAccount(a: {
+    id: string;
+    name: string;
+    avatarColor: string;
+    createdAt: string;
+    email: string | null;
+    appleUserId: string;
+  }): void {
+    getDb()
+      .prepare(
+        `INSERT INTO users (id, name, avatarColor, createdAt, email, passwordHash, isOwner, appleUserId)
+         VALUES (@id, @name, @avatarColor, @createdAt, @email, NULL, 0, @appleUserId)`
+      )
+      .run({
+        id: a.id,
+        name: a.name,
+        avatarColor: a.avatarColor,
+        createdAt: a.createdAt,
+        email: a.email,
+        appleUserId: a.appleUserId,
+      });
+  },
+
+  /** Bind an existing account to an Apple subject. */
+  setAppleUserId(userId: string, appleUserId: string): void {
+    getDb()
+      .prepare("UPDATE users SET appleUserId = ? WHERE id = ?")
+      .run(appleUserId, userId);
   },
 
   /**
