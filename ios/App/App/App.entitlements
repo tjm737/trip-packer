@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+		Sign in with Apple.
+
+		Declaring this is what actually puts the entitlement into the app's
+		signature. The provisioning profile only PERMITS it -- having the
+		capability enabled on the App ID is necessary but not sufficient, and
+		without this file ASAuthorizationController fails at runtime even
+		though the profile is correct.
+
+		Xcode's Signing & Capabilities tab would normally write this. It is
+		hand-authored here because the project had no entitlements file at all,
+		and a file Xcode generates is still just a file.
+	-->
+	<key>com.apple.developer.applesignin</key>
+	<array>
+		<string>Default</string>
+	</array>
+</dict>
+</plist>
