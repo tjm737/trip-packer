@@ -42,7 +42,15 @@ let package = Package(
                 .product(name: "Capacitor", package: "capacitor-swift-pm"),
                 .product(name: "Cordova", package: "capacitor-swift-pm"),
             ],
-            path: "ios/Sources/NativeScreensPlugin"
+            path: "ios/Sources/NativeScreensPlugin",
+            linkerSettings: [
+                // FoundationModelsBridge.swift calls LanguageModelSession
+                // directly for on-device packing suggestions. Import alone
+                // compiles but does not link, so without this the native
+                // suggestions path fails at runtime while the build stays
+                // green. .weak because the framework is iOS 26+ only.
+                .linkedFramework("FoundationModels", .when(platforms: [.iOS]))
+            ]
         )
     ]
 )

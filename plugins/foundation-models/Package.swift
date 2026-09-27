@@ -20,9 +20,19 @@ import PackageDescription
  * model exists. Raising this to .v26 would raise the whole app's floor and
  * lock out every older device for a feature they cannot have anyway.
  *
- * `FoundationModels` is a system framework on iOS 26+, so it is referenced by
- * the compiler via the SDK and needs no package dependency. Building against
- * an SDK that lacks it will fail here -- which is the correct, loud failure.
+ * `FoundationModels` is a system framework on iOS 26+, and it MUST be linked
+ * explicitly: `import FoundationModels` alone compiles (the SDK provides the
+ * module) but leaves every symbol unresolved in the final binary, because SPM
+ * does not autolink system frameworks for you. That is a silent failure -- the
+ * build stays green and the call dies at runtime as a dyld lookup against a
+ * framework the app never loaded. `linkerSettings` below is what fixes it, and
+ * `.weak` is required so the app still launches on iOS 15-25, where the
+ * framework does not exist at all. Without `.weak`, the app would fail to
+ * launch on every device that does not have Apple Intelligence.
+ *
+ * Verified with: otool -L <App.app/App> | grep -i foundationmodels
+ * (must list FoundationModels.framework; a blank result means suggestions can
+ * never work, however green the build is.)
  */
 let package = Package(
     name: "FoundationModelsPlugin",
@@ -45,7 +55,12 @@ let package = Package(
                 .product(name: "Capacitor", package: "capacitor-swift-pm"),
                 .product(name: "Cordova", package: "capacitor-swift-pm"),
             ],
-            path: "ios/Sources/FoundationModelsPlugin"
+            path: "ios/Sources/FoundationModelsPlugin",
+            linkerSettings: [
+                // See the header note. .weak because the framework only exists
+                // on iOS 26+, while the app deploys to iOS 15.
+                .linkedFramework("FoundationModels", .when(platforms: [.iOS]))
+            ]
         )
     ]
 )

@@ -68,6 +68,206 @@ final class PackingListModel: ObservableObject {
         state?.trips.first { $0.id == tripId }
     }
 
+    // MARK: - Bags
+
+    /// This trip's bags in a stable order.
+    ///
+    /// Sorted by name, not by creation time: TPBag does not decode `createdAt`,
+    /// and sorting by `id` (a random UUID) would put the list in an order that
+    /// looks arbitrary and can appear to reshuffle between renders. Name is the
+    /// order the user can see and predict. Case-insensitive so "backpack" does
+    /// not sort after "Daypack".
+    func bags(for tripId: String) -> [TPBag] {
+        (state?.bags ?? [])
+            .filter { $0.tripId == tripId }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    func bag(_ bagId: String?) -> TPBag? {
+        guard let bagId else { return nil }
+        return (state?.bags ?? []).first { $0.id == bagId }
+    }
+
+    /// How many items this trip has assigned to a bag. Shown as the bag's count
+    /// so the user can see at a glance which bag is carrying the trip.
+    func itemCount(for bag: TPBag) -> Int {
+        (state?.items ?? []).filter { $0.bagId == bag.id }.count
+    }
+
+    /// Adds a bag. No optimism: the bag list is short, the sheet stays open
+    /// with a spinner until the write lands, and a failed add that briefly
+    /// showed a phantom bag would then have to animate it away again.
+    func addBag(tripId: String, name: String, kind: String) async -> Bool {
+        let bag = TPBag(
+            id: UUID().uuidString,
+            tripId: tripId,
+            name: name,
+            kind: kind,
+            tagNumber: "",
+            notes: ""
+        )
+        do {
+            try await TPClient.shared.mutate(.bagCreate(bag))
+            // Append locally rather than refetching: the server has no unique
+            // constraint to violate here, so a successful round trip means the
+            // bag exists and a refetch would only cost the user a spinner.
+            state?.bags = (state?.bags ?? []) + [bag]
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func renameBag(_ bag: TPBag, name: String) async -> Bool {
+        guard let idx = state?.bags?.firstIndex(where: { $0.id == bag.id }) else { return false }
+        let previous = state?.bags?[idx].name
+        state?.bags?[idx].name = name
+        do {
+            try await TPClient.shared.mutate(.bagRename(id: bag.id, name: name))
+            return true
+        } catch {
+            if let previous { state?.bags?[idx].name = previous }
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Deletes a bag and unassigns its items.
+    ///
+    /// The items are NOT deleted -- a bag is only a container, and losing the
+    /// packing list because a bag was removed would be data loss. Clearing
+    /// `bagId` locally keeps the list consistent with what the server does.
+    func deleteBag(_ bag: TPBag) async {
+        guard !pending.contains(bag.id) else { return }
+        let removedBag = bag
+        let affected = (state?.items ?? []).filter { $0.bagId == bag.id }
+
+        pending.insert(bag.id)
+        state?.bags = (state?.bags ?? []).filter { $0.id != bag.id }
+        for i in (state?.items.indices ?? 0..<0) where state?.items[i].bagId == bag.id {
+            state?.items[i].bagId = nil
+        }
+
+        do {
+            try await TPClient.shared.mutate(.bagDelete(id: bag.id))
+        } catch {
+            state?.bags = (state?.bags ?? []) + [removedBag]
+            for i in (state?.items.indices ?? 0..<0) where affected.contains(where: { $0.id == state?.items[i].id }) {
+                state?.items[i].bagId = removedBag.id
+            }
+            errorMessage = error.localizedDescription
+        }
+        pending.remove(bag.id)
+    }
+
+    /// Moves an item into a bag, or out of every bag when `bagId` is nil.
+    ///
+    /// Optimistic like toggle: the row's chip updates under the finger, which
+    /// is the whole feedback the user gets for the action.
+    func setBag(_ item: TPItem, bagId: String?) async {
+        guard let idx = state?.items.firstIndex(where: { $0.id == item.id }) else { return }
+        let previous = state?.items[idx].bagId
+        state?.items[idx].bagId = bagId
+
+        do {
+            try await TPClient.shared.mutate(.itemSetBag(id: item.id, bagId: bagId))
+        } catch {
+            state?.items[idx].bagId = previous
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Suggestions support
+
+    /// Whether an item with this name is already on the trip.
+    ///
+    /// Case- and whitespace-insensitive: the model returns "Passport" for a
+    /// list that already contains "passport", and offering to add it again
+    /// under a differently-cased name would create a visible duplicate.
+    func hasItem(named name: String, tripId: String) -> Bool {
+        let target = Self.normalise(name)
+        guard !target.isEmpty else { return false }
+        return (state?.items ?? []).contains {
+            $0.tripId == tripId && Self.normalise($0.name) == target
+        }
+    }
+
+    /// The trip's item names, for the prompt's "do not repeat these" list.
+    func itemNames(for tripId: String) -> [String] {
+        (state?.items ?? []).filter { $0.tripId == tripId }.map(\.name)
+    }
+
+    /// Where a suggested item should land.
+    ///
+    /// Categories are GLOBAL, not trip-scoped -- there is no tripId on
+    /// TPCategory -- and `categories(for:)` deliberately returns only the ones
+    /// that already hold items for this trip. That matters here: an item added
+    /// into a category the list does not render would be invisible, which
+    /// looks exactly like the add having failed.
+    ///
+    /// So this prefers a category already in use by this trip, and otherwise
+    /// falls back to the lowest-ordered category that exists at all. Returns
+    /// nil only when there are genuinely no categories anywhere, in which case
+    /// the caller reports that instead of creating an orphaned item.
+    func defaultCategoryId(for tripId: String) -> String? {
+        if let used = categories(for: tripId).first?.id { return used }
+        return (state?.categories ?? [])
+            .sorted { ($0.order ?? 0) < ($1.order ?? 0) }
+            .first?.id
+    }
+
+    /// Adds a model suggestion as a real item.
+    ///
+    /// Mirrors addSuggestion in the web component: it creates the item
+    /// unchecked (a suggestion is a proposal, not a claim about what is
+    /// packed) with quantity 1, and it is only ever called from an explicit
+    /// tap.
+    func addSuggestion(named name: String, tripId: String, categoryId: String?) async {
+        guard let categoryId else {
+            errorMessage = "This trip has no categories to add into."
+            return
+        }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        // Re-checked here, not just in the view: the row may have been
+        // rendered before another device added the same item.
+        guard !hasItem(named: trimmed, tripId: tripId) else { return }
+
+        let order = (state?.items ?? [])
+            .filter { $0.categoryId == categoryId }
+            .map(\.order)
+            .max()
+            .map { $0 + 1 } ?? 0
+
+        let item = TPItem(
+            id: UUID().uuidString,
+            tripId: tripId,
+            categoryId: categoryId,
+            name: trimmed,
+            quantity: 1,
+            checked: false,
+            icon: nil,
+            order: order,
+            bagId: nil
+        )
+
+        // Optimistic: the row appears immediately, matching the tap.
+        state?.items = (state?.items ?? []) + [item]
+
+        do {
+            try await TPClient.shared.mutate(.itemCreate(item))
+        } catch {
+            state?.items = (state?.items ?? []).filter { $0.id != item.id }
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Shared normalisation for name comparison.
+    private static func normalise(_ s: String) -> String {
+        s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
     /// Toggles locally, then persists. Reverts the local flip if the write
     /// fails, because a checklist that silently lies about what is packed is
     /// worse than one that shows an error.
@@ -228,6 +428,20 @@ struct PackingListView: View {
                         .foregroundStyle(TPTheme.textSecondary)
                 }
             }
+            // Refresh lives here rather than as pull-to-refresh: the
+            // `.refreshable` control competed with the ScrollView's own pan and
+            // broke scrolling outright (see the note above `content`). Placement
+            // is `.primaryAction` so it sits on the trailing edge, opposite
+            // Done, which is where a reload control is expected.
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    Task { await model.load() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .disabled(model.isLoading)
+                .accessibilityLabel("Refresh")
+            }
         }
         // No .toolbarBackground here: it needs iOS 16 and this target supports
         // iOS 15. The nav bar keeps its default material, which reads as native
@@ -281,6 +495,21 @@ struct PackingListView: View {
     private var content: some View {
         ScrollView {
             VStack(spacing: 12) {
+                BagSection(tripId: tripId, model: model)
+
+                SuggestionsSection(
+                    tripId: tripId,
+                    destination: model.trip(tripId)?.destination ?? "",
+                    // Dates are not decoded into TPTrip (the API has them, the
+                    // native shell does not read them), so the prompt states
+                    // only what is actually known. Passing a guess would have
+                    // the model reason about weather and season it was told
+                    // rather than one it was given.
+                    days: nil,
+                    month: nil,
+                    model: model
+                )
+
                 if model.categories(for: tripId).isEmpty {
                     EmptyStateView(
                         icon: "suitcase",
@@ -294,9 +523,13 @@ struct PackingListView: View {
                             category: category,
                             items: model.items(for: tripId, in: category.id),
                             pending: model.pending,
+                            bags: model.bags(for: tripId),
                             onToggle: { item in Task { await model.toggle(item) } },
                             onEdit: { item in editingItem = item },
-                            onDelete: { item in deletingItem = item }
+                            onDelete: { item in deletingItem = item },
+                            onSetBag: { item, bagId in
+                                Task { await model.setBag(item, bagId: bagId) }
+                            }
                         )
                     }
                 }
@@ -304,7 +537,24 @@ struct PackingListView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
-        .refreshable { await model.load() }
+        // NO .refreshable HERE, deliberately.
+        //
+        // It was here and it broke scrolling: `.refreshable` installs a
+        // pull-to-refresh control that competes with the ScrollView's own
+        // vertical pan, so the list fought the gesture instead of scrolling.
+        // The symptom was exactly "scroll up and down does not work" while
+        // taps, toggles and the swipe rows all still worked -- which is why
+        // it read as a gesture bug in the rows rather than in the container.
+        //
+        // It also predates the swipe rows: it arrived in the same commit that
+        // fixed them, so the two were easy to confuse, and the row's
+        // `.simultaneousGesture` looked like the obvious culprit. It was not.
+        // A row gesture cannot prevent its parent ScrollView from scrolling;
+        // a refresh control on the ScrollView can.
+        //
+        // Refresh moved to a toolbar button (see the toolbar below). If
+        // pull-to-refresh is wanted back later, it needs to be re-added
+        // together with a fix for this interaction, not on its own.
     }
 }
 
@@ -423,9 +673,12 @@ private struct CategoryCard: View {
     let category: TPCategory
     let items: [TPItem]
     let pending: Set<String>
+    /// The trip's bags, so each row can show which bag its item is in.
+    let bags: [TPBag]
     let onToggle: (TPItem) -> Void
     let onEdit: (TPItem) -> Void
     let onDelete: (TPItem) -> Void
+    let onSetBag: (TPItem, String?) -> Void
 
     /// Which row is swiped open. Held per CARD rather than globally, so an open
     /// row in one category is not closed by opening a row in another -- they are
@@ -452,15 +705,18 @@ private struct CategoryCard: View {
                             id: item.id,
                             openRowId: $openRowId,
                             onEdit: { onEdit(item) },
-                            onDelete: { onDelete(item) }
-                        ) {
-                            PackingRow(
-                                item: item,
-                                isPending: pending.contains(item.id),
-                                isSwipedOpen: openRowId == item.id,
-                                onToggle: { onToggle(item) }
-                            )
-                        }
+                            onDelete: { onDelete(item) },
+                            content: {
+                                PackingRow(
+                                    item: item,
+                                    isPending: pending.contains(item.id),
+                                    isSwipedOpen: openRowId == item.id,
+                                    bags: bags,
+                                    onToggle: { onToggle(item) },
+                                    onSetBag: { bagId in onSetBag(item, bagId) }
+                                )
+                            }
+                        )
                     }
                 }
                 .padding(.vertical, 4)
@@ -574,13 +830,27 @@ struct SwipeRow<Content: View>: View {
             content
                 .background(TPTheme.surface1)
                 .offset(x: offset)
-                // highPriorityGesture, NOT gesture. The row lives inside a
-                // ScrollView, whose own pan is a competing drag; a plain
-                // `.gesture()` loses that contest and the row never moves, so
-                // the swipe appears to do nothing at all. Taking priority lets
-                // the row win, and the mostly-vertical bail-out in the gesture
-                // (see `dragGesture`) hands scrolling back to the ScrollView.
-                .highPriorityGesture(dragGesture)
+                // simultaneousGesture, NOT highPriorityGesture and NOT gesture.
+                //
+                //   .gesture            -- the enclosing ScrollView wins the
+                //                          contest and the row never moves, so
+                //                          the swipe looks unimplemented.
+                //   .highPriorityGesture -- the row wins EVERY drag, including
+                //                          vertical ones, so scrolling the
+                //                          list breaks. (This is the one that
+                //                          gets misdiagnosed: if scrolling is
+                //                          broken, check whether the CONTAINER
+                //                          has a refresh control before
+                //                          blaming the row's priority.)
+                //   .simultaneousGesture -- both receive the drag, the row acts
+                //                          only when the direction lock says
+                //                          horizontal, and the ScrollView keeps
+                //                          vertical scrolling. This is correct.
+                //
+                // The row must therefore never claim a gesture it will not
+                // act on, which is exactly what the `guard abs(dx) > abs(dy)`
+                // in dragGesture is for.
+                .simultaneousGesture(dragGesture)
                 // A tap anywhere on an open row closes it. Placed on the row
                 // rather than the container so the revealed buttons below stay
                 // tappable.
@@ -717,55 +987,145 @@ private struct PackingRow: View {
     /// tapping an open row should close it (handled by SwipeRow) rather than
     /// silently flip its checked state underneath the revealed buttons.
     let isSwipedOpen: Bool
+    /// The trip's bags. Empty on a trip that has not opted into bags, in which
+    /// case no chip and no menu are drawn at all -- an empty "assign to bag"
+    /// control on every row of a trip that has no bags would be a permanent
+    /// invitation to a dead end.
+    let bags: [TPBag]
     let onToggle: () -> Void
+    let onSetBag: (String?) -> Void
 
     /// Matches Tailwind's emerald-500, used for the checkbox and the row tint
     /// in the web app. Not the system accent, which is blue and reads as a
     /// different product.
     private let emerald = Color(hex: 0x10b981)
 
+    /// The bag this item is in, if that bag is still in the trip's list.
+    ///
+    /// Looked up rather than trusted: an item can reference a bag deleted on
+    /// another device, and showing a chip for a bag that no longer exists
+    /// would be a ghost the user cannot clear.
+    private var bag: TPBag? {
+        guard let bagId = item.bagId else { return nil }
+        return bags.first { $0.id == bagId }
+    }
+
     var body: some View {
-        Button {
-            guard !isSwipedOpen else { return }
-            onToggle()
-        } label: {
-            HStack(spacing: 12) {
-                checkbox
+        HStack(spacing: 0) {
+            // The toggle button covers checkbox and name only. The bag chip
+            // sits OUTSIDE it so tapping the chip cannot also flip the item's
+            // packed state -- two different actions one tap apart is the
+            // classic source of "it checked itself off when I tapped the bag".
+            Button {
+                guard !isSwipedOpen else { return }
+                onToggle()
+            } label: {
+                HStack(spacing: 12) {
+                    checkbox
 
-                if let icon = item.icon, !icon.isEmpty {
-                    Text(icon).font(.system(size: 14))
+                    if let icon = item.icon, !icon.isEmpty {
+                        Text(icon).font(.system(size: 14))
+                    }
+
+                    Text(item.name)
+                        .font(.system(size: 14))
+                        .strikethrough(item.checked, color: TPTheme.textMuted)
+                        .foregroundStyle(item.checked ? TPTheme.textMuted : Color(hex: 0xe4e4e7))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+
+                    Spacer(minLength: 8)
+
+                    // Quantity only shown when it says something a bare row would
+                    // not: "Passport x1" is noise, "Battery x4" is information.
+                    if item.quantity > 1 {
+                        Text("x\(item.quantity)")
+                            .font(.system(size: 12))
+                            .foregroundStyle(TPTheme.textMuted)
+                            .monospacedDigit()
+                    }
                 }
-
-                Text(item.name)
-                    .font(.system(size: 14))
-                    .strikethrough(item.checked, color: TPTheme.textMuted)
-                    .foregroundStyle(item.checked ? TPTheme.textMuted : Color(hex: 0xe4e4e7))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-
-                Spacer(minLength: 8)
-
-                // Quantity only shown when it says something a bare row would
-                // not: "Passport x1" is noise, "Battery x4" is information.
-                if item.quantity > 1 {
-                    Text("x\(item.quantity)")
-                        .font(.system(size: 12))
-                        .foregroundStyle(TPTheme.textMuted)
-                        .monospacedDigit()
-                }
+                .padding(.leading, 12)
+                .padding(.vertical, 10)
+                .background(item.checked ? emerald.opacity(0.05) : Color.clear)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(item.checked ? emerald.opacity(0.05) : Color.clear)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .disabled(isPending)
+            .opacity(isPending ? 0.6 : 1)
+
+            if !bags.isEmpty {
+                bagControl
+            } else {
+                // Keeps the row's right padding correct when there is no chip,
+                // so rows with and without bags stay aligned.
+                Spacer().frame(width: 12)
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(isPending)
-        .opacity(isPending ? 0.6 : 1)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(item.name)\(item.quantity > 1 ? ", quantity \(item.quantity)" : "")")
-        .accessibilityValue(item.checked ? "Packed" : "Not packed")
+        .accessibilityValue(accessibilityValue)
         .accessibilityHint("Double tap to toggle")
+    }
+
+    /// Combined VoiceOver value: packed state plus bag, because the chip alone
+    /// is a visual affordance a screen reader user would never reach.
+    private var accessibilityValue: String {
+        let packed = item.checked ? "Packed" : "Not packed"
+        guard !bags.isEmpty else { return packed }
+        if let bag { return "\(packed), in \(bag.name)" }
+        return "\(packed), no bag"
+    }
+
+    /// Assigns the item to a bag, or clears it.
+    ///
+    /// A Menu rather than a swipe action: the swipe already carries Edit and
+    /// Delete, and a third revealed button would make the row's gesture
+    /// crowded. It also keeps the current bag visible on the row, which a
+    /// swipe-only control could not do.
+    private var bagControl: some View {
+        Menu {
+            Button {
+                onSetBag(nil)
+            } label: {
+                Label("No bag", systemImage: bag == nil ? "checkmark" : "tray")
+            }
+
+            ForEach(bags) { option in
+                Button {
+                    onSetBag(option.id)
+                } label: {
+                    Label(
+                        option.name,
+                        systemImage: option.id == item.bagId ? "checkmark" : "suitcase"
+                    )
+                }
+            }
+        } label: {
+            if let bag {
+                HStack(spacing: 4) {
+                    Image(systemName: "suitcase.fill")
+                        .font(.system(size: 9))
+                    Text(bag.name)
+                        .font(.system(size: 11))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(TPTheme.textSecondary)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(TPTheme.surface2)
+                .clipShape(Capsule())
+            } else {
+                Image(systemName: "suitcase")
+                    .font(.system(size: 13))
+                    .foregroundStyle(TPTheme.textMuted.opacity(0.7))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+        }
+        .padding(.trailing, 10)
+        .disabled(isPending)
+        .accessibilityLabel(bag == nil ? "Assign a bag" : "In \(bag!.name), change bag")
     }
 
     /// A filled emerald box with a tick when packed, an empty outlined box when

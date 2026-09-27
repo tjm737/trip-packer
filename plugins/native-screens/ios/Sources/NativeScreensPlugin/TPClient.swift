@@ -29,6 +29,13 @@ struct TPState: Codable {
     var trips: [TPTrip]
     var categories: [TPCategory]
     var items: [TPItem]
+    /// Optional, not required, even though the server always sends it.
+    ///
+    /// A required array would make every older cached payload fail to decode
+    /// whole, so a client that briefly predates this field would show an empty
+    /// app rather than a trip without bags. Optional degrades to "no bags",
+    /// which is a state the UI already renders.
+    var bags: [TPBag]?
 }
 
 struct TPTrip: Codable, Identifiable, Hashable {
@@ -44,6 +51,32 @@ struct TPCategory: Codable, Identifiable, Hashable {
     var order: Int?
 }
 
+/// A bag: the physical container a trip's items travel in.
+///
+/// A second axis, not another category. Category answers "what kind of thing is
+/// it", bag answers "where is it right now" — the same t-shirt is Clothing AND
+/// in the black carry-on. Mirrors `Bag` in src/lib/types.ts.
+///
+/// `tagNumber` and `notes` are plain strings rather than optionals because that
+/// is what the API sends (empty string when unknown); making them optional here
+/// would mean two spellings of "absent" and a decoder that has to accept both.
+struct TPBag: Codable, Identifiable, Hashable {
+    var id: String
+    var tripId: String
+    var name: String
+    var kind: String
+    var tagNumber: String
+    var notes: String
+}
+
+/// How many suggestions to ask the on-device model for. Mirrors MAX_SUGGESTIONS
+/// in src/lib/packingSuggestions.ts.
+///
+/// Duplicated rather than fetched because there is no path from native code to
+/// a TypeScript constant at runtime. If the web value changes, the native
+/// prompt and the web prompt diverge, so change both together.
+let kMaxSuggestions = 12
+
 struct TPItem: Codable, Identifiable, Hashable {
     var id: String
     var tripId: String
@@ -55,6 +88,13 @@ struct TPItem: Codable, Identifiable, Hashable {
     /// web app, so it is decoded here too rather than guessed at.
     var icon: String?
     var order: Int
+    /// Which bag this item is packed in. Optional because the API sends null
+    /// for an unassigned item, and null honestly means "not in a bag yet".
+    ///
+    /// Required for the bag UI to work at all: without this field the item's
+    /// bag would never round-trip, so assigning one would appear to succeed
+    /// and then show nothing on the next load.
+    var bagId: String?
 }
 
 /// The envelope both endpoints wrap their payload in.
@@ -80,6 +120,14 @@ enum TPOp {
     case itemQuantity(id: String, quantity: Int)
     case itemCreate(TPItem)
     case itemDelete(id: String)
+    /// Assign an item to a bag. `bagId` is the wire field, and nil is a
+    /// meaningful value here rather than "leave unchanged": clearing an
+    /// assignment is how an item leaves a bag, and the server distinguishes
+    /// `null` (unassign) from an absent key (don't touch).
+    case itemSetBag(id: String, bagId: String?)
+    case bagCreate(TPBag)
+    case bagRename(id: String, name: String)
+    case bagDelete(id: String)
 
     var body: [String: Any] {
         switch self {
@@ -109,6 +157,40 @@ enum TPOp {
 
         case .itemDelete(let id):
             return ["op": "item.delete", "id": id]
+
+        case .itemSetBag(let id, let bagId):
+            // NSNull, not a missing key. `["bagId": nil]` would drop the entry
+            // from the dictionary entirely, which reads as "no change" and
+            // leaves the item in a bag the user just asked to remove it from.
+            //
+            // Typed as Any explicitly: `bagId ?? NSNull()` does not typecheck,
+            // because ?? requires both sides to be the same type and String?
+            // and NSNull are not. Widening first makes the nil branch legal.
+            let value: Any = bagId ?? NSNull()
+            return [
+                "op": "item.update",
+                "id": id,
+                "updates": ["bagId": value],
+            ]
+
+        case .bagCreate(let bag):
+            return [
+                "op": "bag.create",
+                "bag": [
+                    "id": bag.id,
+                    "tripId": bag.tripId,
+                    "name": bag.name,
+                    "kind": bag.kind,
+                    "tagNumber": bag.tagNumber,
+                    "notes": bag.notes,
+                ],
+            ]
+
+        case .bagRename(let id, let name):
+            return ["op": "bag.update", "id": id, "updates": ["name": name]]
+
+        case .bagDelete(let id):
+            return ["op": "bag.delete", "id": id]
         }
     }
 }
