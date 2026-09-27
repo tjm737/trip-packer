@@ -1369,7 +1369,25 @@ export function TripMap({ tripId }: { tripId: string }) {
        */}
       <div
         className={cn(
-          "z-0 w-full overflow-hidden rounded-lg border border-white/8",
+          /*
+           * `relative` is load-bearing, not decoration.
+           *
+           * Leaflet numbers its internal panes 400-700 and its zoom
+           * controls 1000. Those are descendants of this div, and without a
+           * stacking context here they escape into the root one and paint
+           * over the sticky header below it (z-10), so scrolling up buries
+           * the trip name under the map.
+           *
+           * `z-0` alone does not contain them: z-index is ignored on a
+           * statically positioned element, which this was, so the class was
+           * inert and no stacking context existed. `relative` makes it
+           * apply, which traps every Leaflet pane inside this box.
+           *
+           * Verified in-browser: wrapper z-index 0 with position static
+           * (`createsContext: false`) let a z-1000 pane win over the z-10
+           * header. It must stay relative.
+           */
+          "relative z-0 w-full overflow-hidden rounded-lg border border-white/8",
           hasStops && !loading ? "h-[280px] sm:h-[380px]" : "h-0 border-0"
         )}
       >
