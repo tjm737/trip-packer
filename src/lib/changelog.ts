@@ -37,6 +37,21 @@ export interface Release {
  */
 export const RELEASES: Release[] = [
   {
+    version: "0.7.4",
+    date: "2026-09-27",
+    headline: "Your itinerary, in your calendar",
+    groups: [
+      {
+        area: "Itinerary",
+        items: [
+          "A trip can now be downloaded as a calendar file, so flights, check-ins and bookings land in whatever calendar you already use.",
+          "Each item keeps its real times, and a hotel spans from check-in right through to checkout rather than sitting on the arrival day.",
+          "Times are written without a timezone, so the schedule reads the same as it does in the app wherever you open it.",
+        ],
+      },
+    ],
+  },
+  {
     version: "0.7.3",
     date: "2026-09-26",
     headline: "Pull down to refresh",
