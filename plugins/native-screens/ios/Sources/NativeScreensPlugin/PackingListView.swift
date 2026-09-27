@@ -276,6 +276,78 @@ final class PackingListModel: ObservableObject {
         }
     }
 
+    /// Adds an item the user typed, into a specific category.
+    ///
+    /// Separate from `addSuggestion` rather than a flag on it, because the two
+    /// differ in the ways that matter. A suggestion may be silently skipped --
+    /// `addSuggestion` returns without a word when the name already exists,
+    /// which is right for a proposal the user did not literally type. A typed
+    /// item may not: the user entered text and pressed Add, so refusing must
+    /// say why. Same reason the destination category is a parameter here
+    /// instead of `defaultCategoryId` being resolved inside.
+    ///
+    /// The `📦` icon and quantity 1 match the web app's handleAddItem, which
+    /// passes `"📦", 1`. Note that `TPOp.itemCreate` sends `"icon": ""` on the
+    /// wire regardless (see the note there), so this field does not affect what
+    /// the server stores -- it is kept accurate so the optimistic local row
+    /// matches what a reload will show.
+    func addItem(named name: String, tripId: String, categoryId: String) async -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+
+        /*
+         * Checked here so the user gets a sentence rather than a list that
+         * quietly grows a second identical row.
+         *
+         * Verified against the live API: the server does NOT reject a duplicate
+         * name. `items` has a unique index on `id` only (idx_items_trip and
+         * idx_items_category are both non-unique), so posting the same name
+         * with a new id returns 200 and stores BOTH rows. The guard is
+         * therefore preventing a real duplicate, not pre-empting a server
+         * error. (An earlier version of this comment claimed the opposite,
+         * because a probe that reused the same `id` returned 500 -- that was
+         * the primary key, not the name.)
+         *
+         * This is also why the check is worth making here and not on the
+         * server: two rows with one name is a user-visible annoyance, not a
+         * data-integrity failure, so the server is entitled to allow it.
+         */
+        guard !hasItem(named: trimmed, tripId: tripId) else {
+            errorMessage = "\"\(trimmed)\" is already on this list."
+            return false
+        }
+
+        let order = (state?.items ?? [])
+            .filter { $0.categoryId == categoryId }
+            .map(\.order)
+            .max()
+            .map { $0 + 1 } ?? 0
+
+        let item = TPItem(
+            id: UUID().uuidString,
+            tripId: tripId,
+            categoryId: categoryId,
+            name: trimmed,
+            quantity: 1,
+            checked: false,
+            icon: "📦",
+            order: order,
+            bagId: nil
+        )
+
+        // Optimistic: the row appears immediately, matching the tap.
+        state?.items = (state?.items ?? []) + [item]
+
+        do {
+            try await TPClient.shared.mutate(.itemCreate(item))
+        } catch {
+            state?.items = (state?.items ?? []).filter { $0.id != item.id }
+            errorMessage = error.localizedDescription
+            return false
+        }
+        return true
+    }
+
     /// Shared normalisation for name comparison.
     private static func normalise(_ s: String) -> String {
         s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -398,6 +470,8 @@ struct PackingListView: View {
     /// the only thing standing between a stray swipe and lost data.
     @State private var editingItem: TPItem?
     @State private var deletingItem: TPItem?
+    /// True while the Add Item sheet is open.
+    @State private var addingItem = false
 
     var body: some View {
         ZStack {
@@ -442,6 +516,25 @@ struct PackingListView: View {
                         .foregroundStyle(TPTheme.textSecondary)
                 }
             }
+            // Add is placed BEFORE refresh so it lands on the inner
+            // trailing edge. `.primaryAction` items are laid out in the order
+            // declared, so declaring Add first puts it closest to the title and
+            // pushes refresh to the outer edge. Adding an item is the more
+            // common action and belongs nearest the content.
+            //
+            // Hidden entirely when the trip has no categories: there would be
+            // nowhere to put the item, and a button that opens a sheet whose
+            // Add button can never enable is worse than no button.
+            ToolbarItem(placement: .primaryAction) {
+                if !model.categories(for: tripId).isEmpty {
+                    Button {
+                        addingItem = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("Add item")
+                }
+            }
             // Refresh lives here rather than as pull-to-refresh: the
             // `.refreshable` control competed with the ScrollView's own pan and
             // broke scrolling outright (see the note above `content`). Placement
@@ -483,6 +576,23 @@ struct PackingListView: View {
             actions: { Button("OK", role: .cancel) { model.clearError() } },
             message: { Text(model.errorMessage ?? "") }
         )
+        .sheet(isPresented: $addingItem) {
+            AddItemSheet(
+                categories: model.categories(for: tripId),
+                initialCategoryId: model.defaultCategoryId(for: tripId),
+                isSaving: false,
+                onSave: { name, categoryId in
+                    let ok = await model.addItem(
+                        named: name,
+                        tripId: tripId,
+                        categoryId: categoryId
+                    )
+                    if ok { addingItem = false }
+                    return ok
+                },
+                onCancel: { addingItem = false }
+            )
+        }
         .sheet(item: $editingItem) { item in
             EditItemSheet(
                 item: item,
@@ -537,7 +647,7 @@ struct PackingListView: View {
                     ContentUnavailableView {
                         Label("Nothing to pack yet", systemImage: "suitcase")
                     } description: {
-                        Text("Add items in the app and they will appear here.")
+                        Text("Tap + to add your first item, or pick a suggestion above.")
                     }
                     .padding(.top, 60)
                 } else {
@@ -680,6 +790,131 @@ private struct EditItemSheet: View {
                             let n = name
                             let q = quantity
                             Task { _ = await onSave(n, q) }
+                        }
+                        .disabled(!canSave)
+                    }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+        .onAppear { nameFocused = true }
+    }
+}
+
+/// Add a new item to one category.
+///
+/// A sheet rather than the web app's inline text field. The inline field works
+/// in a browser because the row is in a scrolling column and a keyboard slides
+/// over it; in a presented native list the same layout puts the field under the
+/// keyboard, and the category it adds to is whichever row happened to be
+/// visible. The sheet makes both explicit: you name the item, and you choose
+/// where it goes.
+///
+/// It also gives a duplicate-name failure somewhere to be reported without the
+/// user losing the text they typed.
+private struct AddItemSheet: View {
+    let categories: [TPCategory]
+    let isSaving: Bool
+    /// Returns true when the add landed, so the sheet knows to dismiss.
+    let onSave: (String, String) async -> Bool
+    let onCancel: () -> Void
+
+    @State private var name: String
+    @State private var categoryId: String
+    @FocusState private var nameFocused: Bool
+
+    init(
+        categories: [TPCategory],
+        initialCategoryId: String?,
+        isSaving: Bool,
+        onSave: @escaping (String, String) async -> Bool,
+        onCancel: @escaping () -> Void
+    ) {
+        self.categories = categories
+        self.isSaving = isSaving
+        self.onSave = onSave
+        self.onCancel = onCancel
+        _name = State(initialValue: "")
+        // Falls back to the first category only if the caller had no
+        // preference; the caller passes the default so the picker opens on the
+        // same category the web app would have used.
+        _categoryId = State(initialValue: initialCategoryId ?? categories.first?.id ?? "")
+    }
+
+    /// An empty name cannot be saved, so the button says so rather than failing
+    /// on the server and surfacing an error the user cannot act on. A trip with
+    /// no categories has nowhere to put an item, so that disables it too.
+    private var canSave: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !categoryId.isEmpty
+            && !isSaving
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                TPTheme.surface0.ignoresSafeArea()
+
+                Form {
+                    Section {
+                        TextField("Item name", text: $name)
+                            .focused($nameFocused)
+                            .foregroundStyle(TPTheme.textPrimary)
+                            .submitLabel(.done)
+                    } header: {
+                        Text("Name")
+                            .font(.system(size: 10, weight: .medium))
+                            .tracking(0.8)
+                            .foregroundStyle(TPTheme.textMuted)
+                    }
+
+                    /*
+                     * The category picker appears only when there is a real
+                     * choice to make. With one category it is a control with a
+                     * single answer, which is noise; with several it is the
+                     * thing that decides where the item lands, and getting it
+                     * wrong means the user has to move the item afterwards.
+                     */
+                    if categories.count > 1 {
+                        Section {
+                            Picker("Category", selection: $categoryId) {
+                                ForEach(categories, id: \.id) { category in
+                                    // Mirrors the web row: category emoji then
+                                    // name, so the picker matches what the
+                                    // cards below show.
+                                    Text("\(category.icon ?? "") \(category.name)")
+                                        .tag(category.id)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .tint(TPTheme.textSecondary)
+                        } header: {
+                            Text("Category")
+                                .font(.system(size: 10, weight: .medium))
+                                .tracking(0.8)
+                                .foregroundStyle(TPTheme.textMuted)
+                        }
+                    }
+                }
+                // See the note on EditItemSheet: the grouped Form background is
+                // a light grey that fights the dark tokens.
+                .scrollContentBackground(.hidden)
+            }
+            .navigationTitle("Add Item")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: onCancel)
+                        .disabled(isSaving)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if isSaving {
+                        ProgressView().tint(TPTheme.textSecondary)
+                    } else {
+                        Button("Add") {
+                            let n = name
+                            let c = categoryId
+                            Task { _ = await onSave(n, c) }
                         }
                         .disabled(!canSave)
                     }
