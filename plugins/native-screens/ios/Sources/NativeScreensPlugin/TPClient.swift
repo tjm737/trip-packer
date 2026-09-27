@@ -66,15 +66,32 @@ private struct StateEnvelope: Codable {
  * Mutation ops, kept as an enum so a call site cannot invent a payload shape
  * the server will reject. The raw values match the string literals in
  * src/lib/reconcile.ts; if a case is added there, it must be added here too.
+ *
+ * `item.update` takes a PARTIAL item server-side (`updates: Partial<PackingItem>`
+ * in reconcile.ts:63), so an edit only sends the fields the user changed. The
+ * per-field cases below exist rather than one "send the whole item" case so a
+ * rename cannot accidentally clobber a concurrent toggle: sending the whole
+ * struct would carry a stale `checked` along with the new name and silently
+ * revert whatever the other device just did.
  */
 enum TPOp {
-    case itemUpdate(id: String, checked: Bool)
+    case itemToggle(id: String, checked: Bool)
+    case itemRename(id: String, name: String)
+    case itemQuantity(id: String, quantity: Int)
     case itemCreate(TPItem)
+    case itemDelete(id: String)
 
     var body: [String: Any] {
         switch self {
-        case .itemUpdate(let id, let checked):
+        case .itemToggle(let id, let checked):
             return ["op": "item.update", "id": id, "updates": ["checked": checked]]
+
+        case .itemRename(let id, let name):
+            return ["op": "item.update", "id": id, "updates": ["name": name]]
+
+        case .itemQuantity(let id, let quantity):
+            return ["op": "item.update", "id": id, "updates": ["quantity": quantity]]
+
         case .itemCreate(let item):
             return [
                 "op": "item.create",
@@ -89,6 +106,9 @@ enum TPOp {
                     "order": item.order,
                 ],
             ]
+
+        case .itemDelete(let id):
+            return ["op": "item.delete", "id": id]
         }
     }
 }
