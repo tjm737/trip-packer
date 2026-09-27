@@ -236,6 +236,43 @@ const h = require("./harness.cjs");
     );
   });
 
+  await h.test("insertBag REQUIRES createdAt and updatedAt (the native 500)", () => {
+    /*
+     * The regression this guards: the native iOS client sent bag.create without
+     * these two fields. insertBag binds eight named parameters and better-sqlite3
+     * throws `Missing named parameter "createdAt"` at bind time, which is an
+     * uncaught throw -> HTTP 500. The client only surfaces the status code, so it
+     * read as a generic server fault.
+     *
+     * The rest of this file cannot catch it by construction: every fixture above
+     * includes both stamps precisely BECAUSE the columns are NOT NULL, so the
+     * suite exercises only well-formed payloads. This asserts the requirement
+     * itself, so dropping a field from any client fails here rather than on a
+     * device.
+     */
+    seed("req");
+    const full = bagRow("breq", "t1req");
+    for (const field of ["createdAt", "updatedAt"]) {
+      const incomplete = { ...full };
+      delete incomplete[field];
+      let threw = false;
+      try {
+        db.tx.insertBag(incomplete);
+      } catch {
+        threw = true;
+      }
+      h.assert(threw, `insertBag must reject a bag missing ${field}`);
+    }
+    // And the complete payload -- the shape both clients must send -- succeeds.
+    db.tx.insertBag(full);
+    const b = db.readState().bags.find((x) => x.id === "breq");
+    h.assert(b !== undefined, "the complete payload must insert");
+    h.assert(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(b.createdAt),
+      `createdAt must be ISO 8601 WITH milliseconds, matching Date.toISOString(); got ${b.createdAt}`
+    );
+  });
+
   await h.test("cleanup", () => {
     try {
       fs.rmSync(dir, { recursive: true, force: true });
