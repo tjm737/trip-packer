@@ -235,7 +235,7 @@ function insertTrip(db, userId, spec, demoTrip) {
     reservationCount++;
   }
 
-  return { tripId, itemCount, reservationCount };
+  return { tripId, itemCount, reservationCount, bagCount: bagIds.length };
 }
 
 async function main() {
@@ -343,6 +343,25 @@ async function main() {
     `             ${active.itemCount + archived.itemCount} items, ` +
       `${active.reservationCount + archived.reservationCount} reservations`
   );
+
+  /*
+   * Bags are reported because they are the 1.0 feature App Review sees first,
+   * and because their absence is the one seeding outcome that must not pass
+   * quietly -- an empty Bags section is a guideline 4.2 risk (see the comment
+   * above `bagSpecs`).
+   *
+   * Without this line the deploy log could not answer "did the bags seed?",
+   * which is exactly what it needed to answer: `update.sh` greps this output
+   * for a summary, and a summary that omits the field being fixed cannot
+   * verify the fix. Report the count, and mark zero as a problem rather than
+   * printing "0 bags" in the same tone as success.
+   */
+  const bagTotal = active.bagCount + archived.bagCount;
+  console.log(
+    `  bags      ${bagTotal}` +
+      (bagTotal === 0 ? "   ← PROBLEM: reviewers would see an empty Bags section" : "")
+  );
+
   console.log(`  login     ${verified ? "verified (hash round-trips)" : "PROBLEM — check password"}`);
 
   if (!verified) process.exit(1);

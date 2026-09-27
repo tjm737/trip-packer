@@ -271,7 +271,11 @@ if [[ -f "${APP_DIR}/scripts/seed-demo.cjs" ]]; then
     ok "review account re-seeded"
     # Print only the content summary -- never the password, which would land in
     # the deploy log and in journalctl.
-    grep -E "trips|items|login|owner" /tmp/seed-demo.log | sed 's/^/    /' || true
+    #
+    # `bags` is included because it is the field whose absence is a review
+    # risk, so it has to survive this filter; a summary line that is grepped
+    # away verifies nothing.
+    grep -E "trips|items|bags|login|owner" /tmp/seed-demo.log | sed 's/^/    /' || true
   else
     warn "re-seed failed (see /tmp/seed-demo.log) -- the app is up, demo content may be stale"
     tail -5 /tmp/seed-demo.log | sed 's/^/    /' || true
