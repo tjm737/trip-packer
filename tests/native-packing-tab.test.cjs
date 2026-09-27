@@ -25,6 +25,7 @@ const h = require("./harness.cjs");
 const {
   shouldPresentPackingTab,
   shouldRenderWebPackingList,
+  shouldShowNativeListButton,
 } = h.loadModule("src/lib/nativePackingTab.ts");
 
 async function run() {
@@ -181,6 +182,108 @@ async function run() {
     h.assertEqual(
       shouldRenderWebPackingList({ nativeAvailable: true, nativeOnScreen: false }),
       true
+    );
+  });
+
+  /* -- the stray "Open native list" button --------------------------------- */
+
+  /*
+   * The reported bug: "when I close the packing list, I see the open native list
+   * button".
+   *
+   * The button rendered unconditionally whenever the platform was iOS. So the
+   * ordinary path -- enter the tab, native list opens, close it, fall back to the
+   * web list -- ended with a button offering to open the screen that had just been
+   * closed. Nothing was actually broken; it just read as broken, which is worse,
+   * because there is no error to point at.
+   *
+   * On iOS the native list IS the packing screen and it opens itself. A control
+   * for opening it is redundant by definition, so its absence is the correct
+   * default and these cases pin that.
+   */
+
+  await h.test("does NOT show the button in the normal iOS flow", () => {
+    /*
+     * The regression test for the reported bug. State: iOS, presentation
+     * succeeded, user dismissed the native list, web list is now showing. The
+     * button must be gone.
+     *
+     * If this ever returns true, the stray button is back and so is the
+     * complaint.
+     */
+    h.assertEqual(
+      shouldShowNativeListButton({
+        nativeAvailable: true,
+        presentFailed: false,
+        tabEmpty: false,
+      }),
+      false
+    );
+  });
+
+  await h.test("does NOT show the button just because the platform is iOS", () => {
+    // The exact shape of the old bug: platform capability treated as a reason to
+    // render. Capability is a precondition, never a justification.
+    h.assertEqual(
+      shouldShowNativeListButton({
+        nativeAvailable: true,
+        presentFailed: false,
+        tabEmpty: false,
+      }),
+      false
+    );
+  });
+
+  await h.test("shows the button when the automatic presentation failed", () => {
+    /*
+     * The case the control legitimately exists for. The user tapped the Packing
+     * tab expecting the native list; it threw. Without a way to retry, the tab is
+     * a dead end.
+     */
+    h.assertEqual(
+      shouldShowNativeListButton({
+        nativeAvailable: true,
+        presentFailed: true,
+        tabEmpty: false,
+      }),
+      true
+    );
+  });
+
+  await h.test("shows the button when the tab would otherwise be empty", () => {
+    // Belt-and-braces: even without a thrown error, a tab with no web list behind
+    // it needs some way forward.
+    h.assertEqual(
+      shouldShowNativeListButton({
+        nativeAvailable: true,
+        presentFailed: false,
+        tabEmpty: true,
+      }),
+      true
+    );
+  });
+
+  await h.test("NEVER shows the button on web or Android", () => {
+    /*
+     * There is no native screen to open on these platforms, so the button would
+     * be a lie -- it would throw if tapped. `nativeAvailable` is checked first
+     * precisely so the other two flags cannot conjure a button that cannot work.
+     */
+    h.assertEqual(
+      shouldShowNativeListButton({
+        nativeAvailable: false,
+        presentFailed: true,
+        tabEmpty: true,
+      }),
+      false
+    );
+    h.assertEqual(
+      shouldShowNativeListButton({
+        nativeAvailable: false,
+        presentFailed: false,
+        tabEmpty: false,
+      }),
+      false
     );
   });
 

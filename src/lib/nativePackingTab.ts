@@ -94,3 +94,38 @@ export function shouldRenderWebPackingList(input: {
 }): boolean {
   return !(input.nativeAvailable && input.nativeOnScreen);
 }
+
+/*
+ * Whether the "Open native list" control should be on screen.
+ *
+ * It should almost never be. On iOS the native list IS the packing screen and it
+ * auto-presents on entry into the tab, so a button whose only job is to open it
+ * is a control for something that already happened. It used to render
+ * unconditionally whenever the platform was iOS, which meant the ordinary path --
+ * open the tab, dismiss the native list -- ended with a stray button sitting above
+ * the fallback web list. There is nothing broken about that screen, but it reads
+ * as broken, because a button offering to open a screen you just closed looks
+ * like an error state the app has failed to explain.
+ *
+ * So the only honest reason to show it is that the automatic presentation did not
+ * happen and the user is otherwise stuck:
+ *
+ *   - `presentFailed` -- the present call threw. The user asked for the native
+ *     list (by tapping the tab) and did not get it. Showing a way to retry is the
+ *     difference between a recoverable hiccup and a dead tab.
+ *   - `tabEmpty` -- there is no web list behind it to use instead. Without this,
+ *     a failure that leaves the tab blank would offer no way forward at all.
+ *
+ * Note both are checked against a platform that can actually present. On web and
+ * Android there is no native screen to open, so the control must never appear --
+ * `nativeAvailable` guards that, and it is checked first so the other two cannot
+ * conjure a button on a platform that cannot honour it.
+ */
+export function shouldShowNativeListButton(input: {
+  nativeAvailable: boolean;
+  presentFailed: boolean;
+  tabEmpty: boolean;
+}): boolean {
+  if (!input.nativeAvailable) return false;
+  return input.presentFailed || input.tabEmpty;
+}
