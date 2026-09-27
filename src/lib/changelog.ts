@@ -54,6 +54,12 @@ export const RELEASES: Release[] = [
           "TripPlanner is for people aged 13 and over. This is now stated on the sign-in screen, in the support questions, and in the privacy policy.",
         ],
       },
+      {
+        area: "Accessibility",
+        items: [
+          "The Sign in, Create account and Copy link buttons had text that was too faint to read comfortably against their background. They are now legible in both the normal and hover states.",
+        ],
+      },
     ],
   },
   {

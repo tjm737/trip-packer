@@ -194,7 +194,7 @@ export function CreateAccountDialog({
                 size="sm"
                 title="Close and finish"
                 onClick={() => onOpenChange(false)}
-                className="h-8 bg-emerald-600 px-3 text-xs font-semibold text-emerald-50 hover:bg-emerald-500"
+                className="h-8 bg-emerald-500 px-3 text-xs font-semibold text-emerald-950 hover:bg-emerald-400"
               >
                 Done
               </Button>
@@ -311,7 +311,7 @@ export function CreateAccountDialog({
                 size="sm"
                 disabled={busy}
                 title="Create this account"
-                className="h-8 flex-shrink-0 bg-emerald-600 px-3 text-xs font-semibold text-emerald-50 hover:bg-emerald-500"
+                className="h-8 flex-shrink-0 bg-emerald-500 px-3 text-xs font-semibold text-emerald-950 hover:bg-emerald-400"
               >
                 {busy ? (
                   <>

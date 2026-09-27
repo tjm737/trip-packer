@@ -216,6 +216,44 @@ async function main() {
 
     const page = await context.newPage();
 
+    /*
+     * Public screens are captured BEFORE signing in, and that ordering is
+     * load-bearing rather than stylistic.
+     *
+     * `/login` issues a 307 to `/` once a session exists, so capturing it after
+     * sign-in silently yields a second copy of the dashboard under a "Sign in"
+     * filename. The earlier version did exactly that: 01-login and 02-dashboard
+     * came out byte-identical, and the shot captioned "Sign in" was in fact the
+     * trip list. Apple would have received two identical images.
+     */
+    const capturePass = async (useAuth) => {
+      for (const screen of SCREENS) {
+        if (screen.auth !== useAuth) continue;
+
+        let route = screen.route;
+        if (route === null) {
+          route = await firstTripRoute(page, base);
+          if (!route) {
+            console.log(`  skip ${screen.slug} (no trip visible for this account)`);
+            continue;
+          }
+        }
+
+        const file = path.join(dir, `${screen.slug}.png`);
+        await capture(page, base + route, file, device);
+
+        const kb = Math.round(fs.statSync(file).size / 1024);
+        written.push({ device: key, slug: screen.slug, file, kb });
+        console.log(`  ✓ ${screen.slug}  ${device.expect.width}x${device.expect.height}  ${kb}KB`);
+      }
+    };
+
+    // Public pass: no session, so /login renders the sign-in screen itself.
+    await capturePass(false);
+    // A redirect that lands somewhere else means the "public" shot is not what
+    // it claims; failing loudly beats shipping a mislabelled image.
+    await verifyLoginShot(page, base, path.join(dir, "01-login.png"));
+
     let authed = false;
     if (password) {
       authed = await signIn(page, base, password);
@@ -228,28 +266,8 @@ async function main() {
       );
     }
 
-    for (const screen of SCREENS) {
-      if (screen.auth && !authed) {
-        console.log(`  skip ${screen.slug} (needs a session)`);
-        continue;
-      }
-
-      let route = screen.route;
-      if (route === null) {
-        route = await firstTripRoute(page, base);
-        if (!route) {
-          console.log(`  skip ${screen.slug} (no trip visible for this account)`);
-          continue;
-        }
-      }
-
-      const file = path.join(dir, `${screen.slug}.png`);
-      await capture(page, base + route, file, device);
-
-      const kb = Math.round(fs.statSync(file).size / 1024);
-      written.push({ device: key, slug: screen.slug, file, kb });
-      console.log(`  ✓ ${screen.slug}  ${device.expect.width}x${device.expect.height}  ${kb}KB`);
-    }
+    // Authenticated pass.
+    await capturePass(true);
 
     await context.close();
     console.log("");
@@ -324,6 +342,29 @@ async function firstTripRoute(page, base) {
   });
   if (route) return route;
   return null;
+}
+
+/*
+ * Guard against the mislabelling bug that produced this fix.
+ *
+ * `/login` redirects to `/` when a session already exists, so a "Sign in"
+ * screenshot taken with a live session is really the dashboard. Checking where
+ * the public pass actually landed is the direct test: if it is not /login, the
+ * image is mislabelled.
+ */
+async function verifyLoginShot(page, base, loginFile) {
+  const landed = page.url().split("?")[0];
+  const expected = new URL("/login", base).href.split("?")[0];
+  if (landed !== expected) {
+    throw new Error(
+      `the public /login shot did not land on /login (landed on ${landed}). ` +
+        `A signed-in session redirects /login to /, which produces a second ` +
+        `copy of the dashboard labelled "Sign in".`
+    );
+  }
+  if (!fs.existsSync(loginFile)) {
+    throw new Error(`expected a login screenshot at ${loginFile}, but it is missing.`);
+  }
 }
 
 /*

@@ -472,7 +472,7 @@ export function ShareDialog({
                   onClick={createLink}
                   disabled={creating}
                   title="Create a new read-only share link"
-                  className="h-11 w-full bg-emerald-600 font-semibold text-emerald-50 hover:bg-emerald-500 focus-ring sm:h-9"
+                  className="h-11 w-full bg-emerald-500 font-semibold text-emerald-950 hover:bg-emerald-400 focus-ring sm:h-9"
                 >
                   {creating ? (
                     <>
