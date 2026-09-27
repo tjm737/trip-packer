@@ -121,3 +121,43 @@ Not blockers, but worth knowing:
   `docs/live-activities-feasibility.md`. The paid account is required for
   submission anyway, so that decision is now made by submitting.
 - The app reads no device location, so no location usage string is needed.
+
+---
+
+## Keeping the demo password stable across deploys
+
+`deploy/update.sh` re-seeds the review account on every deploy, and
+`scripts/seed-demo.cjs` resets the credential each time it runs — it has to, or
+the password it prints would not be the password that works. The consequence:
+
+**Without configuration, every deploy silently rotates the demo password**, and
+App Store Connect keeps handing the reviewer the old value. The failure only
+shows up as "the reviewer cannot sign in", with nothing local pointing at why.
+
+Set it once on the server, outside the repo so it survives `git reset`:
+
+```bash
+sudo -S -p '' mkdir -p /etc/trip-packer
+printf '%s' 'the-password' | sudo -S -p '' tee /etc/trip-packer/review-password >/dev/null
+sudo -S -p '' chown root:root /etc/trip-packer/review-password
+sudo -S -p '' chmod 600 /etc/trip-packer/review-password
+```
+
+Then paste that same value into App Store Connect → App Review Information →
+Password. Deploys now apply it unchanged, and `update.sh` reports
+`password applied from /etc/trip-packer/review-password`.
+
+If the file is missing, `update.sh` warns and the seeder generates a new
+password — the old behaviour, but visible instead of silent.
+
+Resolution order, highest first:
+
+1. `--password` argument (manual runs only; never used by `update.sh`, because
+   argv is readable by every user on the box via the process table)
+2. `TRIP_PACKER_DEMO_PASSWORD`
+3. `/etc/trip-packer/review-password` (override path with `DEMO_PASSWORD_FILE`)
+4. `REVIEW_PASSWORD` environment variable
+5. Generated and printed
+
+To change the password: update the file, then deploy. Both sides — the file and
+App Store Connect — must be updated together, or the reviewer gets a 401.

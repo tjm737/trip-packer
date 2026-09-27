@@ -49,6 +49,29 @@ DOMAIN="${DOMAIN:-trips.planetracker.app}"
 BASE_URL="${BASE_URL:-http://127.0.0.1:${PORT}}"
 SERVICE_USER="${SERVICE_USER:-${APP_NAME}}"
 
+# The review account's password.
+#
+# seed-demo.cjs resets the password on every run (it must, so the value it
+# prints is the value that works), which means deploying without a password
+# here silently rotates the credential out from under the copy already saved
+# in App Store Connect -- and the app then rejects Apple's reviewer.
+#
+# So the password is supplied from a file OUTSIDE the repo, which survives
+# `git reset`/`git clean` and is not world-readable:
+#
+#   printf '%s' 'the-password' > /etc/trip-packer/review-password
+#   chown root:root /etc/trip-packer/review-password && chmod 600 ...
+#
+# Absent file => warn and let the seeder generate one, which is the old
+# behaviour but now visible rather than silent.
+DEMO_PASSWORD_FILE="${DEMO_PASSWORD_FILE:-/etc/trip-packer/review-password}"
+DEMO_PASSWORD=""
+if [[ -r "${DEMO_PASSWORD_FILE}" ]]; then
+  DEMO_PASSWORD="$(tr -d '\r\n' < "${DEMO_PASSWORD_FILE}")"
+elif [[ -n "${REVIEW_PASSWORD:-}" ]]; then
+  DEMO_PASSWORD="${REVIEW_PASSWORD}"
+fi
+
 # Route checks. The status is what matters; the canary is /api/state.
 CHECK_PATHS=("/login" "/")
 # /api/state must NOT be 200 for an anonymous request. 200 means per-user
@@ -259,16 +282,36 @@ ok "listening on :${PORT}"
 # failed re-seed leaves a working app with a stale demo, which is strictly
 # better than refusing to deploy.
 #
-# The password is deliberately NOT rotated here. App Store Connect holds the
-# password you entered in the review notes, and rotating it on deploy would
-# silently invalidate that. Re-run `npm run seed-demo -- --password '...'` by
-# hand if you want to change it, and update the notes.
+# The password comes from DEMO_PASSWORD_FILE (see the top of this script).
+# seed-demo.cjs resets the credential on every run, so on a machine where that
+# file is absent each deploy rotates it and invalidates whatever is saved in
+# App Store Connect. With the file present the value is stable, and the copy in
+# the review notes keeps working.
 step "Re-seeding the review account"
 
 if [[ -f "${APP_DIR}/scripts/seed-demo.cjs" ]]; then
-  if runuser -u "${SERVICE_USER}" -- env TRIP_PACKER_DB="${APP_DIR}/data/trip-packer.db" \
+  # Pass the password through the environment, never argv: an argument is
+  # visible to every user on the box via the process table.
+  #
+  # When the file is missing we deliberately do NOT invent one. The seeder
+  # would generate and print a fresh value that nobody reads, App Store
+  # Connect would still hold the old one, and the failure would surface as
+  # "the reviewer cannot sign in" -- with no local signal saying why. Better
+  # to say so here.
+  if [[ -z "${DEMO_PASSWORD}" ]]; then
+    warn "no review password configured (${DEMO_PASSWORD_FILE} missing)"
+    info "the seeder will generate a NEW one, which will NOT match App Store Connect"
+    info "fix: printf '%s' 'the-password' > ${DEMO_PASSWORD_FILE} && chmod 600 ${DEMO_PASSWORD_FILE}"
+  fi
+
+  if runuser -u "${SERVICE_USER}" -- env \
+       TRIP_PACKER_DB="${APP_DIR}/data/trip-packer.db" \
+       TRIP_PACKER_DEMO_PASSWORD="${DEMO_PASSWORD}" \
        bash -lc "cd '${APP_DIR}' && npm run --silent seed-demo" >/tmp/seed-demo.log 2>&1; then
     ok "review account re-seeded"
+    if [[ -n "${DEMO_PASSWORD}" ]]; then
+      ok "password applied from ${DEMO_PASSWORD_FILE} (unchanged in App Store Connect)"
+    fi
     # Print only the content summary -- never the password, which would land in
     # the deploy log and in journalctl.
     #
