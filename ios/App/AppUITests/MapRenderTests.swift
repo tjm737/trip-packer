@@ -37,21 +37,20 @@ final class MapRenderTests: XCTestCase {
             "no WKWebView appeared -- the shell did not load"
         )
 
-        // 2. Open a trip. "Lisbon Long Weekend" is the trip the demo fixture
-        //    actually seeds (src/lib/demoFixture.ts). This previously looked for
-        //    "Iceland", which only exists as landing-page marketing copy -- so
-        //    the test could never pass against a real seeded account.
-        var trip = webView.buttons.matching(
-            NSPredicate(format: "label CONTAINS[c] %@", "Lisbon")
+        // 2. Open a trip. The selector is "Open ..." because TripCard renders
+        //    title={`Open ${trip.name}`} (SidebarContent.tsx) -- a label every
+        //    trip card carries and no other control does. Deliberately not a
+        //    named trip: this runs against the live deployment, so the WebView
+        //    holds whichever session is already signed in -- on a dev machine
+        //    the developer's own account, not the App Review demo account whose
+        //    seeded trips do not exist there. Any trip exercises the map.
+        let trip = webView.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Open ")
         ).firstMatch
-        if !trip.waitForExistence(timeout: 15) {
-            // Fall back to the other seeded trip, so a fixture rename fails with
-            // a clear message here rather than a confusing one further down.
-            trip = webView.buttons.matching(
-                NSPredicate(format: "label CONTAINS[c] %@", "Chicago")
-            ).firstMatch
-        }
-        XCTAssertTrue(trip.waitForExistence(timeout: 30), "no seeded trip card found (expected Lisbon or Chicago)")
+        XCTAssertTrue(
+            trip.waitForExistence(timeout: 30),
+            "no trip card found (looked for a button labelled \"Open ...\") -- needs a signed-in session with at least one trip"
+        )
         trip.tap()
 
         // 3. Tap the Map tab, so we do not silently pass on another tab.

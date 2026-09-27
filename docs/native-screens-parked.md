@@ -12,7 +12,10 @@ They behaved worse than the JS equivalents they replaced:
   detach the native screen, so the previous tab's content stayed on screen over
   the tab the user switched to. This was never verified on device — the UI test
   covering it (`ios/App/AppUITests/NativeTabTeardownTests.swift`) was written
-  but never passed, because each run failed on a bug in the test itself.
+  but never passed, because each run failed on a bug in the test itself. With
+  the feature off, that test now **skips** (`XCTSkip`) rather than failing: it
+  watches a probe that only mounts when a native screen is presented, so it
+  cannot pass while the feature is disabled.
 - **The embedded interaction was not intuitive.** The screen was drawn into the
   page region rather than presented modally, and the exit was the web tab bar
   rather than a Done button, which read as an uncaptured tap.
@@ -69,3 +72,8 @@ proves nothing.
 The other native tests (`native-tab-presentation`, `native-presentation-geometry`,
 `native-presentation-probe`, `itinerary-native-parity`) cover pure functions that
 are independent of the switch and still pass.
+
+`ios/App/AppUITests/NativeTabTeardownTests.swift` **skips** while the feature is
+off. It is a device-level test that drives the real app through sign-in and a
+tab switch, so it cannot be run here; it reports as skipped rather than failed so
+a genuine regression is still visible.

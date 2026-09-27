@@ -53,6 +53,30 @@ final class NativeTabTeardownTests: XCTestCase {
      */
     func testLeavingItineraryTabClosesNativeScreen() throws {
         /*
+         * SKIPPED -- native screens are disabled, so this cannot pass.
+         *
+         * The test watches an accessibility probe that only mounts when a native
+         * screen is presented, and it is behind NativeItineraryAutoOpen's
+         * `if (!isNative) return null` gate. `nativeScreensAvailable()` is false
+         * while NATIVE_SCREENS_ENABLED is false, so no probe ever appears and the
+         * test fails on "the presentation probe never appeared" -- an assertion
+         * that is now proving the feature is off rather than testing teardown.
+         *
+         * A `throw XCTSkip` rather than an XCTFail or a commented-out body: it
+         * reports as a skip, so it is visibly intentional rather than a red test
+         * that trains people to ignore failures. The body is left intact so that
+         * re-enabling the feature is a one-line delete.
+         *
+         * The teardown path was NEVER verified -- no run of this test has passed
+         * since it was written (each earlier attempt failed on a bug in the test
+         * itself). Fix that before re-enabling, per docs/native-screens-parked.md.
+         */
+        throw XCTSkip(
+            "Native screens are disabled (NATIVE_SCREENS_ENABLED = false), so the "
+            + "presentation probe never mounts. See docs/native-screens-parked.md."
+        )
+
+        /*
          * No launch argument resets the close counter, and none is needed: each
          * launch is a fresh WebView with a fresh module instance, so the counter
          * starts at 0 by construction. Passing a flag the app does not read
@@ -67,11 +91,46 @@ final class NativeTabTeardownTests: XCTestCase {
             "no WKWebView appeared -- the shell did not load"
         )
 
-        // Open the demo trip. The fixture is the only trip guaranteed to exist.
-        let trip = webView.buttons.matching(
-            NSPredicate(format: "label CONTAINS[c] %@", "Lisbon")
+        /*
+         * Open a trip WITHOUT assuming which account is signed in.
+         *
+         * The selector is "Open ..." because TripCard renders
+         * title={`Open ${trip.name}`} (SidebarContent.tsx) -- a label every trip
+         * card carries and no other control does. Earlier revisions matched on
+         * card body text ("Packing"/"PACKED"/"ITEMS"), which also matches the
+         * summary stat cards and the New Trip button; that loose predicate is
+         * what let a blind tap navigate off the list and kill the app, leaving
+         * a later assertion to fail with a misleading "probe never appeared".
+         *
+         * Deliberately not a named trip: this runs against the live deployment,
+         * so the WebView holds whichever session is already signed in -- on a
+         * dev machine, the developer's own account, not the App Review demo
+         * account whose seeded trips ("Lisbon", "Chicago") do not exist there.
+         * Teardown-on-tab-exit is identical for every trip, so any trip will do.
+         */
+        var trip = webView.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "Open ")
         ).firstMatch
-        XCTAssertTrue(trip.waitForExistence(timeout: 30), "Lisbon trip card not found")
+        if !trip.waitForExistence(timeout: 20) {
+            // The sidebar may be collapsed to the icon rail at this width, with
+            // trip cards not mounted. Open it, then retry once.
+            let home = webView.buttons.matching(
+                NSPredicate(format: "label CONTAINS[c] %@", "TripPlanner home")
+            ).firstMatch
+            if home.exists { home.tap() }
+            trip = webView.buttons.matching(
+                NSPredicate(format: "label BEGINSWITH %@", "Open ")
+            ).firstMatch
+        }
+        XCTAssertTrue(
+            trip.waitForExistence(timeout: 30),
+            """
+            no trip card found (looked for a button labelled "Open ..."). This \
+            test needs a signed-in session with at least one trip; it does NOT \
+            need a specific trip, so this means the account has no trips or the \
+            sidebar never rendered -- not that a fixture is missing.
+            """
+        )
         trip.tap()
 
         // Baseline. The probe must exist and the shell must be iOS, or every
@@ -133,7 +192,6 @@ final class NativeTabTeardownTests: XCTestCase {
             (f["closed"] ?? 0) > 0
         }
 
-        let final = parse(probe.label)
         print("NATIVE_RESULT afterLeavingTab \(probe.label)")
 
         XCTAssertTrue(
