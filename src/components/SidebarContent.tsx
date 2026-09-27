@@ -26,6 +26,13 @@ import { PrintButton } from "@/components/PrintButton";
 import { CalendarExportButton } from "@/components/CalendarExportButton";
 import { toast } from "@/components/ui/toast";
 import { activeTripIdFromPath } from "@/lib/activeTrip";
+import {
+  DEFAULT_EXPANDED,
+  readExpanded,
+  writeExpanded,
+  toggleSection,
+  type SectionKey,
+} from "@/lib/sidebarSections";
 import { usePathname } from "next/navigation";
 import {
   Plus,
@@ -45,6 +52,41 @@ import {
   LogOut,
   PlaneTakeoff,
 } from "lucide-react";
+
+/*
+ * Shared collapse state for the sidebar sections.
+ *
+ * A hook rather than per-component `useState` because four sections in two
+ * components need the same persisted value, and two copies would drift: collapse
+ * Accounts, reload, and the other component's copy would still say expanded.
+ *
+ * Reads in an effect, not during render. localStorage does not exist on the
+ * server, so reading lazily would make the first client render disagree with the
+ * server HTML -- the same hydration hazard the trip list below already guards
+ * against with `hydrated`. Defaults are used until the effect runs, which is why
+ * the defaults must match today's visible behaviour.
+ */
+function useSectionCollapse() {
+  const [expanded, setExpandedState] = useState<Record<SectionKey, boolean>>(
+    DEFAULT_EXPANDED
+  );
+
+  useEffect(() => {
+    setExpandedState(readExpanded());
+  }, []);
+
+  const toggle = (key: SectionKey) => {
+    setExpandedState((prev) => {
+      const next = toggleSection(prev, key);
+      // Persist inside the updater so the write always sees the value that was
+      // actually applied, rather than a stale closure over the previous one.
+      writeExpanded(next);
+      return next;
+    });
+  };
+
+  return { expanded, toggle };
+}
 
 function UserAvatar({ user, size = "md" }: { user: User; size?: "sm" | "md" | "lg" }) {
   const initials = user.name
@@ -177,6 +219,7 @@ function UserSwitcher() {
    * footer entry point and its own copy of the dialog.
    */
   const [createOpen, setCreateOpen] = useState(false);
+  const { expanded, toggle: toggleSectionKey } = useSectionCollapse();
 
   if (!activeUser) return null;
 
@@ -209,15 +252,40 @@ function UserSwitcher() {
       {/* ---------------------------------------------------------- */}
       {/* Accounts — owner-gated                                      */}
       {/* ---------------------------------------------------------- */}
-      <div className="mb-2 flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <UserCog className="h-3.5 w-3.5 text-zinc-500" />
-          <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500">
-            Accounts
-          </span>
-        </div>
+      {/*
+        * Heading is a button so the whole row is the tap target, and it reuses
+        * the exact chevron/count idiom of Upcoming and Archived below -- a
+        * sidebar with two different collapse affordances would read as broken
+        * rather than as one control applied consistently.
+        *
+        * The count stays visible when collapsed; that is the point of the
+        * control. Collapsing Accounts to reclaim vertical space should not also
+        * hide how many there are.
+        */}
+      <button
+        onClick={() => toggleSectionKey("accounts")}
+        className="mb-2 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500 transition-colors hover:text-zinc-300 focus-ring"
+        title={expanded.accounts ? "Collapse accounts" : "Expand accounts"}
+        aria-expanded={expanded.accounts}
+      >
+        {expanded.accounts ? (
+          <ChevronDown className="h-3 w-3 flex-shrink-0" />
+        ) : (
+          <ChevronRight className="h-3 w-3 flex-shrink-0" />
+        )}
+        <UserCog className="h-3.5 w-3.5" />
+        <span className="flex-1 text-left">Accounts</span>
         <span className="text-[10px] text-zinc-600 tnum">{accounts.length}</span>
-      </div>
+      </button>
+
+      <AnimatePresence initial={false}>
+        {expanded.accounts && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
       <p className="mb-1.5 text-[11px] text-zinc-500">Can sign in to TripPlanner.</p>
 
       <div className="flex flex-col gap-0.5">
@@ -470,6 +538,9 @@ function UserSwitcher() {
           </p>
         )}
       </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <CreateAccountDialog
         open={createOpen}
@@ -505,15 +576,37 @@ function UserSwitcher() {
         * (Per-trip collaboration is the thing that IS open to non-owners, and
         * it belongs on trip_members, not on the global users table.)
         */}
-      <div className="mb-2 mt-4 flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <Users className="h-3.5 w-3.5 text-zinc-500" />
-          <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500">
-            Companions
-          </span>
-        </div>
+      {/*
+        * Mirrors the Accounts heading above. Note the section is NOT hidden when
+        * the companion list is empty -- the count and the "No companions yet"
+        * row both still render, because the empty state is how a user discovers
+        * the feature. Collapsing it is the user's choice, not a side effect of
+        * having none.
+        */}
+      <button
+        onClick={() => toggleSectionKey("companions")}
+        className="mb-2 mt-4 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500 transition-colors hover:text-zinc-300 focus-ring"
+        title={expanded.companions ? "Collapse companions" : "Expand companions"}
+        aria-expanded={expanded.companions}
+      >
+        {expanded.companions ? (
+          <ChevronDown className="h-3 w-3 flex-shrink-0" />
+        ) : (
+          <ChevronRight className="h-3 w-3 flex-shrink-0" />
+        )}
+        <Users className="h-3.5 w-3.5" />
+        <span className="flex-1 text-left">Companions</span>
         <span className="text-[10px] text-zinc-600 tnum">{companions.length}</span>
-      </div>
+      </button>
+
+      <AnimatePresence initial={false}>
+        {expanded.companions && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
       <p className="mb-1.5 text-[11px] text-zinc-500">
         Appear on trips but cannot sign in.
       </p>
@@ -736,6 +829,9 @@ function UserSwitcher() {
           </p>
         )}
       </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-[320px] bg-[var(--surface-2)] border-zinc-700">
@@ -928,7 +1024,7 @@ function TripActionsSection() {
 
 function TripList() {
   const { state, trip, helpers, hydrated } = useApp();
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({ upcoming: true, archived: false });
+  const { expanded, toggle: toggleSectionKey } = useSectionCollapse();
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   // Framer Motion writes inline styles during SSR (opacity:0;height:0px from
@@ -955,16 +1051,12 @@ function TripList() {
         .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
     : [];
 
-  const toggleSection = (key: string) => {
-    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
-
   return (
     <div className="flex-1 overflow-y-auto px-2 py-2 scrollbar-thin">
       {/* Upcoming */}
       <div>
         <button
-          onClick={() => toggleSection("upcoming")}
+          onClick={() => toggleSectionKey("upcoming")}
           className="flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500 transition-colors hover:text-zinc-300 focus-ring"
           title={expanded.upcoming ? "Collapse" : "Expand"}
         >
@@ -1009,7 +1101,7 @@ function TripList() {
       {archivedTrips.length > 0 && (
         <div className="mt-3 border-t border-white/8 pt-2">
           <button
-            onClick={() => toggleSection("archived")}
+            onClick={() => toggleSectionKey("archived")}
             className="flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500 transition-colors hover:text-zinc-300 focus-ring"
             title={expanded.archived ? "Collapse" : "Expand"}
           >
