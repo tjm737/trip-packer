@@ -56,17 +56,28 @@ export function MobileSidebar({ onNewTrip }: { onNewTrip?: () => void }) {
             </button>
           </div>
           {/*
-            Tapping a trip closes the drawer so the new page is visible. Controls
-            that open something in place opt out with `data-keep-drawer-open` —
-            otherwise this handler would close the drawer underneath the thing
-            they just opened, unmounting it along with the sidebar body.
+            Tapping anything that navigates closes the drawer so the new page is
+            visible. Controls that open something in place opt out with
+            `data-keep-drawer-open` — otherwise this handler would close the
+            drawer underneath the thing they just opened, unmounting it along
+            with the sidebar body.
+
+            Links count as navigating, and they are not buttons: the brand logo
+            and the profile row are `<Link>`s, so matching on `button` alone let
+            them render the destination page underneath a drawer that stayed
+            open. On a phone that reads as the logo doing nothing at all.
+
+            The `popstate` listener above is not a substitute. Next's client-side
+            navigation goes through `history.pushState`, which emits no
+            `popstate`, so a `<Link>` never trips it — only a full document
+            navigation (TripCard's `window.location.href`) does.
           */}
           <div
             className="flex-1 min-h-0 flex flex-col pb-[env(safe-area-inset-bottom)]"
             onClick={(e) => {
               const el = e.target as HTMLElement;
               if (el.closest("[data-keep-drawer-open]")) return;
-              if (el.closest("button")) setOpen(false);
+              if (el.closest("button, a[href]")) setOpen(false);
             }}
           >
             <SidebarBody onNewTrip={onNewTrip} />

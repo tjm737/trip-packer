@@ -103,8 +103,55 @@ async function run() {
       "MobileSidebar no longer honours data-keep-drawer-open"
     );
     h.assert(
-      drawer.includes('el.closest("button")'),
-      "MobileSidebar no longer closes on button taps"
+      drawer.includes('el.closest("button, a[href]")'),
+      "MobileSidebar no longer closes on button/link taps"
+    );
+  });
+
+  await h.test("tap-to-close covers LINKS, not just buttons", () => {
+    /*
+     * The bug this catches: the brand logo and the profile row navigate via
+     * `<Link>` (an `<a>`), and the handler matched on `button` alone. Tapping
+     * the logo changed the route but left the drawer open over the destination
+     * — on a phone, indistinguishable from the logo doing nothing.
+     *
+     * A string match on the old handler would NOT have caught it: the handler
+     * was present and correct-looking the whole time, it just did not cover
+     * the element type the logo happens to be. So this assertion checks the
+     * MATCHER covers anchors.
+     *
+     * `a[href]` rather than bare `a` is deliberate — an anchor with no href is
+     * a JS-only control, not navigation, and should not dismiss the drawer.
+     */
+    const drawer = fs.readFileSync(
+      path.join(__dirname, "..", "src", "components", "MobileSidebar.tsx"),
+      "utf8"
+    );
+    const m = drawer.match(/el\.closest\(\s*"([^"]+)"\s*\)\s*\)\s*setOpen\(false\)/);
+    h.assert(m !== null, "could not find the drawer's close-on-tap matcher");
+    const matcher = m[1];
+    h.assert(
+      matcher.includes("a[href]"),
+      `drawer matcher "${matcher}" does not cover links, so <Link> navigation ` +
+        `(the brand logo, the profile row) leaves the drawer open over the page`
+    );
+  });
+
+  await h.test("the brand logo links home and is inside the drawer body", () => {
+    /*
+     * The logo must send the user to "/" from any screen. It is rendered by
+     * SidebarBody, which both the desktop aside and the mobile drawer use, so
+     * a single Link covers both. This pins the href so a refactor cannot
+     * quietly point the wordmark somewhere else.
+     */
+    const source = fs.readFileSync(SIDEBAR, "utf8");
+    const brand = source.match(
+      /aria-label="TripPlanner home"[\s\S]{0,600}?<\/Link>/
+    );
+    h.assert(brand !== null, "could not find the TripPlanner home Link");
+    h.assert(
+      /href="\/"/.test(source.slice(Math.max(0, brand.index - 400), brand.index)),
+      "the brand logo does not link to /"
     );
   });
 
