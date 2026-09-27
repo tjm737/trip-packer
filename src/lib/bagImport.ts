@@ -13,7 +13,7 @@
  * would silently share bag rows. Every import therefore mints new ids.
  */
 
-import type { AppState, Bag, BagKind, PackingItem } from "./types";
+import type { AppState, Bag, PackingItem } from "./types";
 
 /** A trip a bag can be imported from: one the user owns or has access to. */
 export type BagSourceTrip = {
@@ -22,14 +22,16 @@ export type BagSourceTrip = {
   bagCount: number;
 };
 
-export const BAG_KIND_LABELS: Record<BagKind, string> = {
-  checked: "Checked",
-  carry_on: "Carry-on",
-  personal: "Personal item",
-  other: "Other",
-};
-
-export const BAG_KINDS: BagKind[] = ["carry_on", "checked", "personal", "other"];
+/*
+ * Re-exported from the canonical source rather than declared again here.
+ *
+ * These used to be a second copy of the same Record, and a third (with wrong
+ * values) lived in TripBags.tsx until the "carry-on"/"carry_on" mismatch was
+ * found by the bag claim export. Two copies that agree today are still two
+ * places to change in 0.8; @/lib/types is the one that also matches the
+ * bags.kind CHECK constraint in db.ts.
+ */
+export { BAG_KIND_LABELS, BAG_KINDS } from "./types";
 
 /** Nothing to import, as a named value rather than a fresh {} each render. */
 export const NO_IMPORT = { tripId: null, itemIds: null } as const;

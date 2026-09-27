@@ -799,6 +799,93 @@
   break-inside: avoid;
 }
 
+/*
+ * Bag claim sheet: the bag's identifying facts, and the contents table.
+ *
+ * A table rather than a list, because a claim form is read by comparing rows
+ * against a physical bag and the Qty and Value columns have to line up on
+ * paper. It is also the layout airline forms expect.
+ */
+.print-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem 1.5rem;
+  margin: 0 0 0.75rem;
+}
+
+.print-facts > div {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.print-facts dt {
+  color: #555555;
+  min-width: 5.5rem;
+}
+
+.print-facts dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.print-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1rem;
+}
+
+.print-table th,
+.print-table td {
+  border-bottom: 1px solid #dddddd;
+  padding: 0.3rem 0.4rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.print-table th {
+  border-bottom: 1.5px solid #111111;
+  color: #555555;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/*
+ * Qty stays narrow and centred so the column does not steal width from the item
+ * names, which are the part a person actually reads.
+ */
+.print-col-qty {
+  width: 3.5rem;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/*
+ * The Value column is sized to be writable by hand: a ruled blank wide enough
+ * for a figure plus a currency symbol, since the app stores no prices.
+ */
+.print-col-value {
+  width: 6.5rem;
+  text-align: right;
+}
+
+.print-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.print-footnote {
+  margin-top: 1.5rem;
+  border-top: 1px solid #dddddd;
+  padding-top: 0.6rem;
+  color: #555555;
+  font-size: 10px;
+}
+
+.print-footnote p {
+  margin: 0;
+}
+
 @media print {
   /*
    * Hide everything that is app chrome rather than document. `print:hidden` on

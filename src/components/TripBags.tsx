@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useApp } from "@/lib/AppContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,25 +23,50 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Check, Luggage, Pencil, Plus, Trash2 } from "lucide-react";
+import { Check, FileText, Luggage, Pencil, Plus, Trash2 } from "lucide-react";
+import { BAG_KIND_LABELS, type BagKind } from "@/lib/types";
 
-/**
- * Bag kinds, with the weight limit an airline claim would care about.
+/*
+ * Presentation hint per bag kind, keyed by the canonical BagKind.
  *
- * Kept here rather than in types.ts because the limits are a presentation
- * affordance -- they are shown next to the kind and never enforced. A hard
- * limit would be wrong: cabin allowances vary by carrier and fare, so a number
- * that blocks the user would be confidently incorrect more often than helpful.
+ * The VALUES and LABELS come from @/lib/types, not from a local list. They used
+ * to be duplicated here, and the copy had drifted: this file wrote "carry-on"
+ * while types.ts, the BagKind union and the bags.kind CHECK constraint all use
+ * "carry_on". SQLite rejected the hyphenated value outright, so choosing
+ * Carry-on failed with a constraint error while every other kind saved fine.
+ *
+ * Only the hint belongs here: cabin allowances vary by carrier and fare, so a
+ * number that blocks the user would be confidently incorrect more often than
+ * helpful. It is shown next to the kind and never enforced.
  */
-const BAG_KINDS = [
-  { value: "carry-on", label: "Carry-on", hint: "Typically 22 x 14 x 9 in" },
-  { value: "checked", label: "Checked", hint: "Typically 50 lb / 23 kg" },
-  { value: "personal", label: "Personal item", hint: "Fits under the seat" },
-  { value: "other", label: "Other", hint: "Gear, stroller, sports bag" },
-] as const;
+const BAG_KIND_HINTS: Record<BagKind, string> = {
+  carry_on: "Typically 22 x 14 x 9 in",
+  checked: "Typically 50 lb / 23 kg",
+  personal: "Fits under the seat",
+  other: "Gear, stroller, sports bag",
+};
 
+/** Canonical values, in the order the picker shows them. */
+const BAG_KIND_ORDER: readonly BagKind[] = [
+  "carry_on",
+  "checked",
+  "personal",
+  "other",
+];
+
+const BAG_KIND_OPTIONS = BAG_KIND_ORDER.map((value) => ({
+  value,
+  label: BAG_KIND_LABELS[value],
+  hint: BAG_KIND_HINTS[value],
+}));
+
+/*
+ * Falls back to the raw stored value rather than a generic "Other". An
+ * unrecognised kind is a bug worth seeing, not one worth hiding behind a label
+ * that is also what a legitimate 'other' bag shows.
+ */
 function kindLabel(kind: string): string {
-  return BAG_KINDS.find((k) => k.value === kind)?.label ?? "Other";
+  return BAG_KIND_LABELS[kind as BagKind] ?? kind;
 }
 
 /**
@@ -59,7 +85,11 @@ export function TripBags({ tripId }: { tripId: string }) {
 
   const [adding, setAdding] = useState(false);
   const [draftName, setDraftName] = useState("");
-  const [draftKind, setDraftKind] = useState<string>("carry-on");
+  /*
+   * Typed as BagKind, not string, so a typo here is a compile error rather than
+   * a CHECK constraint failure the user discovers on save.
+   */
+  const [draftKind, setDraftKind] = useState<BagKind>("carry_on");
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
@@ -80,9 +110,14 @@ export function TripBags({ tripId }: { tripId: string }) {
 
   const submitNew = async () => {
     if (!draftName.trim()) return;
-    await bagActions.create(tripId, draftName.trim(), draftKind as never);
+    /*
+     * No cast: draftKind is a BagKind, so this is checked against the same union
+     * the database's CHECK constraint enforces. The previous `as never` silenced
+     * the mismatch instead of surfacing it.
+     */
+    await bagActions.create(tripId, draftName.trim(), draftKind);
     setDraftName("");
-    setDraftKind("carry-on");
+    setDraftKind("carry_on");
     setAdding(false);
   };
 
@@ -145,6 +180,24 @@ export function TripBags({ tripId }: { tripId: string }) {
                   <Pencil className="w-3 h-3" />
                 </Button>
               </Tooltip>
+              {/*
+                Opens the printable claim sheet in a new tab, so the packing list
+                stays where it was while the sheet is reviewed or printed. Unlike
+                Rename and Delete this does not mutate anything, hence the
+                navigation rather than an onClick -- it is a link, and it behaves
+                like one (middle-click, open in new window, copy the address).
+              */}
+              <Tooltip label="Baggage claim form" side="top">
+                <Link
+                  href={`/trips/${encodeURIComponent(tripId)}/bags/${encodeURIComponent(b.id)}/claim`}
+                  target="_blank"
+                  rel="noopener"
+                  aria-label={`Open the baggage claim form for ${b.name}`}
+                  className="inline-flex items-center justify-center w-6 h-6 rounded text-zinc-500 hover:text-zinc-300 focus-ring"
+                >
+                  <FileText className="w-3 h-3" />
+                </Link>
+              </Tooltip>
               <Tooltip
                 label={
                   count > 0
@@ -194,12 +247,15 @@ export function TripBags({ tripId }: { tripId: string }) {
             </div>
             <div className="space-y-2">
               <Label className="text-zinc-300">Type</Label>
-              <Select value={draftKind} onValueChange={(v) => setDraftKind(v ?? "carry-on")}>
+              <Select
+                value={draftKind}
+                onValueChange={(v) => setDraftKind((v as BagKind) ?? "carry_on")}
+              >
                 <SelectTrigger className="bg-zinc-800 border-zinc-700 text-white">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-zinc-900 border-zinc-700">
-                  {BAG_KINDS.map((k) => (
+                  {BAG_KIND_OPTIONS.map((k) => (
                     <SelectItem key={k.value} value={k.value} className="text-zinc-200">
                       <span className="flex items-center gap-2">
                         {k.label}
