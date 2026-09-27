@@ -66,7 +66,7 @@ import { TripBags } from "@/components/TripBags";
 import { TripMap } from "@/components/TripMap";
 import { Tabs } from "@/components/Tabs";
 import { PackingSuggestions } from "@/components/PackingSuggestions";
-import { NativePackingButton } from "@/components/NativePackingButton";
+import { NativePackingAutoOpen } from "@/components/NativePackingAutoOpen";
 import { ShareButton } from "@/components/ShareButton";
 import { ShareDialog } from "@/components/ShareDialog";
 import { observeEditRequests } from "@/lib/editRequest";
@@ -1170,12 +1170,12 @@ export default function TripDetail() {
                       month={tripStartMonth(tripInfo.startDate) ?? undefined}
                     />
 
-                    {/* Native SwiftUI list. Renders only inside the iOS app --
-                        on the web the component returns null, so this is inert
-                        in a browser rather than a button that errors. Sits
-                        beside the web list it mirrors, since the two show the
-                        same items and are alternatives, not a hierarchy. */}
-                    <NativePackingButton tripId={tripId} />
+                    {/* Native SwiftUI list -- auto-presents on entering this tab.
+                        Renders only inside the iOS app. It is an OVERLAY, not a
+                        replacement: the web list below stays mounted and is what
+                        the user returns to after dismissing it, and it is the
+                        whole feature on the web and Android. */}
+                    <NativePackingAutoOpen tripId={tripId} />
 
                     {categories.length === 0 ? (
                       <div className="text-center py-16">
