@@ -558,17 +558,29 @@ struct SwipeRow<Content: View>: View {
     private let commitThreshold: CGFloat = 44
 
     var body: some View {
-        ZStack(alignment: .leading) {
+        ZStack(alignment: .trailing) {
             // The actions sit BEHIND the row and are uncovered by it moving,
             // rather than being laid out beside it. A `HStack` would push the
             // row narrower as the buttons appear, which looks like the list is
             // being squashed.
+            //
+            // Alignment is `.trailing`, NOT `.leading`: the row slides LEFT, so
+            // it uncovers its right-hand side. Leading alignment drew the
+            // buttons at the left edge, where the row still covered them -- the
+            // swipe moved and revealed nothing, which reads as "no delete
+            // button". The actions must live where the gap appears.
             actions
 
             content
                 .background(TPTheme.surface1)
                 .offset(x: offset)
-                .gesture(dragGesture)
+                // highPriorityGesture, NOT gesture. The row lives inside a
+                // ScrollView, whose own pan is a competing drag; a plain
+                // `.gesture()` loses that contest and the row never moves, so
+                // the swipe appears to do nothing at all. Taking priority lets
+                // the row win, and the mostly-vertical bail-out in the gesture
+                // (see `dragGesture`) hands scrolling back to the ScrollView.
+                .highPriorityGesture(dragGesture)
                 // A tap anywhere on an open row closes it. Placed on the row
                 // rather than the container so the revealed buttons below stay
                 // tappable.
@@ -622,8 +634,9 @@ struct SwipeRow<Content: View>: View {
                 }
             )
         }
-        // Only the buttons actually uncovered are visible, so the leading half
-        // is clipped rather than peeking.
+        // Hidden while the row is closed, so the buttons cannot bleed through
+        // the row's own background at rest. Once the row slides, the strip it
+        // vacates shows whatever the trace order puts underneath -- the actions.
         .opacity(offset < 0 ? 1 : 0)
     }
 
