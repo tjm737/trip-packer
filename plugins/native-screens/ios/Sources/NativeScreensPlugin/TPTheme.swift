@@ -27,6 +27,19 @@ enum TPTheme {
     static let surface3 = Color(hex: 0x383838)
     static let primary = Color(hex: 0x406655)
 
+    /// Tailwind `emerald-400` — the green the WEB app already uses for its AI
+    /// affordances (see `PackingSuggestions.tsx`, which tints its spinner
+    /// `text-emerald-400`). Reusing it here keeps the native AI button anchored
+    /// to an existing brand colour instead of inventing a second green.
+    ///
+    /// Distinct from `primary` (0x406655), which is a dark forest green chosen
+    /// for tinting and large fills. Both are legible in their intended pairing
+    /// -- white on `primary` measures 6.46:1 and dark-on-`ai` measures 10.30:1
+    /// -- so this is not a contrast decision, it is a hue/brightness one: the
+    /// brighter emerald is what makes a small control read as "the AI action"
+    /// against a dark card, and it matches the accent the web already uses.
+    static let ai = Color(hex: 0x34d399)
+
     /// zinc-400 / zinc-500 / zinc-700 equivalents, for text and hairlines.
     static let textPrimary = Color(hex: 0xfafafa)
     static let textSecondary = Color(hex: 0xa1a1aa)

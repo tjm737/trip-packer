@@ -344,7 +344,11 @@ struct SuggestionsSection: View {
             HStack(spacing: 6) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 12))
-                    .foregroundStyle(TPTheme.textMuted)
+                    // Same accent as the button below, so the header and its
+                    // action read as one AI affordance. Previously both header
+                    // and button were muted grey, which was the reason neither
+                    // stood out.
+                    .foregroundStyle(TPTheme.ai)
                 Text("SUGGESTIONS")
                     .font(.system(size: 10, weight: .semibold))
                     .tracking(0.8)
@@ -353,11 +357,33 @@ struct SuggestionsSection: View {
                 if generating {
                     ProgressView().controlSize(.mini)
                 } else {
-                    Button(generatedOnce ? "Regenerate" : "Suggest") {
+                    // A filled, green, icon+label button -- this is the one
+                    // ACTION in the section, and the web app also pairs the
+                    // label with a Sparkles icon. The icon is what makes it
+                    // read as "this is the AI feature" rather than as a
+                    // generic submit, which the bare word "Suggest" did not.
+                    Button {
                         Task { await generate() }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "wand.and.stars")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text(generatedOnce ? "Regenerate" : "Suggest")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundStyle(TPTheme.surface0)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(TPTheme.ai)
+                        .clipShape(Capsule())
                     }
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(TPTheme.textSecondary)
+                    .buttonStyle(.plain)
+                    // Spoken as one control, and named for what it does rather
+                    // than for the glyph, which VoiceOver would otherwise read
+                    // as "wand and stars".
+                    .accessibilityLabel(
+                        generatedOnce ? "Regenerate suggestions" : "Suggest packing items"
+                    )
                 }
             }
 
