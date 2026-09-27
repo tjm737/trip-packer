@@ -219,11 +219,36 @@ export function PackingSuggestions({
               size="sm"
               disabled={!control.enabled}
               onClick={generate}
-              className="text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50 focus-ring disabled:opacity-50"
+              className={
+                control.enabled
+                  ? // Emerald, not the app's usual primary blue: this is the only
+                    // model-backed control on the page, and the colour is what
+                    // makes it read as a distinct, "smart" affordance rather
+                    // than one more toolbar button.
+                    //
+                    // emerald-500, emphatically NOT emerald-600. This project
+                    // re-points the emerald scale for its dark-first design
+                    // (globals.css @theme), and the custom ramp is much darker
+                    // than stock Tailwind: emerald-600 here is #618c79, and the
+                    // best ratio any text achieves on it is 4.05:1 -- below AA.
+                    // emerald-500 (#739e8b) with emerald-950 text measures
+                    // 5.12:1. Verified against the emitted palette, not assumed:
+                    // the numbers are inverted from stock, so "darken the green,
+                    // lighten the text" is exactly wrong here.
+                    "bg-emerald-500 text-emerald-950 font-semibold shadow-sm hover:bg-emerald-400 focus-ring"
+                  : // Unavailable stays dim and uncoloured on purpose. A bright
+                    // green button that cannot do anything reads as a broken
+                    // control; the grey one plus the hint below reads as a
+                    // feature this device does not have.
+                    "text-zinc-500 focus-ring cursor-not-allowed"
+              }
             >
               {control.generating ? (
                 <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
               ) : (
+                // The sparkle is the AI signal, so it never animates: a
+                // spinning sparkle would say "working" when the button is
+                // actually idle and waiting for a click.
                 <Sparkles className="w-4 h-4 mr-1.5" />
               )}
               {control.label}
