@@ -111,7 +111,13 @@ export function demoTrip(): DemoTrip {
     destination: "Lisbon, Portugal",
     startInDays: 24,
     lengthDays: 4,
-    icon: "plane",
+    /*
+     * An emoji, not a lucide name. Trip icons render as raw text
+     * (`{trip.icon}`), so a name like "plane" shows the literal word in the
+     * sidebar and on the shared page. Every real entry point defaults to "✈️"
+     * — see trips/new/page.tsx, DashboardClient.tsx and itineraryImport.ts.
+     */
+    icon: "✈️",
     notes:
       "Flight lands mid-afternoon. Hotel is a 15-minute walk from Praça do " +
       "Comércio, so no car needed — the tram and the metro cover everything.",
@@ -236,7 +242,7 @@ export function archivedDemoTrip(): DemoTrip {
     destination: "Chicago, IL",
     startInDays: -46,
     lengthDays: 5,
-    icon: "home",
+    icon: "🏠",
     notes: "Thanksgiving with the family. Kept for the packing list.",
     categories: [
       {

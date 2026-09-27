@@ -148,6 +148,31 @@ const RESERVATION_TYPES = [
     }
   });
 
+  await h.test("trip icons are emoji, not lucide names", () => {
+    /*
+     * Trip icons are interpolated as raw text (`{trip.icon}` in
+     * SidebarContent.tsx:913 and SharedTripView.tsx:126), unlike category and
+     * item icons, which are looked up in a name->component map.
+     *
+     * So a lucide name here does not fail to render -- it renders as the
+     * literal word. "plane" and "home" appeared in the sidebar of every
+     * signed-in screen and on the public share page, next to the trip name,
+     * which reads as a broken placeholder to anyone looking at it.
+     *
+     * Real trips are created with an emoji default ("✈️"), so the fixture must
+     * match that contract. Asserting "contains a non-ASCII glyph" is
+     * deliberately loose: any emoji passes, and the only values that fail are
+     * bare identifiers, which are exactly the bug.
+     */
+    for (const trip of [demo.demoTrip(), demo.archivedDemoTrip()]) {
+      h.assert(
+        /[^\x00-\x7F]/.test(trip.icon),
+        `${trip.name} has icon "${trip.icon}" -- an ASCII identifier renders as ` +
+          `that literal word in the sidebar, not as an icon`
+      );
+    }
+  });
+
   await h.test("the fixture is regenerated per call, not frozen at import", () => {
     // If this were a module-level constant the dates would be captured once and
     // drift stale. Calling it twice must produce equal values, and the dates

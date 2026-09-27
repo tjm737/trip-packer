@@ -259,6 +259,7 @@ export function LoginDialog({
                 autoComplete="current-password"
                 disabled={busy}
                 className="h-9 bg-[var(--surface-1)] text-sm"
+                placeholder="Your password"
               />
             </div>
           </div>
