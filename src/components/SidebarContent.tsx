@@ -264,6 +264,7 @@ function UserSwitcher() {
         */}
       <button
         onClick={() => toggleSectionKey("accounts")}
+        data-keep-drawer-open
         className="mb-2 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500 transition-colors hover:text-zinc-300 focus-ring"
         title={expanded.accounts ? "Collapse accounts" : "Expand accounts"}
         aria-expanded={expanded.accounts}
@@ -585,6 +586,7 @@ function UserSwitcher() {
         */}
       <button
         onClick={() => toggleSectionKey("companions")}
+        data-keep-drawer-open
         className="mb-2 mt-4 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500 transition-colors hover:text-zinc-300 focus-ring"
         title={expanded.companions ? "Collapse companions" : "Expand companions"}
         aria-expanded={expanded.companions}
@@ -1057,6 +1059,7 @@ function TripList() {
       <div>
         <button
           onClick={() => toggleSectionKey("upcoming")}
+        data-keep-drawer-open
           className="flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500 transition-colors hover:text-zinc-300 focus-ring"
           title={expanded.upcoming ? "Collapse" : "Expand"}
         >
@@ -1102,6 +1105,7 @@ function TripList() {
         <div className="mt-3 border-t border-white/8 pt-2">
           <button
             onClick={() => toggleSectionKey("archived")}
+        data-keep-drawer-open
             className="flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500 transition-colors hover:text-zinc-300 focus-ring"
             title={expanded.archived ? "Collapse" : "Expand"}
           >
