@@ -28,6 +28,7 @@ import { readCachedCoords, writeCachedCoords } from "@/lib/geoCache";
 import { readCachedLegs, writeCachedLegs } from "@/lib/routeCache";
 import { apiUrl } from "@/lib/apiUrl";
 import { useWhenServiceWorkerReady } from "@/lib/serviceWorker";
+import { DRAFTS_HIDDEN_BY_DEFAULT, filterStops } from "@/lib/mapStops";
 import { Tooltip } from "@/components/ui/tooltip";
 import { StopEditor } from "@/components/StopEditor";
 import { cn } from "cn";
@@ -527,13 +528,20 @@ export function TripMap({ tripId }: { tripId: string }) {
    * of one. Folding it into the same set would mean a chip that reads like its
    * neighbours but behaves differently, and would make "show me only the
    * confirmed skeleton" inexpressible alongside a type selection.
+  /*
+   * Defaults to HIDING drafts: the map is read to answer "where am I actually
+   * going", and a draft is a place you have not committed to yet. Mixing
+   * unbooked stops into the route on first look overstates the trip and puts
+   * pins on the map that may never happen. Showing them is the deliberate act,
+   * and is not persisted, so a reload returns to the confirmed picture.
    *
-   * Defaults to showing drafts: a draft is still a place you plan to be, and
-   * silently dropping it from the route would understate the trip on first
-   * look. Hiding them is the deliberate act, and is not persisted, so a reload
-   * returns to the full picture.
+   * This is the reverse of the original choice, which defaulted to showing
+   * drafts on the grounds that a draft is still somewhere you plan to be. The
+   * toggle and the amber styling both already existed; only the starting state
+   * changed, which is why the chip's colour logic (below) had to change with
+   * it.
    */
-  const [hiddenDrafts, setHiddenDrafts] = useState(false);
+  const [hiddenDrafts, setHiddenDrafts] = useState(DRAFTS_HIDDEN_BY_DEFAULT);
 
   /*
    * The stops actually drawn, after the type filter and the draft filter.
@@ -556,11 +564,7 @@ export function TripMap({ tripId }: { tripId: string }) {
    * filtered, so the general path costs nothing to keep correct.
    */
   const visibleStops = useMemo(() => {
-    const filtered = stops.filter(
-      (s) => !hiddenTypes.has(s.type) && !(hiddenDrafts && !s.confirmed)
-    );
-    if (filtered.length === stops.length) return stops;
-    return filtered.map((s, i) => ({ ...s, index: i + 1 }));
+    return filterStops(stops, hiddenTypes, hiddenDrafts);
   }, [stops, hiddenTypes, hiddenDrafts]);
 
   /*
@@ -1276,11 +1280,12 @@ export function TripMap({ tripId }: { tripId: string }) {
             * doing the separating, which is enough once the line has broken.
             *
             * Amber is the draft colour everywhere else in the app — the status
-            * pill, the form toggle — so the chip is amber when drafts are shown
-            * and neutral when they are hidden. That inverts the type chips, where
-            * the lit state is the "on" one; here the lit state is "drafts
-            * visible", which is the default, so the colour tracks what is on
-            * screen rather than what is enabled.
+            * pill, the form toggle — so the chip is amber when drafts are SHOWN
+            * and neutral when they are hidden. The condition is written as
+            * `hiddenDrafts` (not its inverse) so the lit state stays keyed to
+            * what is actually on the map: with drafts hidden by default, a
+            * keyboard user tabbing across the chips now finds the amber one is
+            * the one that is *revealing* something, not the resting state.
             */}
           {draftCount > 0 && typeCounts.size > 1 && (
             <span aria-hidden className="mx-0.5 hidden h-4 w-px bg-white/10 sm:block" />
