@@ -59,6 +59,52 @@ Store Connect rejects any upload reusing a build number, so it must strictly
 increase on every upload. Bump it by hand before each one. This is the most
 likely cause of a rejected upload during TestFlight iteration.
 
+## Archive and export (verified 2026-09-27)
+
+```
+# archive
+xcodebuild -project App.xcodeproj -scheme App -configuration Release \
+  -destination "generic/platform=iOS" -archivePath /tmp/tparchive.xcarchive archive
+
+# export for App Store Connect
+xcodebuild -exportArchive -archivePath /tmp/tparchive.xcarchive \
+  -exportOptionsPlist /tmp/ExportOptions.plist -exportPath /tmp/tpexport \
+  -allowProvisioningUpdates
+```
+
+`ExportOptions.plist` needs `method = app-store-connect` and `teamID =
+XQBRZ94BTS`. **The export fails without `-allowProvisioningUpdates`** ("No
+profiles for com.tylermorgan.tripplanner were found") — the archive itself
+succeeds, so this looks like a signing failure but is only a missing profile
+fetch.
+
+Verified from the exported `.ipa`: signed `Apple Distribution: TYLER JAMES
+MORGAN (XQBRZ94BTS)`, profile `iOS Team Store Provisioning Profile`, expires
+2027-09-26, `get-task-allow = false` (so it is genuinely a distribution build),
+bundle `com.tylermorgan.tripplanner` 1.0 (1).
+
+**Pitfall — do not use `nm` to check a Release binary.** Release strips the
+symbol table, so `nm | grep PackingListView` returns 0 hits and looks like the
+native screens are missing from the shipping app. They are there; use
+`strings` instead. This cost real time during the first Release pass.
+
+## Testing a Release build on a device
+
+The App Store `.ipa` cannot be installed on a device — it is distribution
+signed. To exercise Release behaviour against production, build for the device
+instead (same optimization, same production URL, development-signed):
+
+```
+xcodebuild -project App.xcodeproj -scheme App -configuration Release \
+  -destination "id=<UDID>" -derivedDataPath /tmp/tprelease build
+xcrun devicectl device install app --device <UDID> \
+  /tmp/tprelease/Build/Products/Release-iphoneos/App.app
+```
+
+`devicectl` **cannot launch while the device is locked** — it fails with
+`BSErrorCodeDescription = Locked` and `RequestDenied`, which reads like a
+signing or provisioning problem but is not. Unlock the phone and retry.
+
 ## Export compliance
 
 `ITSAppUsesNonExemptEncryption = false` is set in `ios/App/App/Info.plist`.
