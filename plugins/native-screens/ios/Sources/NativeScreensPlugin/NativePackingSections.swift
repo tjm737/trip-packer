@@ -250,11 +250,13 @@ struct BagEditorSheet: View {
     }
 
     var body: some View {
-        // NavigationView, not NavigationStack: the app deploys to iOS 15
-        // (IPHONEOS_DEPLOYMENT_TARGET=15.0) and NavigationStack is iOS 16+.
-        // This sheet only needs a title and two toolbar buttons, so the older
-        // container costs nothing here.
-        NavigationView {
+        // NavigationStack, not NavigationView. The target is iOS 17 now, so the
+        // reason this used to be NavigationView (it being iOS 16+) is gone, and
+        // NavigationView is deprecated. Dropping `.navigationViewStyle(.stack)`
+        // is part of the same change: it only existed to stop NavigationView
+        // presenting as a split view in a sheet, which NavigationStack never
+        // does.
+        NavigationStack {
             Form {
                 Section {
                     TextField("Name", text: $name)
@@ -296,10 +298,6 @@ struct BagEditorSheet: View {
             }
             .onAppear { nameFocused = true }
         }
-        // On iOS 15 a NavigationView in a sheet can present as a split view,
-        // which would draw an empty sidebar beside the form. Stacked style is
-        // the phone behaviour this screen is for.
-        .navigationViewStyle(.stack)
     }
 }
 

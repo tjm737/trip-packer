@@ -17,13 +17,17 @@ import PackageDescription
  * `ios/Sources/<Name>` with a `Package.swift` at the package root pointing into
  * it -- so `cap sync ios` discovers it the same way.
  *
- * Platforms is pinned to .iOS(.v15) to match the app's deployment target. The
- * SwiftUI screen it presents uses only API available at 15; that constraint is
- * deliberate, because raising this floor would drop devices for a pilot feature.
+ * Platforms is pinned to .iOS(.v17) to match the app's deployment target.
+ *
+ * That target was raised from .v15 deliberately: 15 was never a decision, it
+ * was the Capacitor scaffold default, and it was costing a pile of
+ * deprecated-API workarounds (NavigationView instead of NavigationStack, a
+ * hand-rolled empty state instead of ContentUnavailableView, no way to style
+ * the nav bar). 17 covers the devices actually in use and removes that debt.
  */
 let package = Package(
     name: "NativeScreensPlugin",
-    platforms: [.iOS(.v15)],
+    platforms: [.iOS(.v17)],
     products: [
         .library(
             name: "NativeScreensPlugin",

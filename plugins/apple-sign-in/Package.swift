@@ -13,7 +13,7 @@ import PackageDescription
  * FoundationModels package next door where availability is decided at runtime:
  * there is no runtime check that can make the API exist on an older OS, so the
  * package simply requires what the API requires. The app's own deployment
- * target is iOS 15, which is above this, so nothing is locked out.
+ * target is iOS 17, which is above this, so nothing is locked out.
  *
  * AuthenticationServices is a system framework, referenced via the SDK with no
  * package dependency.

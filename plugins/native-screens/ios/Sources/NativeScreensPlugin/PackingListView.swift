@@ -396,18 +396,18 @@ struct PackingListView: View {
                         .tint(TPTheme.textSecondary)
                         .foregroundStyle(TPTheme.textSecondary)
                 } else if let message = model.errorMessage, model.state == nil {
-                    // Deliberately not ContentUnavailableView: that needs iOS 17
-                    // and this target supports iOS 15. Raising the deployment
-                    // target for one empty state would drop devices the app
-                    // otherwise supports, so the state is built from primitives
-                    // available at 15.
-                    EmptyStateView(
-                        icon: "exclamationmark.triangle",
-                        title: "Could not load",
-                        message: message,
-                        actionTitle: "Try Again",
-                        action: { Task { await model.load() } }
-                    )
+                    // ContentUnavailableView is available now that the target is
+                    // iOS 17. It replaces the hand-rolled EmptyStateView that
+                    // existed only because this API was out of reach at 15.
+                    ContentUnavailableView {
+                        Label("Could not load", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(message)
+                    } actions: {
+                        Button("Try Again") { Task { await model.load() } }
+                            .buttonStyle(.borderedProminent)
+                            .tint(TPTheme.primary)
+                    }
                 } else {
                     content
                 }
@@ -418,10 +418,11 @@ struct PackingListView: View {
         .toolbar {
             // The `if` goes INSIDE the ToolbarItem, not around it. Wrapping the
             // item in an `if let` makes the builder produce an
-            // `Optional<ToolbarContent>`, which only conforms to ToolbarContent
-            // on iOS 16+ -- a warning here and a hard error under Swift 6.
-            // Keeping the condition inside yields a concrete ToolbarItem whose
-            // body happens to be empty, which is valid on iOS 15.
+            // `Optional<ToolbarContent>`; keeping the condition inside yields a
+            // concrete ToolbarItem whose body happens to be empty, which is
+            // unambiguous and avoids a hard error under Swift 6's stricter
+            // builder checking. (This was originally framed as an iOS 15
+            // constraint, but the pattern is correct on any target.)
             ToolbarItem(placement: .cancellationAction) {
                 if let onClose {
                     Button("Done", action: onClose)
@@ -443,9 +444,18 @@ struct PackingListView: View {
                 .accessibilityLabel("Refresh")
             }
         }
-        // No .toolbarBackground here: it needs iOS 16 and this target supports
-        // iOS 15. The nav bar keeps its default material, which reads as native
-        // chrome above the dark content rather than as a styling mistake.
+        // The nav bar is pinned to the same black as the content it sits over.
+        // The default material is translucent, which produces a visible seam
+        // between the chrome and the #0a0a0a page -- the web app has no such
+        // seam because its header and page share one background. This was
+        // previously left on the default because .toolbarBackground was out of
+        // reach at iOS 15; at 17 it is available, so the two now match.
+        .toolbarBackground(TPTheme.surface0, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        // Kept deliberately alongside the toolbarColorScheme above: that one
+        // only styles the bar, while this forces the whole screen to dark mode,
+        // which the content and the Form rows depend on.
         .preferredColorScheme(.dark)
         .task { await model.load() }
         // A failed toggle or delete sets errorMessage, which the load-failure
@@ -511,11 +521,11 @@ struct PackingListView: View {
                 )
 
                 if model.categories(for: tripId).isEmpty {
-                    EmptyStateView(
-                        icon: "suitcase",
-                        title: "Nothing to pack yet",
-                        message: "Add items in the app and they will appear here."
-                    )
+                    ContentUnavailableView {
+                        Label("Nothing to pack yet", systemImage: "suitcase")
+                    } description: {
+                        Text("Add items in the app and they will appear here.")
+                    }
                     .padding(.top, 60)
                 } else {
                     ForEach(model.categories(for: tripId), id: \.id) { category in
@@ -596,7 +606,9 @@ private struct EditItemSheet: View {
     }
 
     var body: some View {
-        NavigationView {
+        // NavigationStack (target is iOS 17 now); see the note in
+        // NativePackingSections for why the old NavigationView is gone.
+        NavigationStack {
             ZStack {
                 TPTheme.surface0.ignoresSafeArea()
 
@@ -632,14 +644,13 @@ private struct EditItemSheet: View {
                     }
                 }
                 // The Form's grouped background is a light grey that fights the
-                // dark tokens. `.scrollContentBackground(.hidden)` would clear it
-                // but needs iOS 16 and this target is iOS 15, so the background
-                // is set directly with `UITableView.appearance()` instead --
-                // the 15-compatible route. Scoped by setting it here rather than
-                // at launch so it does not leak into other screens' tables.
-                .onAppear {
-                    UITableView.appearance().backgroundColor = .clear
-                }
+                // dark tokens, so it is hidden here rather than overridden
+                // globally. This previously used `UITableView.appearance()`
+                // because `.scrollContentBackground` needs iOS 16 and the
+                // target was 15 -- an app-wide UIKit override that leaked into
+                // every other table in the process. At 17 the modifier is
+                // available and the hack is gone.
+                .scrollContentBackground(.hidden)
             }
             .navigationTitle("Edit Item")
             .navigationBarTitleDisplayMode(.inline)
@@ -662,7 +673,6 @@ private struct EditItemSheet: View {
                 }
             }
         }
-        .navigationViewStyle(.stack)
         .preferredColorScheme(.dark)
         .onAppear { nameFocused = true }
     }
@@ -730,7 +740,9 @@ private struct CategoryCard: View {
         )
         // Collapsing the card while a row is open would leave the row state
         // pointing at a hidden row, so close it.
-        .onChange(of: collapsed) { isCollapsed in
+        // Two-parameter form: the single-parameter `onChange(of:perform:)` is
+        // deprecated as of iOS 17, and raising the target surfaced the warning.
+        .onChange(of: collapsed) { _, isCollapsed in
             if isCollapsed { openRowId = nil }
         }
     }
@@ -869,7 +881,10 @@ struct SwipeRow<Content: View>: View {
         .accessibilityElement(children: .combine)
         .accessibilityAction(named: "Delete", onDelete)
         .accessibilityAction(named: "Edit", onEdit)
-        .onChange(of: openRowId) { newValue in
+        // Two-parameter form: the single-parameter `onChange(of:perform:)` is
+        // deprecated as of iOS 17. The old value is not needed here, but the
+        // form is used for consistency with the other site in this file.
+        .onChange(of: openRowId) { _, newValue in
             // Another row opened: close this one. Driven by the shared binding
             // so the row cannot disagree with the parent about who is open.
             if newValue != id && offset != 0 {
@@ -1147,44 +1162,5 @@ private struct PackingRow: View {
                     .foregroundStyle(.white)
             }
         }
-    }
-}
-
-/// A centred icon / title / message block, optionally with one action.
-///
-/// Exists because `ContentUnavailableView` requires iOS 17 while this target
-/// supports iOS 15. Declared once and reused rather than inlined twice, so the
-/// two empty states cannot drift apart visually.
-private struct EmptyStateView: View {
-    let icon: String
-    let title: String
-    let message: String
-    var actionTitle: String?
-    var action: (() -> Void)?
-
-    var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 42))
-                .foregroundStyle(TPTheme.textMuted)
-
-            Text(title)
-                .font(.headline)
-                .foregroundStyle(TPTheme.textPrimary)
-
-            Text(message)
-                .font(.subheadline)
-                .foregroundStyle(TPTheme.textSecondary)
-                .multilineTextAlignment(.center)
-
-            if let actionTitle, let action {
-                Button(actionTitle, action: action)
-                    .buttonStyle(.borderedProminent)
-                    .tint(TPTheme.primary)
-                    .padding(.top, 4)
-            }
-        }
-        .padding(32)
-        .frame(maxWidth: .infinity)
     }
 }
