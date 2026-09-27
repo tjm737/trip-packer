@@ -130,11 +130,16 @@ becomes true and the annual self-classification report applies.
 - [x] ASC record created → SKU `dexterstrips`, id `6816529260`
 - [x] Demo account created, with trips/stops/reservations/packing/bags
 - [x] iOS deployment target raised to 17 (was 15; see `140791c`)
-- [ ] Production deploy current — `50f7d6e` was deployed and verified, but
-      `e41166c` (demo bags) still needs a deploy for the reviewer to see bags
+- [x] App Privacy questionnaire answered (in ASC, not in this repo)
+- [x] Age rating set in ASC, consistent with the stated 13+ minimum
+- [x] Production serving `c866f73` (verified by fetching `/privacy` and
+      `/support` and confirming the 13+ copy is present)
+- [ ] Production deploy of `3a3bf57` — the review-password plumbing. Requires
+      `/etc/trip-packer/review-password` to exist first; see
+      `docs/app-store-review-notes.md`. Without it the deploy warns and rotates
+      the credential, invalidating the password in ASC
 - [ ] Archive uploaded, processed, TestFlight-tested
 - [ ] Screenshots in required sizes — **nothing exists yet; see below**
-- [ ] App Privacy answers filled in (ASC questionnaire, separate from the manifest)
 
 ## Screenshots
 
