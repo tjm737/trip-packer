@@ -98,13 +98,18 @@ final class PackingListModel: ObservableObject {
     /// with a spinner until the write lands, and a failed add that briefly
     /// showed a phantom bag would then have to animate it away again.
     func addBag(tripId: String, name: String, kind: String) async -> Bool {
+        // Both stamps are the same instant, mirroring src/lib/storage.ts. The
+        // server requires them (see TPBag) and does not fill them in.
+        let now = tpNow()
         let bag = TPBag(
             id: UUID().uuidString,
             tripId: tripId,
             name: name,
             kind: kind,
             tagNumber: "",
-            notes: ""
+            notes: "",
+            createdAt: now,
+            updatedAt: now
         )
         do {
             try await TPClient.shared.mutate(.bagCreate(bag))
@@ -122,9 +127,17 @@ final class PackingListModel: ObservableObject {
     func renameBag(_ bag: TPBag, name: String) async -> Bool {
         guard let idx = state?.bags?.firstIndex(where: { $0.id == bag.id }) else { return false }
         let previous = state?.bags?[idx].name
+        let now = tpNow()
         state?.bags?[idx].name = name
+        state?.bags?[idx].updatedAt = now
         do {
-            try await TPClient.shared.mutate(.bagRename(id: bag.id, name: name))
+            // updatedAt is sent because the server WHITELISTS updatable keys and
+            // silently drops the rest -- omitting it is not an error, it just
+            // leaves the row's updatedAt frozen, which defeats conflict
+            // resolution later. Mirrors src/lib/storage.ts:526.
+            try await TPClient.shared.mutate(
+                .bagRename(id: bag.id, name: name, updatedAt: now)
+            )
             return true
         } catch {
             if let previous { state?.bags?[idx].name = previous }

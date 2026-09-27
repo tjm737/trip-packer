@@ -67,6 +67,36 @@ struct TPBag: Codable, Identifiable, Hashable {
     var kind: String
     var tagNumber: String
     var notes: String
+    /*
+     * createdAt / updatedAt are REQUIRED by the server's insertBag, which binds
+     * eight named parameters and throws a RangeError on any missing one:
+     *
+     *   INSERT INTO bags (id, tripId, name, kind, tagNumber, notes,
+     *                     createdAt, updatedAt) VALUES (...)
+     *
+     * better-sqlite3 raises `Missing named parameter "createdAt"` at bind time,
+     * which surfaces as an uncaught throw and therefore HTTP 500 -- the client
+     * only sees "Server responded with 500", with nothing naming the cause.
+     *
+     * They are stamped CLIENT-side, matching src/lib/storage.ts:506-507 where
+     * both are set to the same `now`. The server does not default them, so a
+     * client that omits them fails rather than getting a server timestamp.
+     */
+    var createdAt: String
+    var updatedAt: String
+}
+
+/// ISO 8601 with fractional seconds, matching JavaScript's `Date.toISOString()`.
+///
+/// `ISO8601DateFormatter()` with default options emits `2026-09-21T14:13:20Z`
+/// (no milliseconds), while the web client sends `...20.123Z`. Both parse, so a
+/// mismatch raises nothing -- it just means native- and web-created rows carry
+/// different precision and sort inconsistently within the same second. The
+/// explicit formatOptions is the difference, and it is required for parity.
+let tpNow: () -> String = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f.string(from: Date())
 }
 
 /// How many suggestions to ask the on-device model for. Mirrors MAX_SUGGESTIONS
@@ -126,7 +156,7 @@ enum TPOp {
     /// `null` (unassign) from an absent key (don't touch).
     case itemSetBag(id: String, bagId: String?)
     case bagCreate(TPBag)
-    case bagRename(id: String, name: String)
+    case bagRename(id: String, name: String, updatedAt: String)
     case bagDelete(id: String)
 
     var body: [String: Any] {
@@ -183,11 +213,19 @@ enum TPOp {
                     "kind": bag.kind,
                     "tagNumber": bag.tagNumber,
                     "notes": bag.notes,
+                    // Must be sent: see the note on TPBag. Omitting either one
+                    // makes the server throw at bind time and return 500.
+                    "createdAt": bag.createdAt,
+                    "updatedAt": bag.updatedAt,
                 ],
             ]
 
-        case .bagRename(let id, let name):
-            return ["op": "bag.update", "id": id, "updates": ["name": name]]
+        case .bagRename(let id, let name, let updatedAt):
+            return [
+                "op": "bag.update",
+                "id": id,
+                "updates": ["name": name, "updatedAt": updatedAt],
+            ]
 
         case .bagDelete(let id):
             return ["op": "bag.delete", "id": id]
