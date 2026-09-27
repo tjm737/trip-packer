@@ -27,6 +27,14 @@ export type DemoItem = {
   quantity?: number;
   checked?: boolean;
   icon?: string;
+  /**
+   * Which bag this item travels in, by index into the trip's `bags`.
+   *
+   * Omitted means unassigned, which is the normal state while packing. Not
+   * every item gets one -- a list where literally everything is pre-assigned
+   * looks curated rather than used.
+   */
+  bagIndex?: number;
 };
 
 export type DemoCategory = {
@@ -63,8 +71,24 @@ export type DemoTrip = {
   lengthDays: number;
   notes: string;
   icon: string;
+  /**
+   * Physical bags, for the packing list's Bags section.
+   *
+   * Optional: the archived trip has none, which is realistic and also proves the
+   * UI's empty-bags state renders rather than only ever being seen full.
+   */
+  bags?: DemoBag[];
   categories: DemoCategory[];
   reservations: DemoReservation[];
+};
+
+export type DemoBag = {
+  name: string;
+  /** Must be one of the CHECK-constrained kinds: checked, carry_on, personal, other. */
+  kind: "checked" | "carry_on" | "personal" | "other";
+  /** Airline bag tag, when there is one. */
+  tagNumber?: string;
+  notes?: string;
 };
 
 /** `YYYY-MM-DD`, `days` from today. Date-only columns. */
@@ -91,16 +115,37 @@ export function demoTrip(): DemoTrip {
     notes:
       "Flight lands mid-afternoon. Hotel is a 15-minute walk from Praça do " +
       "Comércio, so no car needed — the tram and the metro cover everything.",
+    /*
+     * Two bags, and the assignment follows what a real packer would do: the
+     * carry-on holds what you cannot afford to lose (documents, medication,
+     * electronics), the checked bag holds bulk clothing. That makes the Bags
+     * section demonstrate its actual purpose -- "where is it right now" -- rather
+     * than showing two containers with arbitrary contents.
+     */
+    bags: [
+      {
+        name: "Black carry-on",
+        kind: "carry_on",
+        tagNumber: "TP-4471902",
+        notes: "Overhead bin. Keeps the documents and medication with me.",
+      },
+      {
+        name: "Blue checked bag",
+        kind: "checked",
+        tagNumber: "TP-4471903",
+        notes: "",
+      },
+    ],
     categories: [
       {
         name: "Clothing",
         icon: "shirt",
         items: [
-          { name: "T-shirts", quantity: 4, checked: true, icon: "shirt" },
-          { name: "Light jacket", quantity: 1, checked: true, icon: "shirt" },
-          { name: "Walking shoes", quantity: 1, icon: "footprints" },
-          { name: "Swimsuit", quantity: 1, icon: "shirt" },
-          { name: "Socks", quantity: 5, icon: "shirt" },
+          { name: "T-shirts", quantity: 4, checked: true, icon: "shirt", bagIndex: 1 },
+          { name: "Light jacket", quantity: 1, checked: true, icon: "shirt", bagIndex: 1 },
+          { name: "Walking shoes", quantity: 1, icon: "footprints", bagIndex: 1 },
+          { name: "Swimsuit", quantity: 1, icon: "shirt", bagIndex: 1 },
+          { name: "Socks", quantity: 5, icon: "shirt", bagIndex: 1 },
         ],
       },
       {
@@ -108,8 +153,8 @@ export function demoTrip(): DemoTrip {
         icon: "droplet",
         items: [
           { name: "Toothbrush", quantity: 1, checked: true, icon: "droplet" },
-          { name: "Sunscreen SPF 50", quantity: 1, icon: "sun" },
-          { name: "Prescription medication", quantity: 1, icon: "pill" },
+          { name: "Sunscreen SPF 50", quantity: 1, icon: "sun", bagIndex: 1 },
+          { name: "Prescription medication", quantity: 1, icon: "pill", bagIndex: 0 },
           { name: "Razor", quantity: 1, icon: "droplet" },
         ],
       },
@@ -117,20 +162,20 @@ export function demoTrip(): DemoTrip {
         name: "Electronics",
         icon: "plug",
         items: [
-          { name: "Phone charger", quantity: 1, checked: true, icon: "plug" },
-          { name: "Type C adapter (Portugal)", quantity: 2, icon: "plug" },
-          { name: "Power bank", quantity: 1, icon: "battery" },
-          { name: "Headphones", quantity: 1, icon: "headphones" },
+          { name: "Phone charger", quantity: 1, checked: true, icon: "plug", bagIndex: 0 },
+          { name: "Type C adapter (Portugal)", quantity: 2, icon: "plug", bagIndex: 0 },
+          { name: "Power bank", quantity: 1, icon: "battery", bagIndex: 0 },
+          { name: "Headphones", quantity: 1, icon: "headphones", bagIndex: 0 },
         ],
       },
       {
         name: "Documents",
         icon: "file-text",
         items: [
-          { name: "Passport", quantity: 1, checked: true, icon: "book" },
-          { name: "Travel insurance", quantity: 1, icon: "file-text" },
-          { name: "Hotel confirmation", quantity: 1, checked: true, icon: "file-text" },
-          { name: "Boarding passes", quantity: 2, icon: "ticket" },
+          { name: "Passport", quantity: 1, checked: true, icon: "book", bagIndex: 0 },
+          { name: "Travel insurance", quantity: 1, icon: "file-text", bagIndex: 0 },
+          { name: "Hotel confirmation", quantity: 1, checked: true, icon: "file-text", bagIndex: 0 },
+          { name: "Boarding passes", quantity: 2, icon: "ticket", bagIndex: 0 },
         ],
       },
     ],

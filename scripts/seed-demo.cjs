@@ -141,6 +141,34 @@ function insertTrip(db, userId, spec, demoTrip) {
   });
 
   let itemCount = 0;
+  /*
+   * Bags are created BEFORE the items so each item can be assigned as it is
+   * inserted. Creating the bag rows in a second pass would mean either an
+   * update per item or a NULL bagId on everything, and a reviewer opening the
+   * packing list would then see a Bags section with items sitting outside it.
+   *
+   * This is a review-visibility requirement, not decoration: the submission doc
+   * calls an empty Bags section a release blocker, because bags are a visible
+   * 1.0 feature and guideline 4.2 (minimum functionality) is the primary
+   * rejection risk for a shell app. A demo account with no bags would show the
+   * reviewer the one screen that looks unfinished.
+   */
+  const bagSpecs = spec.bags ?? [];
+  const bagIds = bagSpecs.map((bag) => {
+    const bagId = crypto.randomUUID();
+    db.tx.insertBag({
+      id: bagId,
+      tripId,
+      name: bag.name,
+      kind: bag.kind,
+      tagNumber: bag.tagNumber ?? "",
+      notes: bag.notes ?? "",
+      createdAt: now,
+      updatedAt: now,
+    });
+    return bagId;
+  });
+
   spec.categories.forEach((cat, catIndex) => {
     const categoryId = crypto.randomUUID();
     db.tx.insertCategory({
@@ -151,6 +179,14 @@ function insertTrip(db, userId, spec, demoTrip) {
       order: catIndex,
     });
     cat.items.forEach((item, itemIndex) => {
+      /*
+       * bagIndex assigns an item to one of this trip's bags. Round-robin would
+       * scatter a category across bags and read as random, so the spec names
+       * the bag explicitly and every item without one stays unassigned -- which
+       * is also the honest default, since most packing is decided later.
+       */
+      const bagId =
+        typeof item.bagIndex === "number" ? bagIds[item.bagIndex] ?? null : null;
       db.tx.insertItem({
         id: crypto.randomUUID(),
         tripId,
@@ -160,7 +196,7 @@ function insertTrip(db, userId, spec, demoTrip) {
         checked: Boolean(item.checked),
         icon: item.icon ?? "package",
         order: itemIndex,
-        bagId: null,
+        bagId,
       });
       itemCount++;
     });
