@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Export options for the App Store Connect upload.
+
+  `method` is spelled `app-store-connect` in current Xcode. The older
+  `app-store` value is deprecated and was itself a rename of the even older
+  `app-store-upload` — a wrong value here fails the export rather than
+  silently producing a dev-signed ipa, so read the error if it changes again.
+
+  `signingStyle = automatic` lets the export step apply the Distribution
+  certificate. This is the step that actually does App Store signing; the
+  archive that precedes it is dev-signed by design.
+-->
+<plist version="1.0">
+<dict>
+	<key>method</key>
+	<string>app-store-connect</string>
+	<key>teamID</key>
+	<string>XQBRZ94BTS</string>
+	<key>signingStyle</key>
+	<string>automatic</string>
+	<key>uploadSymbols</key>
+	<true/>
+	<key>stripSwiftSymbols</key>
+	<true/>
+	<key>compileBitcode</key>
+	<false/>
+	<key>manageAppVersionAndBuildNumber</key>
+	<false/>
+	<key>destination</key>
+	<string>export</string>
+</dict>
+</plist>
