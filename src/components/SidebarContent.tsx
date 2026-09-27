@@ -22,7 +22,11 @@ import { AboutButton, AboutDialog } from "@/components/AboutDialog";
 import { SignInButton, LoginDialog } from "@/components/LoginDialog";
 import { CreateAccountDialog } from "@/components/CreateAccountDialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { PrintButton } from "@/components/PrintButton";
+import { CalendarExportButton } from "@/components/CalendarExportButton";
 import { toast } from "@/components/ui/toast";
+import { activeTripIdFromPath } from "@/lib/activeTrip";
+import { usePathname } from "next/navigation";
 import {
   Plus,
   Users,
@@ -39,6 +43,7 @@ import {
   UserCog,
   UserPlus,
   LogOut,
+  PlaneTakeoff,
 } from "lucide-react";
 
 function UserAvatar({ user, size = "md" }: { user: User; size?: "sm" | "md" | "lg" }) {
@@ -853,6 +858,74 @@ function TripCard({
   );
 }
 
+/**
+ * Print and Calendar for the trip currently on screen.
+ *
+ * These used to sit in the trip header beside Share. Five controls in one row
+ * crowded it, and the header is only visible on a trip page anyway, so the
+ * sidebar is the better home for the same reason the header was: it is always
+ * on screen. It is in fact a stronger version of that argument, because the
+ * sidebar is visible from every route rather than just the trip's own.
+ *
+ * TRIP-SCOPED, NOT GLOBAL — and that is the whole difficulty. The sidebar is
+ * global chrome that renders on the landing page and the profile screen too,
+ * but these two actions are properties of ONE trip. So the section draws only
+ * when the path actually names a trip, and it reads the trip from `state.trips`
+ * by id rather than taking a prop, because no parent of the sidebar knows which
+ * trip is open. `activeTripIdFromPath` owns that decision, and it is a pure
+ * module precisely so its edge cases are unit-tested instead of eyeballed.
+ *
+ * The name is resolved for the label only. If the id does not match a trip in
+ * state — a stale link, or state that has not hydrated — the buttons still
+ * render, because Print and Calendar hit the server by id and do not need the
+ * client to know the name. Dropping them in that case would hide a working
+ * control merely because a label could not be filled in.
+ *
+ * Neither button is gated on write access, which matches the header's earlier
+ * behaviour: exporting an itinerary you can already read is not a
+ * modification, so a viewer of a shared trip keeps both. The sidebar renders
+ * for viewers, so this is preserved by construction rather than by a check.
+ */
+function TripActionsSection() {
+  const { state, hydrated } = useApp();
+  const pathname = usePathname();
+  const tripId = activeTripIdFromPath(pathname);
+
+  // Server HTML and the first client render must agree. The path is known on
+  // both sides, but the rest of the shell is driven by state that only settles
+  // after hydration, so gating on `hydrated` avoids a flash of controls that
+  // then reflow the sidebar.
+  if (!hydrated || !tripId) return null;
+
+  const trip = state.trips.find((t) => t.id === tripId) ?? null;
+
+  return (
+    <div className="border-t border-white/8 px-4 py-3">
+      <div className="mb-2 flex items-center gap-1.5">
+        <PlaneTakeoff className="h-3.5 w-3.5 text-zinc-500" />
+        <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500">
+          This trip
+        </span>
+      </div>
+      {trip && (
+        <p className="mb-2 truncate text-[11px] text-zinc-500" title={trip.name}>
+          {trip.name}
+        </p>
+      )}
+      {/*
+        Stacked, not a row. The sidebar is ~260px with 32px of padding, so two
+        labelled buttons side by side would each get ~110px and truncate both
+        labels. Full-width rows keep the labels readable and give each control a
+        comfortable tap target, which is the point of moving them here.
+      */}
+      <div className="flex flex-col gap-1.5">
+        <PrintButton tripId={tripId} variant="sidebar" />
+        <CalendarExportButton tripId={tripId} variant="sidebar" />
+      </div>
+    </div>
+  );
+}
+
 function TripList() {
   const { state, trip, helpers, hydrated } = useApp();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ upcoming: true, archived: false });
@@ -1081,6 +1154,8 @@ export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
       <UserSwitcher />
 
       <TripList />
+
+      <TripActionsSection />
 
       {/* New Trip, with sign-in and About alongside it */}
       <div className="flex items-center gap-2 border-t border-white/8 p-3">
