@@ -5,8 +5,9 @@ import { Capacitor } from "@capacitor/core";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { AlertCircle, Smartphone } from "lucide-react";
-import { openNativeItinerary } from "@/lib/nativeScreens";
-import { shouldPresentItineraryTab, shouldShowNativeFallbackButton } from "@/lib/nativeTabPresentation";
+import { openNativeItinerary, closeNativeScreen, updateNativeFrame } from "@/lib/nativeScreens";
+import { shouldPresentItineraryTab, shouldShowNativeFallbackButton, shouldSendFrame, sameFrame } from "@/lib/nativeTabPresentation";
+import { useNativePresentationFrame } from "@/components/useNativePresentationFrame";
 
 /*
  * Makes the Itinerary tab open the native SwiftUI itinerary by itself, and
@@ -25,8 +26,10 @@ import { shouldPresentItineraryTab, shouldShowNativeFallbackButton } from "@/lib
  * as packing: the web itinerary is the feature on web and Android, and the
  * fallback on iOS when a present fails, so it is not this component's to own.
  *
- * `openItinerary` resolves when the screen is DISMISSED, so the await below IS
- * the dismissal signal. That is a plugin contract, not a convenience.
+ * `openItinerary` resolves differently in the two modes, and this component must
+ * not assume either: embedded it resolves on PRESENTATION (`dismissed: false`)
+ * and the tab's unmount is what closes the screen; modal it resolves on
+ * DISMISSAL (`dismissed: true`). See the result handling in `present` below.
  */
 export function NativeItineraryAutoOpen({
   tripId,
@@ -54,6 +57,21 @@ export function NativeItineraryAutoOpen({
    */
   const [presenting, setPresenting] = useState(false);
 
+  /*
+   * The region to draw into. Null until the tab panel has a usable rect, which
+   * is what gates the present below: presenting before there is a region to
+   * draw into would put the native screen in the wrong place, and the frame is
+   * only correct once the panel above it has settled.
+   *
+   * Kept live while native owns the tab, not stopped once `presenting` flips.
+   * The native view has to track the panel as the page scrolls and the device
+   * rotates, and the only thing that moves it is a fresh frame sent from here --
+   * so tearing the measurement down at presentation time would freeze the native
+   * content exactly when it needs to follow. `onFrameChange` below forwards each
+   * new frame to the plugin.
+   */
+  const frame = useNativePresentationFrame(isNative);
+
   // Resolved after mount so server and first client render agree. The bridge
   // does not exist during SSR, so `Capacitor.getPlatform()` is "web" there, and
   // reading it during render would make the two disagree.
@@ -69,13 +87,59 @@ export function NativeItineraryAutoOpen({
   }, [presenting, onNativeOnScreen]);
 
   /*
+   * Keep the up native screen pinned to the panel as the panel moves.
+   *
+   * See `shouldSendFrame` for why a frame is not sent when there is nothing on
+   * screen or when it repeats what the present already carried. The comparison is
+   * by VALUE -- `measurePresentationFrame` returns a fresh object per
+   * measurement, so an identity check would send on every scroll event.
+   */
+  const lastSentFrame = useRef<typeof frame>(null);
+  useEffect(() => {
+    if (!shouldSendFrame({
+      presenting,
+      hasFrame: frame !== null,
+      sameAsLastSent: sameFrame(lastSentFrame.current, frame),
+    })) return;
+    lastSentFrame.current = frame;
+    void updateNativeFrame(frame as NonNullable<typeof frame>);
+  }, [presenting, frame]);
+
+  /*
    * Present once per entry into the Itinerary tab.
    *
    * Mounting IS the tab entry event -- this component is rendered as part of the
    * tab's content -- and unmounting is the exit, which resets the ref via the
    * cleanup below. That is what lets a second visit re-present without ever
    * presenting twice within one visit.
+   *
+   * Split across two effects on purpose. The arming effect below has NO
+   * dependencies that change during a visit, so its cleanup runs only on real
+   * tab exit. The presenting effect is keyed on `frame`, which changes on every
+   * scroll -- if the reset lived there, a scroll would clear `hasPresented` and
+   * re-present the screen the user is already looking at, which is precisely the
+   * loop the ref exists to prevent.
    */
+  useEffect(() => {
+    if (!isNative) return;
+    return () => {
+      /*
+       * Tab exit -- and this is the ONLY thing that takes the native view down.
+       *
+       * Embedded screens have no Done button by design (the web tab bar is the
+       * exit), so nothing native-side closes them. Without this call the child
+       * controller stays on screen after the user taps another tab, covering the
+       * tab they switched to -- the native content would own the screen instead
+       * of belonging to a tab, which is the exact problem embedding exists to
+       * solve.
+       */
+      void closeNativeScreen();
+      hasPresented.current = false;
+      lastSentFrame.current = null;
+      setPresenting(false);
+    };
+  }, [isNative, tripId]);
+
   useEffect(() => {
     if (!isNative) return;
 
@@ -85,38 +149,61 @@ export function NativeItineraryAutoOpen({
       hasPresented: hasPresented.current,
       presenting,
     });
-    if (action === "present") {
+    // `action === "present"` alone is not enough: the frame must exist too. The
+    // present cannot happen on mount, because the panel has no usable rect until
+    // layout settles -- drawing then would put the screen in the wrong place.
+    if (action === "present" && frame) {
       hasPresented.current = true;
-      present();
+      void present(frame);
     }
-
-    return () => {
-      // Tab exit. A later entry is a new presentation, so clear the flag.
-      hasPresented.current = false;
-      setPresenting(false);
-    };
-    // `isNative` flips false -> true once, after mount; running then is correct.
-    // `presenting` is deliberately NOT a dependency: it is read as a guard at
-    // the moment of entering, and depending on it would re-run this effect when
-    // the presentation resolves, re-arming the loop the guard exists to stop.
+    // No cleanup here: this effect must not reset anything, for the reason above.
+    // `presenting` is read as a guard at the moment of presenting rather than
+    // depended on, because depending on it would re-run this effect when the
+    // presentation resolves and re-arm the loop the guard exists to stop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isNative, tripId]);
+  }, [isNative, tripId, frame]);
 
-  async function present() {
+  async function present(f: NonNullable<typeof frame>) {
     setError(null);
     setPresenting(true);
+    /*
+     * Record the frame the present carries BEFORE the call, so the forwarding
+     * effect above sees it as already-sent and does not immediately re-send it.
+     * A re-send can land before the child controller exists and resolve
+     * `applied: false` under a view that is visibly on screen.
+     */
+    lastSentFrame.current = f;
     try {
-      const result = await openNativeItinerary(tripId);
+      const result = await openNativeItinerary(tripId, f);
 
       /*
-       * `presented: false` means a sheet was already up, so nothing changed --
-       * keep `presenting` true, because the native screen really is on screen
-       * and the web itinerary should stay hidden behind it.
+       * The two fields answer different questions, and in embedded mode they
+       * disagree -- so they must be read separately rather than inferred.
        *
-       * Anything else means the native screen has now been dismissed, because
-       * the promise resolves on dismissal.
+       * `presented: false` means nothing was shown (a screen was already up), so
+       * keep `presenting` true: the native screen really is on screen and the web
+       * itinerary must stay hidden behind it.
+       *
+       * `dismissed: true` means the promise resolved because the screen CLOSED --
+       * the modal behaviour, where resolution waits for the dismissal. Only then
+       * is it right to stop treating the native screen as present.
+       *
+       * Embedded, the promise resolves as soon as the child controller is added
+       * (there is no dismissal to wait for, since the web tab bar is the way out),
+       * and reports `dismissed: false`. Deciding on `presented` alone would read
+       * that as "closed", un-hide the web itinerary underneath, and draw the web
+       * list and the native list on top of each other -- the exact overlap this
+       * whole feature exists to avoid.
        */
-      if (result?.presented !== false) setPresenting(false);
+      if (result?.dismissed) setPresenting(false);
+      /*
+       * `presented: false` means a screen was already up when this was called,
+       * so this call changed nothing. `presenting` stays true -- the native
+       * screen really is on screen and the web itinerary must stay hidden behind
+       * it. Falling through to `setPresenting(false)` here (the previous
+       * behaviour, deciding on resolution alone) un-hid the web list underneath
+       * the live native view.
+       */
     } catch (e) {
       /*
        * Clear `presenting` on failure so the web itinerary renders. A failed
@@ -151,7 +238,13 @@ export function NativeItineraryAutoOpen({
           <Button
             variant="ghost"
             size="sm"
-            onClick={present}
+            onClick={() => {
+              if (!frame) {
+                setError("The itinerary is still loading. Try again in a moment.");
+                return;
+              }
+              void present(frame);
+            }}
             className="text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50 focus-ring"
           >
             <Smartphone className="w-4 h-4 mr-1.5" />

@@ -26,6 +26,8 @@ const {
   shouldPresentNativeTab,
   shouldRenderWebTabContent,
   shouldShowNativeFallbackButton,
+  shouldSendFrame,
+  sameFrame,
 } = h.loadModule("src/lib/nativeTabPresentation.ts");
 
 async function run() {
@@ -285,6 +287,96 @@ async function run() {
       }),
       false
     );
+  });
+
+  /* -- frame forwarding into the embedded region --------------------------- */
+
+  /*
+   * Embedded native content is a child view with an explicit frame, so it does
+   * NOT follow the page. As the page scrolls, rotates or the keyboard opens, the
+   * region moves and only a new frame from JS moves the view with it. The
+   * failure these cases pin is invisible in a type check: the native content
+   * stays where it was first placed while the page slides underneath.
+   */
+
+  await h.test("sends a new frame while the native screen is up", () => {
+    h.assertEqual(
+      shouldSendFrame({ presenting: true, hasFrame: true, sameAsLastSent: false }),
+      true
+    );
+  });
+
+  await h.test("does not send a frame when nothing is on screen", () => {
+    /*
+     * Before the present there is no child view to move. Sending here is a no-op
+     * the plugin answers `applied: false` to, and this effect runs on every
+     * scroll -- so it is worth not calling at all.
+     */
+    h.assertEqual(
+      shouldSendFrame({ presenting: false, hasFrame: true, sameAsLastSent: false }),
+      false
+    );
+  });
+
+  await h.test("does not send a frame when nothing has been measured", () => {
+    h.assertEqual(
+      shouldSendFrame({ presenting: true, hasFrame: false, sameAsLastSent: false }),
+      false
+    );
+  });
+
+  await h.test("does not re-send the frame the present already carried", () => {
+    /*
+     * The present call was given this frame, so the view is already there. A
+     * re-send can arrive before the child controller exists and resolve
+     * `applied: false` under a view that is visibly on screen -- which reads as a
+     * failure that did not happen.
+     */
+    h.assertEqual(
+      shouldSendFrame({ presenting: true, hasFrame: true, sameAsLastSent: true }),
+      false
+    );
+  });
+
+  await h.test("compares frames by value, not identity", () => {
+    /*
+     * `measurePresentationFrame` returns a FRESH object per measurement, so an
+     * unchanged region arrives as a different object every scroll event. An
+     * identity check would therefore send a bridge call per scroll frame for a
+     * region that never moved.
+     */
+    const a = { top: 200, left: 0, width: 393, height: 500 };
+    const b = { top: 200, left: 0, width: 393, height: 500 };
+    h.assert(a !== b, "the two frames must be distinct objects");
+    h.assertEqual(sameFrame(a, b), true);
+  });
+
+  await h.test("treats a moved frame as different", () => {
+    const a = { top: 200, left: 0, width: 393, height: 500 };
+    const moved = { top: 180, left: 0, width: 393, height: 520 };
+    h.assertEqual(sameFrame(a, moved), false);
+  });
+
+  await h.test("treats a frame that only changed on one edge as different", () => {
+    // Each edge is compared, so a change in any single field must count. This
+    // catches a comparison that drops one field -- e.g. forgetting height, which
+    // is the one that moves when the keyboard opens.
+    const a = { top: 200, left: 0, width: 393, height: 500 };
+    h.assertEqual(sameFrame(a, { top: 200, left: 0, width: 393, height: 320 }), false);
+    h.assertEqual(sameFrame(a, { top: 200, left: 0, width: 320, height: 500 }), false);
+    h.assertEqual(sameFrame(a, { top: 200, left: 8, width: 393, height: 500 }), false);
+    h.assertEqual(sameFrame(a, { top: 199, left: 0, width: 393, height: 500 }), false);
+  });
+
+  await h.test("treats two absent frames as equal", () => {
+    // Both unmeasured is the same state, and must not read as a change.
+    h.assertEqual(sameFrame(null, null), true);
+  });
+
+  await h.test("treats an absent frame and a real one as different", () => {
+    const a = { top: 200, left: 0, width: 393, height: 500 };
+    h.assertEqual(sameFrame(null, a), false);
+    h.assertEqual(sameFrame(a, null), false);
   });
 
   await h.summary();

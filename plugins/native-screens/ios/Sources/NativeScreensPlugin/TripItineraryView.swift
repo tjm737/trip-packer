@@ -61,6 +61,25 @@ struct TripItineraryView: View {
     /// presented screen with no way back is a trap.
     var onClose: (() -> Void)?
 
+    /*
+     * Whether this screen is embedded inside the web page rather than presented
+     * as a full-screen sheet.
+     *
+     * The two modes want different chrome, and the differences are not cosmetic:
+     *
+     *  - A MODAL sheet is its own context. It needs a title (nothing else says
+     *    what it is), a Done button (a sheet wants an explicit way out), and a
+     *    navigation bar to hold them.
+     *
+     *  - EMBEDDED, the page around it already provides all of that: the web
+     *    header carries the trip name, destination and dates, and the web tab bar
+     *    is the way out. A native bar would be a second header stacked under the
+     *    first, and a Done button would be a second way out that duplicates the
+     *    tab bar -- so both are dropped and the refresh action moves into the
+     *    content, where it is still reachable.
+     */
+    var embedded: Bool = false
+
     @StateObject private var model = TripItineraryModel()
 
     var body: some View {
@@ -87,38 +106,81 @@ struct TripItineraryView: View {
                 }
             }
         }
-        .navigationTitle(model.trip(tripId)?.name ?? "Itinerary")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationTitle(embedded ? "" : (model.trip(tripId)?.name ?? "Itinerary"))
+        .navigationBarTitleDisplayMode(embedded ? .inline : .large)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                if let onClose {
-                    Button("Done", action: onClose)
-                        .foregroundStyle(TPTheme.textSecondary)
-                }
-            }
-            // Refresh is a toolbar button rather than `.refreshable`, matching
-            // PackingListView. `.refreshable` installs a pull-to-refresh
-            // gesture that competes with the scroll view's own pan and was
-            // removed there for breaking scrolling; the same applies here.
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    Task { await model.load() }
-                } label: {
-                    if model.isLoading {
-                        ProgressView().tint(TPTheme.textSecondary)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
+            /*
+             * Embedded, the toolbar is suppressed entirely: the web header is the
+             * title and the web tab bar is the way out. The refresh action is not
+             * lost -- it moves into the content below (see `embeddedRefreshRow`).
+             */
+            if !embedded {
+                ToolbarItem(placement: .cancellationAction) {
+                    if let onClose {
+                        Button("Done", action: onClose)
                             .foregroundStyle(TPTheme.textSecondary)
                     }
                 }
-                .disabled(model.isLoading)
-                .accessibilityLabel("Refresh itinerary")
+                // Refresh is a toolbar button rather than `.refreshable`, matching
+                // PackingListView. `.refreshable` installs a pull-to-refresh
+                // gesture that competes with the scroll view's own pan and was
+                // removed there for breaking scrolling; the same applies here.
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        Task { await model.load() }
+                    } label: {
+                        if model.isLoading {
+                            ProgressView().tint(TPTheme.textSecondary)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .foregroundStyle(TPTheme.textSecondary)
+                        }
+                    }
+                    .disabled(model.isLoading)
+                    .accessibilityLabel("Refresh itinerary")
+                }
             }
         }
         .toolbarBackground(TPTheme.surface0, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .task { await model.load() }
+    }
+
+    /*
+     * The refresh control, for embedded mode only.
+     *
+     * The toolbar that normally holds it is hidden when embedded, and leaving the
+     * screen with no way to refresh would make the native screen strictly worse
+     * than the web one it replaces -- the web itinerary refetches, and a native
+     * screen that cannot is a regression in the thing being migrated.
+     *
+     * Kept in the content flow rather than floating, so it scrolls away with the
+     * first day instead of covering a row.
+     */
+    @ViewBuilder
+    private var embeddedRefreshRow: some View {
+        if embedded {
+            HStack {
+                Spacer()
+                Button {
+                    Task { await model.load() }
+                } label: {
+                    if model.isLoading {
+                        ProgressView().tint(TPTheme.textSecondary)
+                    } else {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                            .labelStyle(.titleAndIcon)
+                            .font(.system(size: 13))
+                            .foregroundStyle(TPTheme.textSecondary)
+                    }
+                }
+                .disabled(model.isLoading)
+                .accessibilityLabel("Refresh itinerary")
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+        }
     }
 
     @ViewBuilder
@@ -132,14 +194,24 @@ struct TripItineraryView: View {
              * load" treatment here would tell the user something was broken
              * when nothing is.
              */
-            ContentUnavailableView {
-                Label("No reservations", systemImage: "calendar")
-            } description: {
-                Text("Bookings added to this trip will appear here.")
+            VStack(spacing: 12) {
+                ContentUnavailableView {
+                    Label("No reservations", systemImage: "calendar")
+                } description: {
+                    Text("Bookings added to this trip will appear here.")
+                }
+                /* The refresh control is not only for populated lists: an empty
+                   itinerary is where a user most wants to retry, and embedded
+                   mode has no toolbar holding one. */
+                embeddedRefreshRow
             }
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {
+                    /* Embedded mode has no toolbar, so the refresh control lives
+                       here -- see `embeddedRefreshRow`. */
+                    embeddedRefreshRow
+
                     ForEach(days, id: \.day) { group in
                         VStack(alignment: .leading, spacing: 10) {
                             Text(TPItinerary.dayHeading(group.day))

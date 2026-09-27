@@ -460,6 +460,15 @@ struct PackingListView: View {
     /// something the presenter adds around it.
     var onClose: (() -> Void)?
 
+    /*
+     * Whether this screen is embedded inside the web page rather than presented
+     * as a full-screen sheet. See the same flag on TripItineraryView for the
+     * reasoning: embedded, the page provides the title and the way out, so the
+     * native navigation bar and its Done button are suppressed to avoid a second
+     * stacked header and a duplicative exit.
+     */
+    var embedded: Bool = false
+
     @StateObject private var model = PackingListModel()
 
     /// The item being edited, and the item pending deletion.
@@ -500,54 +509,63 @@ struct PackingListView: View {
                 }
             }
         }
-        .navigationTitle(model.trip(tripId)?.name ?? "Packing")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationTitle(embedded ? "" : (model.trip(tripId)?.name ?? "Packing"))
+        .navigationBarTitleDisplayMode(embedded ? .inline : .large)
         .toolbar {
-            // The `if` goes INSIDE the ToolbarItem, not around it. Wrapping the
-            // item in an `if let` makes the builder produce an
-            // `Optional<ToolbarContent>`; keeping the condition inside yields a
-            // concrete ToolbarItem whose body happens to be empty, which is
-            // unambiguous and avoids a hard error under Swift 6's stricter
-            // builder checking. (This was originally framed as an iOS 15
-            // constraint, but the pattern is correct on any target.)
-            ToolbarItem(placement: .cancellationAction) {
-                if let onClose {
-                    Button("Done", action: onClose)
-                        .foregroundStyle(TPTheme.textSecondary)
-                }
-            }
-            // Add is placed BEFORE refresh so it lands on the inner
-            // trailing edge. `.primaryAction` items are laid out in the order
-            // declared, so declaring Add first puts it closest to the title and
-            // pushes refresh to the outer edge. Adding an item is the more
-            // common action and belongs nearest the content.
-            //
-            // Hidden entirely when the trip has no categories: there would be
-            // nowhere to put the item, and a button that opens a sheet whose
-            // Add button can never enable is worse than no button.
-            ToolbarItem(placement: .primaryAction) {
-                if !model.categories(for: tripId).isEmpty {
-                    Button {
-                        addingItem = true
-                    } label: {
-                        Image(systemName: "plus")
+            /*
+             * Embedded, the bar is suppressed entirely -- the web header is the
+             * title and the web tab bar is the way out. Add and Refresh are not
+             * lost; they move into the content (see `embeddedActionRow`), because
+             * a packing list with no way to add an item would be a regression on
+             * the web list it replaces.
+             */
+            if !embedded {
+                // The `if` goes INSIDE the ToolbarItem, not around it. Wrapping the
+                // item in an `if let` makes the builder produce an
+                // `Optional<ToolbarContent>`; keeping the condition inside yields a
+                // concrete ToolbarItem whose body happens to be empty, which is
+                // unambiguous and avoids a hard error under Swift 6's stricter
+                // builder checking. (This was originally framed as an iOS 15
+                // constraint, but the pattern is correct on any target.)
+                ToolbarItem(placement: .cancellationAction) {
+                    if let onClose {
+                        Button("Done", action: onClose)
+                            .foregroundStyle(TPTheme.textSecondary)
                     }
-                    .accessibilityLabel("Add item")
                 }
-            }
-            // Refresh lives here rather than as pull-to-refresh: the
-            // `.refreshable` control competed with the ScrollView's own pan and
-            // broke scrolling outright (see the note above `content`). Placement
-            // is `.primaryAction` so it sits on the trailing edge, opposite
-            // Done, which is where a reload control is expected.
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    Task { await model.load() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
+                // Add is placed BEFORE refresh so it lands on the inner
+                // trailing edge. `.primaryAction` items are laid out in the order
+                // declared, so declaring Add first puts it closest to the title and
+                // pushes refresh to the outer edge. Adding an item is the more
+                // common action and belongs nearest the content.
+                //
+                // Hidden entirely when the trip has no categories: there would be
+                // nowhere to put the item, and a button that opens a sheet whose
+                // Add button can never enable is worse than no button.
+                ToolbarItem(placement: .primaryAction) {
+                    if !model.categories(for: tripId).isEmpty {
+                        Button {
+                            addingItem = true
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                        .accessibilityLabel("Add item")
+                    }
                 }
-                .disabled(model.isLoading)
-                .accessibilityLabel("Refresh")
+                // Refresh lives here rather than as pull-to-refresh: the
+                // `.refreshable` control competed with the ScrollView's own pan and
+                // broke scrolling outright (see the note above `content`). Placement
+                // is `.primaryAction` so it sits on the trailing edge, opposite
+                // Done, which is where a reload control is expected.
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        Task { await model.load() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .disabled(model.isLoading)
+                    .accessibilityLabel("Refresh")
+                }
             }
         }
         // The nav bar is pinned to the same black as the content it sits over.
@@ -624,10 +642,55 @@ struct PackingListView: View {
             Text("This removes it from the packing list for everyone. It cannot be undone.")
         }
     }
+    /*
+     * The add and refresh controls, for embedded mode only.
+     *
+     * The toolbar that normally holds them is hidden when embedded, and both are
+     * real actions rather than chrome: without Add there is no way to put an item
+     * on the list, and without Refresh the screen cannot pick up a change made on
+     * the web. Leaving either out would make the native screen worse than the web
+     * list it replaces.
+     *
+     * Placed at the top of the scroll content so they scroll away rather than
+     * covering a row, and laid out trailing to match where the toolbar items were.
+     */
+    @ViewBuilder
+    private var embeddedActionRow: some View {
+        if embedded {
+            HStack(spacing: 16) {
+                Spacer()
+                if !model.categories(for: tripId).isEmpty {
+                    Button {
+                        addingItem = true
+                    } label: {
+                        Label("Add", systemImage: "plus")
+                            .labelStyle(.titleAndIcon)
+                            .font(.system(size: 13))
+                            .foregroundStyle(TPTheme.textSecondary)
+                    }
+                    .accessibilityLabel("Add item")
+                }
+                Button {
+                    Task { await model.load() }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                        .labelStyle(.titleAndIcon)
+                        .font(.system(size: 13))
+                        .foregroundStyle(TPTheme.textSecondary)
+                }
+                .disabled(model.isLoading)
+                .accessibilityLabel("Refresh")
+            }
+        }
+    }
 
+    @ViewBuilder
     private var content: some View {
         ScrollView {
             VStack(spacing: 12) {
+                /* Embedded mode has no toolbar; see `embeddedActionRow`. */
+                embeddedActionRow
+
                 BagSection(tripId: tripId, model: model)
 
                 SuggestionsSection(
@@ -647,7 +710,15 @@ struct PackingListView: View {
                     ContentUnavailableView {
                         Label("Nothing to pack yet", systemImage: "suitcase")
                     } description: {
-                        Text("Tap + to add your first item, or pick a suggestion above.")
+                        /*
+                         * The hint names the control that actually exists in
+                         * this mode. Embedded has no toolbar +, so pointing at
+                         * one would send the user looking for a button that is
+                         * not there.
+                         */
+                        Text(embedded
+                             ? "Tap Add to create your first item, or pick a suggestion above."
+                             : "Tap + to add your first item, or pick a suggestion above.")
                     }
                     .padding(.top, 60)
                 } else {

@@ -5,8 +5,9 @@ import { Capacitor } from "@capacitor/core";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { AlertCircle, Smartphone } from "lucide-react";
-import { openNativePackingList } from "@/lib/nativeScreens";
-import { shouldPresentNativeTab, shouldShowNativeFallbackButton } from "@/lib/nativeTabPresentation";
+import { openNativePackingList, closeNativeScreen, updateNativeFrame } from "@/lib/nativeScreens";
+import { shouldPresentNativeTab, shouldShowNativeFallbackButton, shouldSendFrame, sameFrame } from "@/lib/nativeTabPresentation";
+import { useNativePresentationFrame } from "@/components/useNativePresentationFrame";
 
 /*
  * Makes the Packing tab open the native SwiftUI list by itself, and reports
@@ -23,11 +24,12 @@ import { shouldPresentNativeTab, shouldShowNativeFallbackButton } from "@/lib/na
  * the fallback on iOS when presenting fails, so it has to keep working when the
  * native bridge is absent entirely.
  *
- * `openPackingList` resolves when the screen is DISMISSED, which makes the
- * await below the dismissal signal -- there is no event to subscribe to and no
- * polling. That is a contract of the plugin, not a convenience: it used to
- * resolve on present, and the web layer's resulting inability to tell present
- * from dismissed is what produced the stale list this replaces.
+ * `openPackingList` resolves differently in the two modes and this component
+ * must handle both: embedded (the normal iOS case, with a frame) it resolves on
+ * PRESENTATION with `dismissed: false`, and the tab's unmount closes the screen;
+ * modal (no frame) it resolves on DISMISSAL with `dismissed: true`. Deciding on
+ * resolution alone is what previously produced the stale list -- and, in the
+ * other direction, un-hid the web list underneath a live native one.
  */
 export function NativePackingAutoOpen({
   tripId,
@@ -55,6 +57,15 @@ export function NativePackingAutoOpen({
    */
   const [presenting, setPresenting] = useState(false);
 
+  /*
+   * The region of the page the native list should occupy, in points.
+   *
+   * Null until the tab panel has been measured. The effect below waits for it,
+   * because the native screen is embedded in that region rather than presented
+   * over the whole page.
+   */
+  const frame = useNativePresentationFrame(isNative);
+
   // Resolved after mount so server and first client render agree -- the bridge
   // does not exist during SSR, so `Capacitor.getPlatform()` is "web" there.
   useEffect(() => {
@@ -70,15 +81,65 @@ export function NativePackingAutoOpen({
   }, [presenting, onNativeOnScreen]);
 
   /*
-   * Present once per entry into the Packing tab.
+   * Keep the up native list pinned to the panel as the panel moves.
    *
-   * This component is mounted as part of the Packing tab's content, so mounting
-   * IS the tab entry event -- and unmounting is the exit, which resets the ref
-   * via the cleanup below. That is what lets a second visit re-present without
-   * ever presenting twice within one visit.
+   * See `shouldSendFrame` for why a frame is not sent when there is nothing on
+   * screen or when it repeats what the present already carried. The comparison is
+   * by VALUE -- `measurePresentationFrame` returns a fresh object per
+   * measurement, so an identity check would send on every scroll event.
+   */
+  const lastSentFrame = useRef<typeof frame>(null);
+  useEffect(() => {
+    if (!shouldSendFrame({
+      presenting,
+      hasFrame: frame !== null,
+      sameAsLastSent: sameFrame(lastSentFrame.current, frame),
+    })) return;
+    lastSentFrame.current = frame;
+    void updateNativeFrame(frame as NonNullable<typeof frame>);
+  }, [presenting, frame]);
+
+  /*
+   * Tab entry arms the present; tab EXIT is what closes the screen.
+   *
+   * Split into a separate effect from the present below because this one has no
+   * dependency that changes during a visit -- so its cleanup runs only on a real
+   * unmount. The present below IS keyed on `frame`, which changes on every
+   * scroll, so putting the teardown in its cleanup (where it used to live) would
+   * close the native screen every time the page scrolled.
+   *
+   * The close is the only thing that takes the native view down: embedded screens
+   * have no Done button by design, the web tab bar is the exit. Without it the
+   * child controller stays on screen over whichever tab the user switched to.
    */
   useEffect(() => {
     if (!isNative) return;
+    return () => {
+      void closeNativeScreen();
+      hasPresented.current = false;
+      lastSentFrame.current = null;
+      setPresenting(false);
+    };
+  }, [isNative, tripId]);
+
+  /*
+   * Present once per entry into the Packing tab.
+   *
+   * This component is mounted as part of the Packing tab's content, so mounting
+   * IS the tab entry event -- and unmounting is the exit, handled by the effect
+   * above. That is what lets a second visit re-present without ever presenting
+   * twice within one visit.
+   */
+  useEffect(() => {
+    if (!isNative) return;
+    /*
+     * Wait for a usable frame before presenting. The native screen is embedded
+     * in the tab panel's region, so presenting before the panel has been
+     * measured would either fail or land in the wrong place -- and a zero-height
+     * frame is treated as "not yet measured" rather than as a real size, because
+     * a hidden or collapsed panel reports one honestly.
+     */
+    if (!frame) return;
 
     const action = shouldPresentNativeTab({
       tabActive: true,
@@ -88,38 +149,52 @@ export function NativePackingAutoOpen({
     });
     if (action === "present") {
       hasPresented.current = true;
-      present();
+      void present(frame);
     }
 
-    return () => {
-      // Tab exit. A later entry is a new presentation, so clear the flag.
-      hasPresented.current = false;
-      setPresenting(false);
-    };
+    // NO cleanup here -- see the effect above. A cleanup keyed on `frame` would
+    // fire on every scroll and close the screen the user is looking at.
     // `isNative` flips false -> true once, after mount; running then is correct.
     // `presenting` is deliberately NOT a dependency: it is read as a guard at
     // the moment of entering, and depending on it would re-run this effect when
     // the presentation resolves, re-arming the loop the guard exists to stop.
+    // `frame` IS a dependency -- it starts null and arrives on the first
+    // measurement, and the effect has to run again once it does. Re-running is
+    // harmless because `hasPresented` stops a second present.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isNative, tripId]);
+  }, [isNative, tripId, frame]);
 
-  async function present() {
+  async function present(f: NonNullable<typeof frame>) {
     setError(null);
     setPresenting(true);
+    /*
+     * Record the frame the present carries BEFORE the call, so the forwarding
+     * effect above sees it as already-sent and does not immediately re-send it.
+     * A re-send can land before the child controller exists and resolve
+     * `applied: false` under a view that is visibly on screen.
+     */
+    lastSentFrame.current = f;
     try {
-      const result = await openNativePackingList(tripId);
+      const result = await openNativePackingList(tripId, f);
 
       /*
-       * `presented: false` means a sheet was already up, so nothing changed --
-       * keep `presenting` true, because the native screen really is on screen
-       * and the web list should stay hidden behind it.
+       * The two fields answer different questions, and in embedded mode they
+       * disagree -- so they must be read separately rather than inferred.
        *
-       * Anything else means the native screen has now been dismissed, because
-       * the promise resolves on dismissal. Clearing `presenting` here is what
-       * brings the tab back, and on iOS brings the web list back with it as the
-       * fallback for a dismissed-then-re-entered tab.
+       * `presented: false` means nothing was shown (a screen was already up), so
+       * keep `presenting` true: the native screen really is on screen and the web
+       * list must stay hidden behind it.
+       *
+       * `dismissed: true` means the promise resolved because the screen CLOSED --
+       * the modal behaviour, where resolution waits for the dismissal. Only then
+       * is it right to stop treating the native screen as present, which is what
+       * brings the tab back.
+       *
+       * Embedded, the promise resolves as soon as the child controller is added
+       * and reports `dismissed: false`; deciding on `presented` alone would bring
+       * the web list back underneath the still-visible native one.
        */
-      if (result?.presented !== false) setPresenting(false);
+      if (result?.dismissed) setPresenting(false);
     } catch (e) {
       /*
        * Clear `presenting` on failure so the web list renders. A failed present
@@ -168,7 +243,14 @@ export function NativePackingAutoOpen({
           <Button
             variant="ghost"
             size="sm"
-            onClick={present}
+            /* Wrapped, not passed directly: `onClick` hands the handler a mouse
+               event, and `present` now takes a frame. Passing it directly would
+               typecheck as "a frame is not an event" in one direction and, were
+               the types looser, would silently hand a MouseEvent to native as a
+               frame. The retry is a no-op until the panel has been measured,
+               which is the same condition the auto-present path waits on. */
+            onClick={() => { if (frame) present(frame); }}
+            disabled={!frame}
             className="text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50 focus-ring"
           >
             <Smartphone className="w-4 h-4 mr-1.5" />

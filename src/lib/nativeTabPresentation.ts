@@ -151,3 +151,64 @@ export function shouldShowNativeFallbackButton(input: {
 export function shouldPresentItineraryTab(input: NativeTabPresentationInput): NativeTabAction {
   return shouldPresentNativeTab(input);
 }
+
+/*
+ * Whether a freshly measured frame should be sent to the native screen.
+ *
+ * Embedded native content is a child view with an explicit frame, so it does NOT
+ * follow the page on its own: as the page scrolls, rotates, or the keyboard
+ * opens, the region the native view is drawn into moves and only a new frame
+ * from here moves the view with it. Without this the native content stays where
+ * it was first placed while the page slides underneath, leaving a gap above and
+ * an overlap over the tab bar below.
+ *
+ * Two rules, both about not sending frames that are wrong to send:
+ *
+ *   - Nothing to move: no native screen is on screen (not presenting), or no
+ *     usable measurement yet. Sending here is a no-op the plugin must answer
+ *     `applied: false` to, and this fires on every scroll frame -- so it is worth
+ *     not sending at all rather than sending and discarding.
+ *
+ *   - The frame is the one the present call already carried. The present is
+ *     given the frame it draws into, so re-sending that same frame immediately
+ *     after is at best redundant. It is also actively misleading: the re-send can
+ *     arrive before the child controller exists and resolve `applied: false`
+ *     while the view is visibly on screen, which reads as a failure that did not
+ *     happen.
+ *
+ * The comparison that matters is by VALUE, not identity: `measurePresentationFrame`
+ * returns a fresh object per measurement, so an unchanged region arrives as a
+ * different object every scroll and an identity check would send a frame on
+ * every single scroll event. `sameFrame` below does the value comparison and the
+ * result is passed in as `sameAsLastSent`.
+ */
+export function shouldSendFrame(input: {
+  presenting: boolean;
+  hasFrame: boolean;
+  sameAsLastSent: boolean;
+}): boolean {
+  if (!input.presenting) return false;
+  if (!input.hasFrame) return false;
+  if (input.sameAsLastSent) return false;
+  return true;
+}
+
+/**
+ * Are two frames the same region?
+ *
+ * Compares by value rather than identity so an unchanged region does not produce
+ * a bridge call per scroll event. Null-safe: two nulls are equal (nothing
+ * measured either time), and null vs a frame is not.
+ */
+export function sameFrame(
+  a: { top: number; left: number; width: number; height: number } | null,
+  b: { top: number; left: number; width: number; height: number } | null,
+): boolean {
+  if (a === null || b === null) return a === b;
+  return (
+    a.top === b.top &&
+    a.left === b.left &&
+    a.width === b.width &&
+    a.height === b.height
+  );
+}
