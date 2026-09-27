@@ -37,6 +37,26 @@ export interface Release {
  */
 export const RELEASES: Release[] = [
   {
+    version: "0.7.5",
+    date: "2026-09-27",
+    headline: "A clearer Suggest items button, and a stated minimum age",
+    groups: [
+      {
+        area: "Packing",
+        items: [
+          "The Suggest items button is now green and easier to find, so it reads as the one action on the packing tab that uses Apple Intelligence.",
+          "When your device cannot run on-device suggestions, the button stays muted rather than looking like something that failed.",
+        ],
+      },
+      {
+        area: "Account",
+        items: [
+          "TripPlanner is for people aged 13 and over. This is now stated on the sign-in screen, in the support questions, and in the privacy policy.",
+        ],
+      },
+    ],
+  },
+  {
     version: "0.7.4",
     date: "2026-09-27",
     headline: "Your itinerary, in your calendar",

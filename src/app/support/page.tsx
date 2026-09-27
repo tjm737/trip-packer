@@ -49,6 +49,10 @@ const FAQ = [
     a: "Open the Profile tab in the app and use the delete option. This removes your account and the trips and data associated with it. If you would rather we did it for you, email us.",
   },
   {
+    q: "Is there a minimum age?",
+    a: "Yes — TripPlanner is for people aged 13 and over, and you must be at least 13 to hold an account. Because accounts are created by the app's owner rather than through a public sign-up form, the age requirement is applied when an account is set up. If you believe an account belongs to someone under 13, email us and we will remove it along with its data.",
+  },
+  {
     q: "Do you use my location?",
     a: "No. The app never asks for access to your device's location. Maps are drawn from the places you type into your itinerary.",
   },

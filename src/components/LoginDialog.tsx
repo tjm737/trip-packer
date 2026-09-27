@@ -282,6 +282,7 @@ export function LoginDialog({
           <div className="mt-4 flex items-center justify-between gap-3">
             <p className="text-[10px] leading-snug text-zinc-500">
               Accounts are created by the trip owner from their sidebar.
+              TripPlanner is for people aged 13 and over.
             </p>
             <Button
               type="submit"

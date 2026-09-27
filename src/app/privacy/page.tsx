@@ -80,7 +80,8 @@ const SECTIONS = [
   {
     heading: "Children",
     body: [
-      "TripPlanner is not directed at children and we do not knowingly collect information from children.",
+      "TripPlanner is for people aged 13 and over. You must be at least 13 years old to use the app or hold an account.",
+      "Accounts are not self-service: they are created by the operator of this app, or by an administrator, rather than through a public sign-up form. We do not knowingly collect information from anyone under 13. If you believe an account belongs to someone under 13, contact us and we will remove it along with its data.",
     ],
   },
   {
