@@ -70,6 +70,14 @@ Options:
                         up; the default is to rebuild from scratch.
   -h, --help            This text.
 
+Environment:
+  TRIP_PACKER_DB        Database to write. Defaults to data/trip-packer.db.
+  TRIP_PACKER_DEMO_PASSWORD
+                        Same as --password, but keeps the value out of argv.
+                        Prefer this: an argument is visible to every user on
+                        the box via the process table and is written to shell
+                        history.
+
 Notes:
   Re-running WIPES the review account's trips and recreates them. That is
   intended: the account is disposable state and a deploy re-seeds it.
@@ -242,8 +250,8 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const email = String(args.email || DEFAULT_EMAIL).trim().toLowerCase();
   const name = String(args.name || DEFAULT_NAME).trim();
-  const password = args.password || generatePassword();
-  const generated = !args.password;
+  const password = args.password || process.env.TRIP_PACKER_DEMO_PASSWORD || generatePassword();
+  const generated = !args.password && !process.env.TRIP_PACKER_DEMO_PASSWORD;
 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     console.error(`That does not look like an email address: ${email}`);
