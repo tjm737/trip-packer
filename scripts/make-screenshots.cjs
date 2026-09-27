@@ -14,11 +14,20 @@
  *
  * App Store Connect validates dimensions and refuses the upload if they are off
  * by a pixel. It is a silent-feeling rejection: the file "uploads" into a slot
- * that then refuses to save. The requirement (as of the 6.9"/13" era):
+ * that then refuses to save. The requirement:
  *
- *   iPhone 6.9"  1320x2868  or 1290x2796   REQUIRED
+ *   iPhone 6.5"  1284x2778  or 1242x2688   REQUIRED if the app runs on iPhone
+ *                                          and no 6.9" set is supplied. Also the
+ *                                          slot every smaller display falls back
+ *                                          to, so providing it keeps 6.3"/6.1"/
+ *                                          5.5"/4.7" renders native rather than
+ *                                          upscaled from 6.9".
  *   iPad 13"     2064x2752  or 2048x2732   REQUIRED, because this target sets
  *                                          TARGETED_DEVICE_FAMILY = "1,2"
+ *
+ * Full table: developer.apple.com/help/app-store-connect/reference/
+ *             screenshot-specifications/  (read it — the required slot has moved
+ *             twice; 6.9" is the newest and older sets are kept as fallbacks)
  *
  * The iPad set is the one that catches people out: the app declares iPhone AND
  * iPad support, so ASC demands iPad screenshots regardless of whether anyone
@@ -43,7 +52,7 @@
  *   node scripts/make-screenshots.cjs                  # public screens only
  *   APPR_REVIEW_PASSWORD='...' node scripts/make-screenshots.cjs
  *   node scripts/make-screenshots.cjs --base http://localhost:4000
- *   node scripts/make-screenshots.cjs --only iphone69
+ *   node scripts/make-screenshots.cjs --only iphone65
  */
 
 "use strict";
@@ -61,11 +70,19 @@ const DEMO_EMAIL = "appreview@trips.planetracker.app";
  * typo fails loudly here instead of silently in App Store Connect.
  */
 const DEVICES = {
-  iphone69: {
-    label: 'iPhone 6.9"',
-    logical: { width: 440, height: 956 },
+  // 6.5" is the anchor of Apple's fallback ladder. Every smaller slot
+  // (6.3/6.1/5.5/4.7) says "if screenshots with the accepted sizes aren't
+  // provided, scaled screenshots for 6.5" displays are used" — so supplying
+  // this set means every older iPhone renders a native shot instead of an
+  // upscale. It is also *required* whenever the 6.9" set is absent.
+  //
+  //   6.5" display: 1284x2778  and  1242x2688
+  //     iPhone 14 Plus, 13 Pro Max, 12 Pro Max, 11 Pro Max, 11, XS Max, XR
+  iphone65: {
+    label: 'iPhone 6.5"',
+    logical: { width: 428, height: 926 },
     scale: 3,
-    expect: { width: 1320, height: 2868 },
+    expect: { width: 1284, height: 2778 },
   },
   ipad13: {
     label: 'iPad 13"',
