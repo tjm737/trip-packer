@@ -67,6 +67,7 @@ import { TripMap } from "@/components/TripMap";
 import { Tabs } from "@/components/Tabs";
 import { PackingSuggestions } from "@/components/PackingSuggestions";
 import { NativePackingAutoOpen } from "@/components/NativePackingAutoOpen";
+import { shouldRenderWebPackingList } from "@/lib/nativePackingTab";
 import { ShareButton } from "@/components/ShareButton";
 import { ShareDialog } from "@/components/ShareDialog";
 import { observeEditRequests } from "@/lib/editRequest";
@@ -484,6 +485,33 @@ export default function TripDetail() {
    * leaving the trip.
    */
   const [tab, setTab] = useState<"map" | "itinerary" | "packing" | "notes">("map");
+
+  /*
+   * Whether the native packing screen currently owns the Packing tab.
+   *
+   * Raised by NativePackingAutoOpen, which is the only thing that can know: it
+   * is what calls the bridge and what observes the dismissal. The web list is
+   * hidden while this is true -- on iOS the native list is the packing screen,
+   * not an overlay, and the web list behind it is stale by construction.
+   *
+   * Defaults false so the very first render on every platform shows the list.
+   * That keeps the tab from being blank while the sheet animates up, and keeps
+   * web/Android, where presenting is impossible, on exactly the old code path.
+   */
+  const [nativePackingOnScreen, setNativePackingOnScreen] = useState(false);
+
+  /*
+   * Whether this platform can present the native list at all.
+   *
+   * Raised by NativePackingAutoOpen rather than read here from
+   * `Capacitor.getPlatform()` directly. The bridge does not exist during SSR, so
+   * that call answers "web" on the server and "ios" on the client -- reading it
+   * during render would make the two disagree about whether to render the web
+   * list, which is a hydration mismatch. The component already resolves the
+   * platform after mount for exactly this reason; it reports the answer up so
+   * the logic lives in one place.
+   */
+  const [nativePackingAvailable, setNativePackingAvailable] = useState(false);
 
   /*
    * A stop on the map can hand off to the full booking editor, which lives on
@@ -1148,7 +1176,35 @@ export default function TripDetail() {
               icon: <Cloud className="w-3.5 h-3.5" />,
               content: (
                 <>
+                    {/* Native SwiftUI list -- auto-presents on entering this tab.
+                        Renders only inside the iOS app. On iOS it is the packing
+                        screen and the web list below is not rendered at all, so
+                        this must stay OUTSIDE the gate: it is what presents, and
+                        unmounting it would reset the ref that stops a
+                        re-present loop. */}
+                    <NativePackingAutoOpen
+                      tripId={tripId}
+                      onNativeOnScreen={setNativePackingOnScreen}
+                      onNativeAvailable={setNativePackingAvailable}
+                    />
 
+                    {/* The web list and everything that belongs to it.
+
+                        Hidden on iOS while the native screen owns the tab. It is
+                        not a second view of the same data -- it was rendered
+                        before any native edit and is never refetched, so showing
+                        it after a dismissal means landing on a stale copy of what
+                        the user was just looking at. That is what "interaction is
+                        not intuitive" was describing.
+
+                        Still rendered on web and Android, where the native screen
+                        does not exist, and on iOS before a presentation is asked
+                        for or after one fails. */}
+                    {shouldRenderWebPackingList({
+                      nativeAvailable: nativePackingAvailable,
+                      nativeOnScreen: nativePackingOnScreen,
+                    }) && (
+                      <>
                     {/* Bags. Sits at the top of the Packing tab because it is the
                         container the rows below are sorted into -- a bag chip on
                         an item is only meaningful once bags exist. */}
@@ -1169,13 +1225,6 @@ export default function TripDetail() {
                       days={tripDurationDays(tripInfo.startDate, tripInfo.endDate) ?? undefined}
                       month={tripStartMonth(tripInfo.startDate) ?? undefined}
                     />
-
-                    {/* Native SwiftUI list -- auto-presents on entering this tab.
-                        Renders only inside the iOS app. It is an OVERLAY, not a
-                        replacement: the web list below stays mounted and is what
-                        the user returns to after dismissing it, and it is the
-                        whole feature on the web and Android. */}
-                    <NativePackingAutoOpen tripId={tripId} />
 
                     {categories.length === 0 ? (
                       <div className="text-center py-16">
@@ -1266,6 +1315,8 @@ export default function TripDetail() {
                       )}
                     </div>
                       </div>
+                    )}
+                      </>
                     )}
 
         

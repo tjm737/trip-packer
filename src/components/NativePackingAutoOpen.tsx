@@ -9,25 +9,35 @@ import { openNativePackingList } from "@/lib/nativeScreens";
 import { shouldPresentPackingTab } from "@/lib/nativePackingTab";
 
 /*
- * Makes the Packing tab open the native SwiftUI list by itself.
+ * Makes the Packing tab open the native SwiftUI list by itself, and reports
+ * whether the native screen currently owns the tab.
  *
- * This replaces the old "Open native list" button. The button was an opt-in
- * pilot affordance -- the user had to know the native screen existed and ask for
- * it. Now the tab presents it on entry, which is what "make the packing tab the
- * native list" means in practice.
+ * On iOS the native list is the packing screen, not an overlay -- the parent
+ * hides the web list while it is up. That is why this component takes
+ * `onNativeOnScreen` and raises its own presentation state: the decision to
+ * hide the web list depends on state that only lives here, and the parent is
+ * what renders the list.
  *
- * It is NOT a replacement of the web list. `openPackingList` presents a SwiftUI
- * screen over the WebView; it does not swap the tab's content, and there is no
- * dismiss verb in the plugin surface for the web layer to observe. So the web
- * list stays mounted underneath and is what the user returns to when they close
- * the native screen -- and it is the whole feature on web and Android, where
- * presenting is impossible.
+ * It reports up rather than rendering the list itself because the list is not
+ * this component's to own. It is the whole feature on web and Android, and it is
+ * the fallback on iOS when presenting fails, so it has to keep working when the
+ * native bridge is absent entirely.
  *
- * Rendering nothing on the web is deliberate: this component's only job is to
- * trigger a native presentation, so outside the iOS app it has nothing to do.
- * The web list is rendered by the parent, not here.
+ * `openPackingList` resolves when the screen is DISMISSED, which makes the
+ * await below the dismissal signal -- there is no event to subscribe to and no
+ * polling. That is a contract of the plugin, not a convenience: it used to
+ * resolve on present, and the web layer's resulting inability to tell present
+ * from dismissed is what produced the stale list this replaces.
  */
-export function NativePackingAutoOpen({ tripId }: { tripId: string }) {
+export function NativePackingAutoOpen({
+  tripId,
+  onNativeOnScreen,
+  onNativeAvailable,
+}: {
+  tripId: string;
+  onNativeOnScreen: (onScreen: boolean) => void;
+  onNativeAvailable: (available: boolean) => void;
+}) {
   const [isNative, setIsNative] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,11 +48,26 @@ export function NativePackingAutoOpen({ tripId }: { tripId: string }) {
    */
   const hasPresented = useRef(false);
 
+  /*
+   * Tracks whether a presentation is in flight or fully on screen. Unlike
+   * `hasPresented` this DOES drive renders -- the parent hides the web list
+   * when it flips -- so it is state.
+   */
+  const [presenting, setPresenting] = useState(false);
+
   // Resolved after mount so server and first client render agree -- the bridge
   // does not exist during SSR, so `Capacitor.getPlatform()` is "web" there.
   useEffect(() => {
-    setIsNative(Capacitor.getPlatform() === "ios");
-  }, []);
+    const native = Capacitor.getPlatform() === "ios";
+    setIsNative(native);
+    onNativeAvailable(native);
+  }, [onNativeAvailable]);
+
+  // Tell the parent whenever native takes or releases the tab. Separate from
+  // the effect below so the parent is told on failure too, not only on success.
+  useEffect(() => {
+    onNativeOnScreen(presenting);
+  }, [presenting, onNativeOnScreen]);
 
   /*
    * Present once per entry into the Packing tab.
@@ -55,13 +80,13 @@ export function NativePackingAutoOpen({ tripId }: { tripId: string }) {
   useEffect(() => {
     if (!isNative) return;
 
-    if (
-      shouldPresentPackingTab({
-        tabActive: true,
-        nativeAvailable: true,
-        hasPresented: hasPresented.current,
-      })
-    ) {
+    const action = shouldPresentPackingTab({
+      tabActive: true,
+      nativeAvailable: true,
+      hasPresented: hasPresented.current,
+      presenting,
+    });
+    if (action === "present") {
       hasPresented.current = true;
       present();
     }
@@ -69,21 +94,44 @@ export function NativePackingAutoOpen({ tripId }: { tripId: string }) {
     return () => {
       // Tab exit. A later entry is a new presentation, so clear the flag.
       hasPresented.current = false;
+      setPresenting(false);
     };
     // `isNative` flips false -> true once, after mount; running then is correct.
+    // `presenting` is deliberately NOT a dependency: it is read as a guard at
+    // the moment of entering, and depending on it would re-run this effect when
+    // the presentation resolves, re-arming the loop the guard exists to stop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isNative, tripId]);
 
   async function present() {
     setError(null);
+    setPresenting(true);
     try {
-      await openNativePackingList(tripId);
+      const result = await openNativePackingList(tripId);
+
+      /*
+       * `presented: false` means a sheet was already up, so nothing changed --
+       * keep `presenting` true, because the native screen really is on screen
+       * and the web list should stay hidden behind it.
+       *
+       * Anything else means the native screen has now been dismissed, because
+       * the promise resolves on dismissal. Clearing `presenting` here is what
+       * brings the tab back, and on iOS brings the web list back with it as the
+       * fallback for a dismissed-then-re-entered tab.
+       */
+      if (result?.presented !== false) setPresenting(false);
     } catch (e) {
       /*
-       * Surface the reason rather than failing silently. The web list is still
-       * on screen below, so this is not fatal -- but the user asked for the
+       * Clear `presenting` on failure so the web list renders. A failed present
+       * must degrade to the web list rather than to an empty tab -- the native
+       * screen is not coming, and leaving the tab blank would give the user no
+       * way to pack anything.
+       *
+       * Surface the reason rather than failing silently: the user asked for the
        * native list and deserves to know it did not open, rather than being
        * left to wonder whether they mis-tapped.
        */
+      setPresenting(false);
       setError(e instanceof Error ? e.message : "Could not open the native list.");
     }
   }

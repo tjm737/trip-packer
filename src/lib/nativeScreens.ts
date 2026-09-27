@@ -14,7 +14,9 @@ import { Capacitor, registerPlugin } from "@capacitor/core";
  */
 
 interface NativeScreensPlugin {
-  openPackingList(options: { tripId: string }): Promise<{ presented: boolean }>;
+  openPackingList(options: {
+    tripId: string;
+  }): Promise<{ presented: boolean; dismissed?: boolean; reason?: string }>;
 }
 
 /*
@@ -54,13 +56,19 @@ export function nativeScreensAvailable(): boolean {
 /**
  * Present the native packing list for a trip.
  *
+ * Resolves when the screen is DISMISSED -- not when it goes up. The returned
+ * `presented: false` is the one exception: it means a sheet was already open and
+ * this call was a no-op, so nothing is on screen that was not there before.
+ *
  * Throws if the platform cannot present it, so callers should gate on
  * `nativeScreensAvailable()` and keep their existing web behaviour as the
  * fallback rather than treating this as the only path.
  */
-export async function openNativePackingList(tripId: string): Promise<void> {
+export async function openNativePackingList(
+  tripId: string
+): Promise<{ presented: boolean; dismissed?: boolean; reason?: string }> {
   if (!nativeScreensAvailable()) {
     throw new Error("Native screens are only available in the iOS app.");
   }
-  await NativeScreens.openPackingList({ tripId });
+  return NativeScreens.openPackingList({ tripId });
 }
