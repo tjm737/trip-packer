@@ -78,15 +78,30 @@ becomes true and the annual self-classification report applies.
 
 - [x] Signing: distribution cert + profile valid
 - [x] Export compliance declared
-- [x] `/privacy` and `/support` live and public
+- [x] `/privacy` and `/support` live and public (both 200)
 - [x] Review notes written (`docs/app-store-review-notes.md`)
 - [x] Seller name confirmed
-- [ ] ASC record created → **done**: SKU `dexterstrips`, id `6816529260`
-- [ ] Demo account created, with trips/stops/reservations/packing/bags
-- [ ] Production deploy current (the shell loads the live origin)
+- [x] ASC record created → SKU `dexterstrips`, id `6816529260`
+- [x] Demo account created, with trips/stops/reservations/packing/bags
+- [x] iOS deployment target raised to 17 (was 15; see `140791c`)
+- [ ] Production deploy current — `50f7d6e` was deployed and verified, but
+      `e41166c` (demo bags) still needs a deploy for the reviewer to see bags
 - [ ] Archive uploaded, processed, TestFlight-tested
-- [ ] Screenshots in required sizes
-- [ ] App Privacy answers filled in
+- [ ] Screenshots in required sizes — **nothing exists yet; see below**
+- [ ] App Privacy answers filled in (ASC questionnaire, separate from the manifest)
+
+## Screenshots
+
+None exist in the repo, and ASC will reject the submission without them. At
+minimum 6.9" (iPhone 17 Pro Max class); 6.5" is worth adding too.
+
+They must be shot from a **Release** build pointed at production. Debug builds
+load the dev server over the LAN, so the screenshots would not match what a
+reviewer sees — and the trip page is auth-gated, so it needs a signed-in session
+against the live origin.
+
+Suggested set, in order: trip list with a countdown, packing list with bags,
+trip timeline, map, live flight status. The first two do most of the selling.
 
 ## Known risks
 
