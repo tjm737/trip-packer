@@ -454,6 +454,41 @@ function migrate(db: SqliteDb): void {
   addColumnIfMissing(db, "items", "bagId", "TEXT");
 
   /*
+   * Usage metrics.
+   *
+   * Counts, not people. There is deliberately no IP, no user agent, no email and
+   * no free-text column: an analytics table that CAN hold something identifying
+   * eventually WILL, and a table that structurally cannot is the only kind that
+   * stays safe to keep, back up, and read years later without a privacy review.
+   * The user id is the internal row id and is nullable — anonymous page views
+   * still count, and a session that never signs in is not a reason to drop a
+   * data point.
+   *
+   * `sessionId` is a random per-tab value generated on the client, so a session
+   * can be *counted* (sessions, not page views) without being *identified*.
+   *
+   * No FOREIGN KEY on userId, matching items.categoryId and items.bagId: SQLite
+   * cannot add an FK to an existing table with ALTER TABLE, and deleting a user
+   * should not silently delete the historical counts that describe them. The row
+   * survives with a dangling id, which is correct for an append-only ledger.
+   */
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS metrics_events (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      name       TEXT NOT NULL,
+      userId     TEXT,
+      sessionId  TEXT,
+      meta       TEXT,
+      createdAt  TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_metrics_name_time
+      ON metrics_events(name, createdAt);
+    CREATE INDEX IF NOT EXISTS idx_metrics_session
+      ON metrics_events(sessionId);
+  `);
+
+  /*
    * Login attempts, for rate limiting.
    *
    * Only FAILED attempts are recorded. A successful login clears the counter,
@@ -1717,5 +1752,98 @@ export const tx = {
     getDb()
       .prepare("DELETE FROM share_tokens WHERE token = ? AND tripId = ?")
       .run(token, tripId);
+  },
+
+  /**
+   * Append a batch of usage events.
+   *
+   * One transaction for the batch: a metric flush arrives in groups (page unload
+   * queues several at once), and without this SQLite would fsync per row, which
+   * on the same connection as real writes is a cost paid by a signal nobody is
+   * waiting for. Batching also means a partial write cannot happen — either the
+   * whole flush lands or none of it does, so the counts stay internally
+   * consistent.
+   *
+   * ⚠️ Callers must pass ALREADY-SANITIZED events (see lib/metrics.ts). This
+   * function writes what it is given; the validation boundary is the route, not
+   * here, because the allowlist is a policy decision and this layer is storage.
+   */
+  recordMetrics(
+    events: {
+      name: string;
+      userId: string | null;
+      sessionId: string | null;
+      meta: Record<string, string | number | boolean> | null;
+    }[]
+  ): void {
+    if (events.length === 0) return;
+
+    const db = getDb();
+    const stmt = db.prepare(
+      `INSERT INTO metrics_events (name, userId, sessionId, meta, createdAt)
+       VALUES (?, ?, ?, ?, ?)`
+    );
+
+    const run = db.transaction(
+      (
+        rows: {
+          name: string;
+          userId: string | null;
+          sessionId: string | null;
+          meta: Record<string, string | number | boolean> | null;
+        }[]
+      ) => {
+        for (const e of rows) {
+          stmt.run(
+            e.name,
+            e.userId,
+            e.sessionId,
+            e.meta ? JSON.stringify(e.meta) : null,
+            new Date().toISOString()
+          );
+        }
+      }
+    );
+
+    run(events);
+  },
+
+  /**
+   * Event counts grouped by name since an ISO cutoff.
+   *
+   * Backs the /api/metrics report. `since` is compared as a string because
+   * every timestamp in this app is ISO-8601 UTC, where lexicographic order is
+   * chronological order — so this stays index-friendly on
+   * idx_metrics_name_time instead of becoming a full scan with a date function.
+   */
+  countMetricsSince(
+    since: string
+  ): { name: string; count: number; sessions: number }[] {
+    return getDb()
+      .prepare(
+        `SELECT name,
+                COUNT(*) AS count,
+                COUNT(DISTINCT sessionId) AS sessions
+           FROM metrics_events
+          WHERE createdAt >= ?
+          GROUP BY name
+          ORDER BY count DESC`
+      )
+      .all(since) as { name: string; count: number; sessions: number }[];
+  },
+
+  /**
+   * Distinct session count since a cutoff — "how many sittings", which is the
+   * number that answers "is anyone using this" better than raw page views.
+   */
+  countSessionsSince(since: string): number {
+    const row = getDb()
+      .prepare(
+        `SELECT COUNT(DISTINCT sessionId) AS n
+           FROM metrics_events
+          WHERE createdAt >= ? AND sessionId IS NOT NULL`
+      )
+      .get(since) as { n: number };
+    return Number(row?.n ?? 0);
   },
 };

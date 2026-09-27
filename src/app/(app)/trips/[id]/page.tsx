@@ -69,6 +69,7 @@ import { PackingSuggestions } from "@/components/PackingSuggestions";
 import { NativePackingButton } from "@/components/NativePackingButton";
 import { ShareButton } from "@/components/ShareButton";
 import { PrintButton } from "@/components/PrintButton";
+import { CalendarExportButton } from "@/components/CalendarExportButton";
 import { ShareDialog } from "@/components/ShareDialog";
 import { observeEditRequests } from "@/lib/editRequest";
 import {
@@ -750,6 +751,15 @@ export default function TripDetail() {
               access.
             */}
             <PrintButton tripId={tripInfo.id} />
+            {/*
+              Calendar sits beside Print for the same reason Print sits beside
+              Share: it is a property of THIS trip, and the header is the only
+              part visible whichever tab is open. Like Print it is deliberately
+              not gated on write access — exporting an itinerary you can already
+              read is not a modification, so a viewer of a shared trip gets it
+              too.
+            */}
+            <CalendarExportButton tripId={tripInfo.id} />
             <ShareDialog
               tripId={tripId}
               canShare={canShare}

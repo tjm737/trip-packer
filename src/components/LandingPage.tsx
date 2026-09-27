@@ -22,19 +22,31 @@ import Link from "next/link";
 import Image from "next/image";
 import {
   ArrowRight,
+  Briefcase,
   CalendarDays,
+  CalendarPlus,
   CloudOff,
   MapPin,
   Plane,
+  Printer,
   Share2,
   ShieldCheck,
+  Sparkles,
   Ticket,
 } from "lucide-react";
 
+import { RELEASES } from "@/lib/changelog";
+
 /*
- * Product surface. Kept as data rather than hand-written markup so the three
- * cards stay structurally identical — the alternative drifts into three
- * slightly different paddings and icon sizes.
+ * Product surface. Kept as data rather than hand-written markup so the cards
+ * stay structurally identical — the alternative drifts into a dozen slightly
+ * different paddings and icon sizes.
+ *
+ * ⚠️ Every claim here must be backed by something in the app. This list is the
+ * first thing a visitor reads and the thing they will be held to, so a card
+ * describing an unbuilt feature is worse than no card at all. Before adding one,
+ * check it against src/lib/changelog.ts — the authoritative record of what
+ * actually shipped — and against the component that implements it.
  */
 const FEATURES = [
   {
@@ -58,6 +70,26 @@ const FEATURES = [
     body: "Flight tracking that follows the booking rather than the airline, so a delay shows up without you going looking for it.",
   },
   {
+    icon: Briefcase,
+    title: "Pack by bag, not by guesswork",
+    body: "Give each bag its own list — carry-on, checked, the one the kids share — so you know what went where when you pack to come home.",
+  },
+  {
+    icon: Sparkles,
+    title: "Suggestions for what to pack",
+    body: "Ideas drawn from where you are going, how long for, the time of year, and what you have booked. Tap to add; nothing is added for you.",
+  },
+  {
+    icon: CalendarPlus,
+    title: "Your trip, in your calendar",
+    body: "Export the itinerary as a calendar file, so flights and check-ins land in the app you already plan your days in.",
+  },
+  {
+    icon: Printer,
+    title: "Take it on paper",
+    body: "A printable itinerary for the parts of a trip where a phone is the last thing you want to be holding.",
+  },
+  {
     icon: CloudOff,
     title: "Works without a signal",
     body: "Installs to your home screen and keeps working on a plane, a train, or a queue at passport control.",
@@ -65,9 +97,19 @@ const FEATURES = [
   {
     icon: Share2,
     title: "Share a read-only view",
-    body: "Send someone a link that shows the itinerary without giving them the ability to change it.",
+    body: "Send someone a link that shows the itinerary without giving them the ability to change it — and choose whether bookings and notes go with it.",
   },
 ];
+
+/*
+ * The three most recent releases, surfaced on the landing page.
+ *
+ * ⚠️ Derived from RELEASES rather than hand-written, because a hand-written copy
+ * is guaranteed to go stale — it would still be advertising 0.6.0 a year from
+ * now. Taking the head of the same array About reads means the landing page
+ * cannot drift from the changelog.
+ */
+const RECENT = RELEASES.slice(0, 3);
 
 export default function LandingPage() {
   return (
@@ -148,7 +190,8 @@ export default function LandingPage() {
               </h1>
               <p className="mt-6 max-w-xl text-base leading-relaxed text-zinc-200 drop-shadow-[0_1px_8px_rgba(0,0,0,0.6)]">
                 Flights, stays, trains and the drive between them, in one place — with
-                a map that shows how far apart the pieces really are.
+                a map that shows how far apart the pieces really are, a packing list
+                that knows what you booked, and a calendar file at the end.
               </p>
 
               <div className="mt-9 flex flex-wrap items-center gap-3">
@@ -223,6 +266,51 @@ export default function LandingPage() {
                 <Icon className="h-4 w-4 text-emerald-400" aria-hidden="true" />
                 <h3 className="mt-3.5 text-sm font-semibold text-zinc-100">{title}</h3>
                 <p className="mt-2 text-[13px] leading-relaxed text-zinc-400">{body}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* What's new — derived from the changelog, so it cannot go stale */}
+        <section className="border-t border-white/8 py-16">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-[10px] font-medium uppercase tracking-[0.08em] text-zinc-500">
+              What&rsquo;s new
+            </h2>
+            <p className="text-[11px] text-zinc-600">
+              Latest release {RELEASES[0]?.version}
+            </p>
+          </div>
+          <div className="mt-8 grid gap-4 sm:grid-cols-3">
+            {RECENT.map((release) => (
+              <div
+                key={release.version}
+                className="surface-raised rounded-xl border border-white/8 p-5"
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-emerald-400">
+                    v{release.version}
+                  </span>
+                  <span className="shrink-0 text-[11px] text-zinc-600">{release.date}</span>
+                </div>
+                <h3 className="mt-3 text-sm font-semibold text-zinc-100">
+                  {release.headline}
+                </h3>
+                {/*
+                  The first line of the first group.
+
+                  ⚠️ This indexes straight into the changelog, which the TYPE
+                  does not protect: Release.groups is ChangeGroup[] and could be
+                  empty. So the invariant is enforced instead by
+                  tests/release-notes.test.cjs ("every release has a usable first
+                  line"), which fails the build if any release would render
+                  nothing here. Do not swap this for `?.` — a silent empty
+                  paragraph would hide a malformed changelog entry on the one
+                  page a logged-out visitor always sees.
+                */}
+                <p className="mt-2 text-[13px] leading-relaxed text-zinc-400">
+                  {release.groups[0].items[0]}
+                </p>
               </div>
             ))}
           </div>

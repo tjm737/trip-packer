@@ -169,6 +169,50 @@ async function run() {
     }
   });
 
+  await h.test(
+    "every release has a usable first line, since the landing page renders it",
+    () => {
+      /*
+       * The public landing page shows RECENT[].groups[0].items[0] for the three
+       * newest releases. Release.groups is typed ChangeGroup[], which permits an
+       * empty array -- the type does NOT protect this index. If a release were
+       * added with an empty groups array (or an empty first items array), that
+       * read would throw and take down the landing page for every logged-out
+       * visitor. Landing on the one page that is the first impression makes this
+       * worth failing the build over.
+       *
+       * Loaded as a real module rather than regex-parsed, because the property
+       * being checked is the SHAPE of the parsed array, not the source text.
+       * The text-based helpers above cannot see this.
+       */
+      const { RELEASES } = h.loadModule("src/lib/changelog.ts");
+
+      h.assert(
+        Array.isArray(RELEASES) && RELEASES.length > 0,
+        "RELEASES is empty, so the landing page has nothing to render"
+      );
+
+      for (const r of RELEASES.slice(0, 3)) {
+        h.assert(
+          Array.isArray(r.groups) && r.groups.length > 0,
+          `release ${r.version} has no change groups, so the landing page ` +
+            `would read groups[0] of undefined`
+        );
+        const g = r.groups[0];
+        h.assert(
+          Array.isArray(g.items) && g.items.length > 0,
+          `release ${r.version} / area "${g.area}" has no items, so the ` +
+            `landing page would render an empty paragraph`
+        );
+        h.assert(
+          typeof g.items[0] === "string" && g.items[0].trim().length > 0,
+          `release ${r.version} first item is blank, so the landing page ` +
+            `would render an empty paragraph`
+        );
+      }
+    }
+  );
+
   await h.test("every release has at least one named area", () => {
     if (areas.length === 0) throw new Error("no change groups found at all");
     for (const a of areas) {

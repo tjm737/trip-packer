@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { AppProvider } from "@/lib/AppContext";
 import { ServiceWorkerRegistrar } from "@/components/ServiceWorkerRegistrar";
+import { PageViewTracker } from "@/components/PageViewTracker";
 import { Toaster } from "@/components/ui/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { DEFAULT_THEME, THEME_STORAGE_KEY, themeClassName } from "@/lib/theme";
@@ -130,6 +131,21 @@ export default function RootLayout({
         <AppProvider>
           <TooltipProvider>{children}</TooltipProvider>
           <ServiceWorkerRegistrar />
+          {/*
+            Page-view counting lives at the ROOT, not in AppShell.
+
+            It was first mounted in AppShell, which only wraps the (app) route
+            group — so the public pages (the landing page, /login,
+            /share/[token], /privacy, /support) were never counted at all. A
+            real browser visit to "/" produced no row, which is how this was
+            caught. Those public pages are the most important thing to measure:
+            the landing page is where anonymous traffic arrives, and
+            /share/[token] is reachability for the sharing feature.
+
+            Placed after `children` so the beacon's effect runs against a
+            committed tree, and it renders nothing.
+          */}
+          <PageViewTracker />
         </AppProvider>
       </body>
     </html>

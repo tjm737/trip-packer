@@ -26,6 +26,7 @@ import { apiUrl } from "./apiUrl";
 import { AVATAR_COLORS } from "./constants";
 import { reconcile } from "./reconcile";
 import { DEFAULT_THEME } from "./theme";
+import { track } from "./track";
 
 /*
  * Client-side API wrapper.
@@ -424,6 +425,22 @@ export async function createTrip(
       items: [...base.items, ...imported.items, ...items],
       bags: [...(base.bags ?? []), ...imported.bags],
     },
+  });
+
+  /*
+   * Recorded only after the write resolves, so the count reflects trips that
+   * actually exist. Fired here rather than at the call site because this
+   * function is the single boundary every trip creation passes through — a
+   * caller-side call would be missed the next time a caller is added, and
+   * would silently under-report exactly the activation metric this exists for.
+   *
+   * `imported_bags` rather than a bag count: it says whether the bag-import
+   * path is being used at all, which is the question worth asking. `track` is
+   * a no-op outside production and never throws.
+   */
+  track("trip_created", {
+    imported_bags: imported.bags.length,
+    item_count: imported.items.length + items.length,
   });
 
   return {
