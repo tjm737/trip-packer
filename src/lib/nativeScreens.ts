@@ -13,10 +13,19 @@ import { Capacitor, registerPlugin } from "@capacitor/core";
  * genuine failure there should surface as an error the UI can show.
  */
 
+/** What every present call resolves with. Resolves on DISMISSAL, not on present. */
+export interface NativePresentResult {
+  presented: boolean;
+  dismissed?: boolean;
+  reason?: string;
+}
+
+/** Options every native screen takes. */
+type OpenOptions = { tripId: string };
+
 interface NativeScreensPlugin {
-  openPackingList(options: {
-    tripId: string;
-  }): Promise<{ presented: boolean; dismissed?: boolean; reason?: string }>;
+  openPackingList(options: OpenOptions): Promise<NativePresentResult>;
+  openItinerary(options: OpenOptions): Promise<NativePresentResult>;
 }
 
 /*
@@ -37,6 +46,9 @@ const NativeScreens = registerPlugin<NativeScreensPlugin>("NativeScreens", {
   web: () =>
     Promise.resolve({
       async openPackingList() {
+        throw new Error("Native screens are only available in the iOS app.");
+      },
+      async openItinerary() {
         throw new Error("Native screens are only available in the iOS app.");
       },
     }),
@@ -66,9 +78,24 @@ export function nativeScreensAvailable(): boolean {
  */
 export async function openNativePackingList(
   tripId: string
-): Promise<{ presented: boolean; dismissed?: boolean; reason?: string }> {
+): Promise<NativePresentResult> {
   if (!nativeScreensAvailable()) {
     throw new Error("Native screens are only available in the iOS app.");
   }
   return NativeScreens.openPackingList({ tripId });
+}
+
+/**
+ * Present the native itinerary for a trip.
+ *
+ * Same contract as `openNativePackingList`: resolves on dismissal, and
+ * `presented: false` means a sheet was already up so nothing changed.
+ */
+export async function openNativeItinerary(
+  tripId: string
+): Promise<NativePresentResult> {
+  if (!nativeScreensAvailable()) {
+    throw new Error("Native screens are only available in the iOS app.");
+  }
+  return NativeScreens.openItinerary({ tripId });
 }

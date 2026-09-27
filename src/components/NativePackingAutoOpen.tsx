@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { AlertCircle, Smartphone } from "lucide-react";
 import { openNativePackingList } from "@/lib/nativeScreens";
-import { shouldPresentPackingTab, shouldShowNativeListButton } from "@/lib/nativePackingTab";
+import { shouldPresentNativeTab, shouldShowNativeFallbackButton } from "@/lib/nativeTabPresentation";
 
 /*
  * Makes the Packing tab open the native SwiftUI list by itself, and reports
@@ -80,7 +80,7 @@ export function NativePackingAutoOpen({
   useEffect(() => {
     if (!isNative) return;
 
-    const action = shouldPresentPackingTab({
+    const action = shouldPresentNativeTab({
       tabActive: true,
       nativeAvailable: true,
       hasPresented: hasPresented.current,
@@ -148,7 +148,7 @@ export function NativePackingAutoOpen({
    * is stated in words rather than implied by the presence of a button, because a
    * bare button reads as an unexplained state rather than an error.
    */
-  const showButton = shouldShowNativeListButton({
+  const showButton = shouldShowNativeFallbackButton({
     nativeAvailable: isNative,
     presentFailed: error !== null,
     tabEmpty: false,

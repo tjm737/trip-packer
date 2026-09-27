@@ -23,17 +23,17 @@
 const h = require("./harness.cjs");
 
 const {
-  shouldPresentPackingTab,
-  shouldRenderWebPackingList,
-  shouldShowNativeListButton,
-} = h.loadModule("src/lib/nativePackingTab.ts");
+  shouldPresentNativeTab,
+  shouldRenderWebTabContent,
+  shouldShowNativeFallbackButton,
+} = h.loadModule("src/lib/nativeTabPresentation.ts");
 
 async function run() {
   /* -- the happy path ------------------------------------------------------ */
 
   await h.test("presents on first entry into the Packing tab on iOS", () => {
     h.assertEqual(
-      shouldPresentPackingTab({
+      shouldPresentNativeTab({
         tabActive: true,
         nativeAvailable: true,
         hasPresented: false,
@@ -46,7 +46,7 @@ async function run() {
   await h.test("does NOT present a second time within the same tab visit", () => {
     // The loop guard. Without this, every re-render re-opens the screen.
     h.assertEqual(
-      shouldPresentPackingTab({
+      shouldPresentNativeTab({
         tabActive: true,
         nativeAvailable: true,
         hasPresented: true,
@@ -67,7 +67,7 @@ async function run() {
    */
   await h.test("does not present again while a presentation is in flight", () => {
     h.assertEqual(
-      shouldPresentPackingTab({
+      shouldPresentNativeTab({
         tabActive: true,
         nativeAvailable: true,
         hasPresented: false,
@@ -82,7 +82,7 @@ async function run() {
   await h.test("never presents off the iOS app", () => {
     // Web and Android have no native screen; presenting would throw.
     h.assertEqual(
-      shouldPresentPackingTab({
+      shouldPresentNativeTab({
         tabActive: true,
         nativeAvailable: false,
         hasPresented: false,
@@ -96,7 +96,7 @@ async function run() {
     // Returning "none" here is load-bearing: it is what lets the caller clear
     // the hasPresented flag while off-tab WITHOUT triggering a presentation.
     h.assertEqual(
-      shouldPresentPackingTab({
+      shouldPresentNativeTab({
         tabActive: false,
         nativeAvailable: true,
         hasPresented: false,
@@ -110,7 +110,7 @@ async function run() {
     // Both guards must hold simultaneously; this pins that neither is skipped
     // by short-circuiting in the wrong order.
     h.assertEqual(
-      shouldPresentPackingTab({
+      shouldPresentNativeTab({
         tabActive: false,
         nativeAvailable: false,
         hasPresented: false,
@@ -119,7 +119,7 @@ async function run() {
       "none"
     );
     h.assertEqual(
-      shouldPresentPackingTab({
+      shouldPresentNativeTab({
         tabActive: false,
         nativeAvailable: false,
         hasPresented: true,
@@ -138,13 +138,13 @@ async function run() {
      * tab and no native screen to fall back to.
      */
     h.assertEqual(
-      shouldRenderWebPackingList({ nativeAvailable: false, nativeOnScreen: false }),
+      shouldRenderWebTabContent({ nativeAvailable: false, nativeOnScreen: false }),
       true
     );
     // And nativeOnScreen true with native unavailable is incoherent, but must
     // not hide the list either -- there is no native screen to hide it for.
     h.assertEqual(
-      shouldRenderWebPackingList({ nativeAvailable: false, nativeOnScreen: true }),
+      shouldRenderWebTabContent({ nativeAvailable: false, nativeOnScreen: true }),
       true
     );
   });
@@ -156,7 +156,7 @@ async function run() {
      * and if presenting never happens the list is all the user has.
      */
     h.assertEqual(
-      shouldRenderWebPackingList({ nativeAvailable: true, nativeOnScreen: false }),
+      shouldRenderWebTabContent({ nativeAvailable: true, nativeOnScreen: false }),
       true
     );
   });
@@ -168,7 +168,7 @@ async function run() {
      * list -- the exact complaint being fixed.
      */
     h.assertEqual(
-      shouldRenderWebPackingList({ nativeAvailable: true, nativeOnScreen: true }),
+      shouldRenderWebTabContent({ nativeAvailable: true, nativeOnScreen: true }),
       false
     );
   });
@@ -180,7 +180,7 @@ async function run() {
      * returns as the fallback for a tab the user re-enters.
      */
     h.assertEqual(
-      shouldRenderWebPackingList({ nativeAvailable: true, nativeOnScreen: false }),
+      shouldRenderWebTabContent({ nativeAvailable: true, nativeOnScreen: false }),
       true
     );
   });
@@ -212,7 +212,7 @@ async function run() {
      * complaint.
      */
     h.assertEqual(
-      shouldShowNativeListButton({
+      shouldShowNativeFallbackButton({
         nativeAvailable: true,
         presentFailed: false,
         tabEmpty: false,
@@ -225,7 +225,7 @@ async function run() {
     // The exact shape of the old bug: platform capability treated as a reason to
     // render. Capability is a precondition, never a justification.
     h.assertEqual(
-      shouldShowNativeListButton({
+      shouldShowNativeFallbackButton({
         nativeAvailable: true,
         presentFailed: false,
         tabEmpty: false,
@@ -241,7 +241,7 @@ async function run() {
      * a dead end.
      */
     h.assertEqual(
-      shouldShowNativeListButton({
+      shouldShowNativeFallbackButton({
         nativeAvailable: true,
         presentFailed: true,
         tabEmpty: false,
@@ -254,7 +254,7 @@ async function run() {
     // Belt-and-braces: even without a thrown error, a tab with no web list behind
     // it needs some way forward.
     h.assertEqual(
-      shouldShowNativeListButton({
+      shouldShowNativeFallbackButton({
         nativeAvailable: true,
         presentFailed: false,
         tabEmpty: true,
@@ -270,7 +270,7 @@ async function run() {
      * precisely so the other two flags cannot conjure a button that cannot work.
      */
     h.assertEqual(
-      shouldShowNativeListButton({
+      shouldShowNativeFallbackButton({
         nativeAvailable: false,
         presentFailed: true,
         tabEmpty: true,
@@ -278,7 +278,7 @@ async function run() {
       false
     );
     h.assertEqual(
-      shouldShowNativeListButton({
+      shouldShowNativeFallbackButton({
         nativeAvailable: false,
         presentFailed: false,
         tabEmpty: false,

@@ -67,7 +67,8 @@ import { TripMap } from "@/components/TripMap";
 import { Tabs } from "@/components/Tabs";
 import { PackingSuggestions } from "@/components/PackingSuggestions";
 import { NativePackingAutoOpen } from "@/components/NativePackingAutoOpen";
-import { shouldRenderWebPackingList } from "@/lib/nativePackingTab";
+import { NativeItineraryAutoOpen } from "@/components/NativeItineraryAutoOpen";
+import { shouldRenderWebTabContent } from "@/lib/nativeTabPresentation";
 import { ShareButton } from "@/components/ShareButton";
 import { ShareDialog } from "@/components/ShareDialog";
 import { observeEditRequests } from "@/lib/editRequest";
@@ -514,6 +515,15 @@ export default function TripDetail() {
   const [nativePackingAvailable, setNativePackingAvailable] = useState(false);
 
   /*
+   * The same pair for the Itinerary tab. Separate state from packing's, because
+   * the two tabs present independent screens: one being on screen says nothing
+   * about the other, and sharing a single flag would have the packing list
+   * re-appear when the itinerary was dismissed.
+   */
+  const [nativeItineraryOnScreen, setNativeItineraryOnScreen] = useState(false);
+  const [nativeItineraryAvailable, setNativeItineraryAvailable] = useState(false);
+
+  /*
    * A stop on the map can hand off to the full booking editor, which lives on
    * the Itinerary tab. Switch there so the panel is mounted to receive the
    * request — otherwise the click changes nothing the user can see.
@@ -854,6 +864,32 @@ export default function TripDetail() {
               icon: <Calendar className="w-3.5 h-3.5" />,
               content: (
                 <>
+                  {/* Native SwiftUI itinerary -- auto-presents on entering this
+                      tab. Renders only inside the iOS app. On iOS it is the
+                      itinerary screen and the web content below is not rendered
+                      at all, so this must stay OUTSIDE the gate: it is what
+                      presents, and unmounting it would reset the ref that stops
+                      a re-present loop. */}
+                  <NativeItineraryAutoOpen
+                    tripId={tripInfo.id}
+                    onNativeOnScreen={setNativeItineraryOnScreen}
+                    onNativeAvailable={setNativeItineraryAvailable}
+                  />
+
+                  {/* The web itinerary and everything that belongs to it.
+
+                      Hidden on iOS while the native screen owns the tab, for the
+                      same reason as packing: it is not a second view of the same
+                      data, it was rendered before any native change and is never
+                      refetched, so returning to it means landing on a stale copy.
+
+                      Still rendered on web and Android, and on iOS before a
+                      presentation is asked for or after one fails. */}
+                  {shouldRenderWebTabContent({
+                    nativeAvailable: nativeItineraryAvailable,
+                    nativeOnScreen: nativeItineraryOnScreen,
+                  }) && (
+                    <>
                   {/* Bookings, then weather for the same stretch of days. */}
                   <div className="space-y-6">
                     {/* Bookings: flights, lodging, cars, trains, ferries. */}
@@ -1167,6 +1203,8 @@ export default function TripDetail() {
 
         
                   </div>
+                    </>
+                  )}
                 </>
               ),
             },
@@ -1200,7 +1238,7 @@ export default function TripDetail() {
                         Still rendered on web and Android, where the native screen
                         does not exist, and on iOS before a presentation is asked
                         for or after one fails. */}
-                    {shouldRenderWebPackingList({
+                    {shouldRenderWebTabContent({
                       nativeAvailable: nativePackingAvailable,
                       nativeOnScreen: nativePackingOnScreen,
                     }) && (

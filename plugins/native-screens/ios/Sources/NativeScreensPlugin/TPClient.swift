@@ -36,6 +36,14 @@ struct TPState: Codable {
     /// app rather than a trip without bags. Optional degrades to "no bags",
     /// which is a state the UI already renders.
     var bags: [TPBag]?
+    /// Bookings: flights, stays, cars, activities.
+    ///
+    /// Optional for the same reason as `bags`: a required array would make every
+    /// payload that predates this field fail to decode WHOLE, so a client
+    /// briefly newer than its server would show an empty app rather than a trip
+    /// without reservations. Optional degrades to "none", which the itinerary
+    /// screen already renders as an empty state.
+    var reservations: [TPReservation]?
 }
 
 struct TPTrip: Codable, Identifiable, Hashable {

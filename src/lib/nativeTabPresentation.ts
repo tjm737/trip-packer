@@ -1,6 +1,12 @@
 /*
- * When the Packing tab should auto-present the native SwiftUI list, and
- * whether the web list should render behind it.
+ * When a tab should auto-present its native SwiftUI screen, and whether the
+ * web content should render behind it.
+ *
+ * Written for the Packing tab and now shared with the Itinerary tab. The rules
+ * are not packing-specific: every native screen presented this way has the same
+ * two questions (present now? render the web fallback?) and the same failure
+ * modes, so the itinerary reuses them rather than growing a parallel copy that
+ * can drift.
  *
  * On iOS the native list IS the packing screen. The web list is not shown
  * behind it and is not what the user returns to -- it is only the fallback for
@@ -24,9 +30,9 @@
  */
 
 /** What the web layer should do with the native presentation right now. */
-export type PackingTabAction = "present" | "wait" | "none";
+export type NativeTabAction = "present" | "wait" | "none";
 
-export interface PackingTabPresentationInput {
+export interface NativeTabPresentationInput {
   /** Is this the Packing tab, right now? */
   tabActive: boolean;
   /** Can the platform present a native screen at all (iOS + native bridge)? */
@@ -61,7 +67,7 @@ export interface PackingTabPresentationInput {
  * presentation look like an idle tab, which is the bug this replaced -- the web
  * list would render underneath a sheet that is still open.
  */
-export function shouldPresentPackingTab(input: PackingTabPresentationInput): PackingTabAction {
+export function shouldPresentNativeTab(input: NativeTabPresentationInput): NativeTabAction {
   if (!input.tabActive) return "none";
   if (!input.nativeAvailable) return "none";
   if (input.hasPresented || input.presenting) return "wait";
@@ -69,10 +75,10 @@ export function shouldPresentPackingTab(input: PackingTabPresentationInput): Pac
 }
 
 /*
- * Whether the web packing list should be rendered.
+ * Whether the web content should be rendered behind the native screen.
  *
  * False on iOS once a native presentation is in flight or on screen: the
- * native screen is not an overlay, it is the packing screen, and the web list
+ * native screen is not an overlay, it is the screen, and the web content
  * behind it is stale by construction -- it was rendered before any native edit
  * and is never refetched. Rendering it means the user closes the native list
  * and lands on a worse copy of what they were just looking at.
@@ -88,7 +94,7 @@ export function shouldPresentPackingTab(input: PackingTabPresentationInput): Pac
  *     this returned `!isNative` instead, a failed present would leave the user
  *     staring at an empty tab with no list and no explanation.
  */
-export function shouldRenderWebPackingList(input: {
+export function shouldRenderWebTabContent(input: {
   nativeAvailable: boolean;
   nativeOnScreen: boolean;
 }): boolean {
@@ -121,11 +127,27 @@ export function shouldRenderWebPackingList(input: {
  * `nativeAvailable` guards that, and it is checked first so the other two cannot
  * conjure a button on a platform that cannot honour it.
  */
-export function shouldShowNativeListButton(input: {
+export function shouldShowNativeFallbackButton(input: {
   nativeAvailable: boolean;
   presentFailed: boolean;
   tabEmpty: boolean;
 }): boolean {
   if (!input.nativeAvailable) return false;
   return input.presentFailed || input.tabEmpty;
+}
+
+/*
+ * Whether the Itinerary tab should auto-present its native screen.
+ *
+ * Same rules as packing -- the itinerary is presented on entering the tab, and
+ * for the same reason: on iOS the native screen IS the itinerary, and the web
+ * version behind it was rendered before any change and is never refetched.
+ *
+ * Kept as a named wrapper rather than a bare re-export so the itinerary has a
+ * single place to diverge later if it needs to. It does not today, and a
+ * re-export would quietly make any future packing-specific rule apply to the
+ * itinerary too.
+ */
+export function shouldPresentItineraryTab(input: NativeTabPresentationInput): NativeTabAction {
+  return shouldPresentNativeTab(input);
 }

@@ -32,6 +32,7 @@ public class NativeScreensPlugin: CAPPlugin, CAPBridgedPlugin {
     public let jsName = "NativeScreens"
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "openPackingList", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "openItinerary", returnType: CAPPluginReturnPromise),
     ]
 
     /// Retains the presentation delegate across the sheet's lifetime.
@@ -43,24 +44,33 @@ public class NativeScreensPlugin: CAPPlugin, CAPBridgedPlugin {
 
     /// Present the native packing list for a trip.
     ///
-    /// Rejects rather than presenting an empty screen when no trip id is given:
-    /// a blank native screen with no explanation is worse than a clear error,
-    /// because the user cannot tell whether it failed or is still loading.
-    ///
-    /// Resolves when the screen is DISMISSED, not when it is presented.
-    ///
-    /// This used to resolve on present, which made the promise useless as a
-    /// signal: the caller learned only that the sheet had gone up. The web layer
-    /// needs to know when it came back down, because on iOS the native list IS
-    /// the packing screen and the web list is not shown behind it. Resolving on
-    /// dismissal also means the natural `await` form is correct -- code after the
-    /// await runs when the user returns -- with no separate event to subscribe to.
-    ///
-    /// `presented: false` is resolved, not rejected, when a sheet is already up.
-    /// That is a no-op, not an error: it happens if the user re-enters the tab
-    /// while the screen is open, and rejecting would surface a spurious failure
-    /// for something the user did not do wrong.
+    /// See `presentScreen` for the shared presentation and dismissal contract:
+    /// the promise resolves when the screen is DISMISSED, not when it is
+    /// presented, and `presented: false` is resolved (not rejected) if a sheet
+    /// is already up.
     @objc func openPackingList(_ call: CAPPluginCall) {
+        presentScreen(call) { tripId, onClose in
+            AnyView(PackingListView(tripId: tripId, onClose: onClose))
+        }
+    }
+
+    @objc func openItinerary(_ call: CAPPluginCall) {
+        presentScreen(call) { tripId, onClose in
+            AnyView(TripItineraryView(tripId: tripId, onClose: onClose))
+        }
+    }
+
+    /// Shared presentation for every native screen.
+    ///
+    /// Extracted when the itinerary was added rather than copied. The dismissal
+    /// machinery below is subtle -- two signals, a resolve-once guard, and a
+    /// delegate that must be retained -- and a second hand-rolled copy is a
+    /// second place for the swipe-to-dismiss path to silently stop resolving.
+    /// `build` takes the trip id and a close closure and returns the screen.
+    private func presentScreen(
+        _ call: CAPPluginCall,
+        build: @escaping (String, @escaping () -> Void) -> AnyView
+    ) {
         guard let tripId = call.getString("tripId"), !tripId.isEmpty else {
             call.reject("A non-empty 'tripId' is required.")
             return
@@ -104,10 +114,7 @@ public class NativeScreensPlugin: CAPPlugin, CAPBridgedPlugin {
                 call.resolve(["presented": true, "dismissed": true])
             }
 
-            let root = PackingListView(
-                tripId: tripId,
-                onClose: { hosted?.dismiss(animated: true) }
-            )
+            let root = build(tripId, { hosted?.dismiss(animated: true) })
             let controller = UIHostingController(rootView: root)
             let nav = UINavigationController(rootViewController: controller)
             nav.modalPresentationStyle = .pageSheet
