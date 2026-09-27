@@ -105,14 +105,58 @@ const NativeScreens = registerPlugin<NativeScreensPlugin>("NativeScreens", {
     }),
 });
 
+/*
+ * KILL SWITCH -- native screens are disabled.
+ *
+ * The SwiftUI screens (packing list, itinerary) never worked as well as their
+ * JS equivalents: the interaction was unintuitive, and leaving a tab did not
+ * reliably tear the native screen down, so the old tab's content stayed on
+ * screen over the new one. Rather than ship that, the whole feature is off.
+ *
+ * This is deliberately a single constant rather than a deletion. Everything
+ * that presents a native screen routes availability through this module, so
+ * flipping this to `true` restores the feature on every code path at once.
+ * The Swift plugin, the components and the tests all stay in the repo.
+ *
+ * Re-enabling needs more than this flag:
+ *   - the teardown-on-tab-exit path was never verified on device (the UI test
+ *     that covers it never passed), so do that first;
+ *   - plus whatever made the interaction feel unintuitive.
+ * See docs/native-screens-parked.md.
+ */
+const NATIVE_SCREENS_ENABLED = false;
+
+/*
+ * Why the disabled feature has its OWN refusal message.
+ *
+ * The web plugin implementation below throws "Native screens are only available
+ * in the iOS app", and it would be tempting to reuse that text here. Doing so
+ * makes the two refusals indistinguishable, which has two costs:
+ *
+ *   - a test cannot tell "off on purpose" from "not on this platform", so it
+ *     passes with the feature on and proves nothing;
+ *   - a developer reading a log cannot tell which one fired, and the two want
+ *     opposite responses: one is a deliberate product decision, the other is a
+ *     wiring bug.
+ *
+ * The message says the feature is turned off so it reads as intentional.
+ */
+const NATIVE_SCREENS_DISABLED_MESSAGE =
+  "Native screens are turned off in this build.";
+
 /**
  * Whether native screens can be presented at all.
  *
  * Checks the platform as well as plugin presence: the web implementation
  * exists precisely so this can be answered by declaration, and it is not
  * available, so `Capacitor.getPlatform() === "ios"` is the real question.
+ *
+ * Returns false unconditionally while NATIVE_SCREENS_ENABLED is false, which is
+ * what disables the feature: every caller in the app gates on this or on the
+ * open* functions below, so there is no second path to reach the plugin.
  */
 export function nativeScreensAvailable(): boolean {
+  if (!NATIVE_SCREENS_ENABLED) return false;
   return Capacitor.getPlatform() === "ios" && Capacitor.isNativePlatform();
 }
 
@@ -136,7 +180,11 @@ export async function openNativePackingList(
   frame?: NativeFrame
 ): Promise<NativePresentResult> {
   if (!nativeScreensAvailable()) {
-    throw new Error("Native screens are only available in the iOS app.");
+    throw new Error(
+      NATIVE_SCREENS_ENABLED
+        ? "Native screens are only available in the iOS app."
+        : NATIVE_SCREENS_DISABLED_MESSAGE
+    );
   }
   return NativeScreens.openPackingList({ tripId, frame });
 }
@@ -153,7 +201,11 @@ export async function openNativeItinerary(
   frame?: NativeFrame
 ): Promise<NativePresentResult> {
   if (!nativeScreensAvailable()) {
-    throw new Error("Native screens are only available in the iOS app.");
+    throw new Error(
+      NATIVE_SCREENS_ENABLED
+        ? "Native screens are only available in the iOS app."
+        : NATIVE_SCREENS_DISABLED_MESSAGE
+    );
   }
   return NativeScreens.openItinerary({ tripId, frame });
 }

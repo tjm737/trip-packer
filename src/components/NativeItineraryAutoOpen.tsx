@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Capacitor } from "@capacitor/core";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { AlertCircle, Smartphone } from "lucide-react";
-import { openNativeItinerary, closeNativeScreen, updateNativeFrame } from "@/lib/nativeScreens";
+import { openNativeItinerary, closeNativeScreen, updateNativeFrame, nativeScreensAvailable } from "@/lib/nativeScreens";
 import { shouldPresentItineraryTab, shouldShowNativeFallbackButton, shouldSendFrame, sameFrame } from "@/lib/nativeTabPresentation";
 import { useNativePresentationFrame } from "@/components/useNativePresentationFrame";
 import { NativePresentationProbe, recordNativeClose } from "@/components/NativePresentationProbe";
@@ -76,8 +75,14 @@ export function NativeItineraryAutoOpen({
   // Resolved after mount so server and first client render agree. The bridge
   // does not exist during SSR, so `Capacitor.getPlatform()` is "web" there, and
   // reading it during render would make the two disagree.
+  //
+  // Gated on `nativeScreensAvailable()` rather than the platform: native screens
+  // are disabled (see NATIVE_SCREENS_ENABLED), so on iOS the platform check is
+  // true while nothing should be presented. It would still call the open
+  // function, which throws for a disabled feature, surfacing an error to the
+  // user on every tab open.
   useEffect(() => {
-    const native = Capacitor.getPlatform() === "ios";
+    const native = nativeScreensAvailable();
     setIsNative(native);
     onNativeAvailable(native);
   }, [onNativeAvailable]);

@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Capacitor } from "@capacitor/core";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { AlertCircle, Smartphone } from "lucide-react";
-import { openNativePackingList, closeNativeScreen, updateNativeFrame } from "@/lib/nativeScreens";
+import { openNativePackingList, closeNativeScreen, updateNativeFrame, nativeScreensAvailable } from "@/lib/nativeScreens";
 import { shouldPresentNativeTab, shouldShowNativeFallbackButton, shouldSendFrame, sameFrame } from "@/lib/nativeTabPresentation";
 import { useNativePresentationFrame } from "@/components/useNativePresentationFrame";
 
@@ -69,7 +68,20 @@ export function NativePackingAutoOpen({
   // Resolved after mount so server and first client render agree -- the bridge
   // does not exist during SSR, so `Capacitor.getPlatform()` is "web" there.
   useEffect(() => {
-    const native = Capacitor.getPlatform() === "ios";
+    /*
+     * Gate on availability, not the platform.
+     *
+     * `Capacitor.getPlatform() === "ios"` was the old test and it is now wrong:
+     * native screens are disabled (see NATIVE_SCREENS_ENABLED), so on iOS the
+     * platform check is true while nothing should be presented. Using it would
+     * still call the open* function, which throws for a disabled feature, and the
+     * catch would surface "Native screens are only available in the iOS app" to
+     * the user -- an error message on every tab open for a deliberate disable.
+     *
+     * `nativeScreensAvailable()` is the single source of truth for whether the
+     * feature is on, so this cannot drift from the kill switch.
+     */
+    const native = nativeScreensAvailable();
     setIsNative(native);
     onNativeAvailable(native);
   }, [onNativeAvailable]);
