@@ -17,6 +17,7 @@
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		8B8EF98D261166905C75BED7 /* MapRenderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B09BCA6613AB6AE99FA43C /* MapRenderTests.swift */; };
+		FE9D591205871C408D52A536 /* NativeTabTeardownTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B776EA356EF16BF70511818 /* NativeTabTeardownTests.swift */; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
 		AE46E73D5A905B2CD62A534D /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = B29D4F96E82B55C9998B8E75 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
@@ -43,6 +44,7 @@
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
 		8AA8343A62E619D81543EAB7 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		94B09BCA6613AB6AE99FA43C /* MapRenderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MapRenderTests.swift; sourceTree = "<group>"; };
+		8B776EA356EF16BF70511818 /* NativeTabTeardownTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NativeTabTeardownTests.swift; sourceTree = "<group>"; };
 		9582B6822FE993A50072D4E8 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 		B29D4F96E82B55C9998B8E75 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -81,6 +83,7 @@
 			isa = PBXGroup;
 			children = (
 				94B09BCA6613AB6AE99FA43C /* MapRenderTests.swift */,
+				8B776EA356EF16BF70511818 /* NativeTabTeardownTests.swift */,
 			);
 			name = AppUITests;
 			path = AppUITests;
@@ -240,6 +243,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				8B8EF98D261166905C75BED7 /* MapRenderTests.swift in Sources */,
+				FE9D591205871C408D52A536 /* NativeTabTeardownTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

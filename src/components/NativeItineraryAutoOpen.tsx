@@ -8,6 +8,7 @@ import { AlertCircle, Smartphone } from "lucide-react";
 import { openNativeItinerary, closeNativeScreen, updateNativeFrame } from "@/lib/nativeScreens";
 import { shouldPresentItineraryTab, shouldShowNativeFallbackButton, shouldSendFrame, sameFrame } from "@/lib/nativeTabPresentation";
 import { useNativePresentationFrame } from "@/components/useNativePresentationFrame";
+import { NativePresentationProbe, recordNativeClose } from "@/components/NativePresentationProbe";
 
 /*
  * Makes the Itinerary tab open the native SwiftUI itinerary by itself, and
@@ -134,6 +135,7 @@ export function NativeItineraryAutoOpen({
        * solve.
        */
       void closeNativeScreen();
+      recordNativeClose();
       hasPresented.current = false;
       lastSentFrame.current = null;
       setPresenting(false);
@@ -218,16 +220,36 @@ export function NativeItineraryAutoOpen({
 
   if (!isNative) return null;
 
+  /*
+   * The probe is rendered in BOTH branches below, and that is load-bearing.
+   *
+   * The test reads it to learn whether the native screen is up. If it only
+   * mounted alongside the error button, it would be absent in exactly the case
+   * the test cares about -- a successful present, where the button is hidden --
+   * and the test would read "no probe" as a failure of the thing it is meant to
+   * be observing. So it is a sibling of the branch, not inside it.
+   */
+  const probeState = {
+    native: isNative,
+    frameTop: frame ? frame.top : null,
+    frameHeight: frame ? frame.height : null,
+    presenting,
+    closedCount: 0,
+    reason: error ?? "",
+  };
+
   const showButton = shouldShowNativeFallbackButton({
     nativeAvailable: isNative,
     presentFailed: error !== null,
     tabEmpty: false,
   });
 
-  if (!showButton) return null;
+  if (!showButton) return <NativePresentationProbe state={probeState} />;
 
   return (
-    <div className="px-3 pb-2 flex items-center gap-2 flex-wrap">
+    <>
+      <NativePresentationProbe state={probeState} />
+      <div className="px-3 pb-2 flex items-center gap-2 flex-wrap">
       <span className="text-[11px] text-amber-400/90 flex items-center gap-1.5">
         <AlertCircle className="w-3 h-3 flex-shrink-0" />
         {error ?? "The native itinerary did not open."}
@@ -252,6 +274,7 @@ export function NativeItineraryAutoOpen({
           </Button>
         </span>
       </Tooltip>
-    </div>
+      </div>
+    </>
   );
 }
