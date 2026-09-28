@@ -33,6 +33,7 @@ import {
   toggleSection,
   type SectionKey,
 } from "@/lib/sidebarSections";
+import { isSectionVisible } from "@/lib/sidebarVisibility";
 import { usePathname } from "next/navigation";
 import {
   Plus,
@@ -193,9 +194,10 @@ function ProfileButton() {
  * client is given, and it is sufficient, so no field was added to the type or
  * the API for this.
  *
- * Account rows are owner-gated: a non-owner sees them read-only, because the
- * underlying ops (user.add/user.update/user.delete) are owner-only server-side
- * and offering a control that can only 403 is worse than offering none. The
+ * Account rows are owner-only, along with the whole section: a non-owner does
+ * not see the list at all. The underlying ops (user.add/user.update/user.delete)
+ * are owner-only server-side, and the list itself discloses who can sign in to
+ * a personal instance, so there is nothing useful to show a non-owner. The
  * "new accounts are made with the CLI" hint exists because `user.add` inserts
  * a profile with NO credentials (api/mutate/route.ts user.add), so there is no
  * honest in-app way to create a login — see the hint's own comment.
@@ -228,9 +230,18 @@ function UserSwitcher() {
   const accounts = state.users.filter(isAccount);
   const companions = state.users.filter((u) => !isAccount(u));
   // Owner-gating runs off the signed-in user's own isOwner flag, which the
-  // server sends only when true (toUser). A non-owner therefore sees the
-  // Accounts list but none of its controls.
+  // server sends only when true (toUser). Before this, a non-owner saw the
+  // Accounts list and the Add-companion control; now both sections are omitted
+  // entirely, so there is nothing to describe and no dead control to explain.
   const isOwner = Boolean(activeUser.isOwner);
+  /*
+   * Accounts and companions are owner-only. See `sidebarVisibility.ts` for why:
+   * both disclose the roster of who can sign in, and both advertise controls the
+   * server refuses with a 403. The server is the boundary; this only stops the
+   * UI from offering what it cannot deliver.
+   */
+  const showAccounts = isSectionVisible("accounts", isOwner);
+  const showCompanions = isSectionVisible("companions", isOwner);
   /*
    * Editing is NOT owner-only. It mirrors the server's rule in
    * api/mutate/route.ts, case "selfOrAdmin":
@@ -249,6 +260,8 @@ function UserSwitcher() {
 
   return (
     <div className="px-4 py-3 border-b border-white/8">
+      {showAccounts && (
+        <>
       {/* ---------------------------------------------------------- */}
       {/* Accounts — owner-gated                                      */}
       {/* ---------------------------------------------------------- */}
@@ -510,19 +523,18 @@ function UserSwitcher() {
           );
         })}
 
-        {isOwner ? (
-          /*
-           * An owner gets a real control here, not a note. This paragraph used
-           * to say accounts could only be minted on the server with
-           * `npm run create-account`, which was true when `user.add` was the
-           * only path and it inserts a profile row with no credentials. The
-           * owner-gated POST /api/accounts changes that: it hashes a password
-           * server-side, so an in-app button now does exactly what it says.
-           *
-           * The server enforces this independently — a non-owner posting to
-           * /api/accounts is refused — so this branch is a convenience, not the
-           * security boundary.
-           */
+        {/*
+         * An owner gets a real control here, not a note. This paragraph used
+         * to say accounts could only be minted on the server with
+         * `npm run create-account`, which was true when `user.add` was the
+         * only path and it inserts a profile row with no credentials. The
+         * owner-gated POST /api/accounts changes that: it hashes a password
+         * server-side, so an in-app button now does exactly what it says.
+         *
+         * The non-owner branch that used to sit here ("Only the owner can
+         * manage accounts.") is gone: the whole Accounts section is now
+         * omitted for a non-owner, so that state is unreachable.
+         */}
           <button
             type="button"
             onClick={() => setCreateOpen(true)}
@@ -533,11 +545,6 @@ function UserSwitcher() {
             <UserPlus className="h-3 w-3" aria-hidden="true" />
             Create account
           </button>
-        ) : (
-          <p className="mt-1 px-2 py-1.5 text-[11px] text-zinc-600">
-            Only the owner can manage accounts.
-          </p>
-        )}
       </div>
           </motion.div>
         )}
@@ -557,9 +564,13 @@ function UserSwitcher() {
           void user;
         }}
       />
+        </>
+      )}
 
+      {showCompanions && (
+        <>
       {/* ---------------------------------------------------------- */}
-      {/* Companions                                                  */}
+      {/* Companions — owner-gated, same as Accounts above            */}
       {/* ---------------------------------------------------------- */}
       {/*
         * Companions are ALSO owner-only, and that is not obvious: a companion
@@ -810,8 +821,7 @@ function UserSwitcher() {
         })}
 
         {/* Add companion — owner only, matching `user.add`'s admin gate. */}
-        {isOwner ? (
-          <button
+        <button
             data-keep-drawer-open
             onClick={() => setOpen(true)}
             className="mt-0.5 flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-xs text-zinc-500 transition-colors hover:bg-white/[0.03] hover:text-zinc-300 focus-ring"
@@ -823,13 +833,6 @@ function UserSwitcher() {
             </span>
             <span>Add companion</span>
           </button>
-        ) : (
-          /* Not a dead button: say why, so the absence of a control reads as a
-             rule rather than as a missing feature. */
-          <p className="mt-1 px-2 py-1.5 text-[11px] text-zinc-600">
-            Only the owner can add companions.
-          </p>
-        )}
       </div>
           </motion.div>
         )}
@@ -879,6 +882,8 @@ function UserSwitcher() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+        </>
+      )}
     </div>
   );
 }
