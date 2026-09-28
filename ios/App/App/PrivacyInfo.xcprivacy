@@ -11,24 +11,29 @@
 		do (they arrive via SPM into the built product, which is why none are
 		found loose in this repo).
 
-		TYPES MATTER, AND THEY ARE NOT UNIFORM -- this is what got a build
-		rejected with ITMS-91056 ("Keys and values in your app's privacy
-		manifests must be valid"), so please read before editing:
+		THE TRAP IS THE COMMENTS, NOT THE TYPES.
 
-		  * NSPrivacyTracking, at the top level, is a real plist BOOLEAN:
-		    <false/>. Apple's own SDK manifests (Capacitor, Cordova) all ship
-		    it exactly that way.
-		  * NSPrivacyCollectedDataTypeLinked and
-		    NSPrivacyCollectedDataTypeTracking, *inside* each entry of
-		    NSPrivacyCollectedDataTypes, are STRINGS: <string>true</string>.
-		    They must be quoted.
+		A double hyphen is ILLEGAL anywhere inside an XML comment. This file
+		previously used several as prose dashes, and Apple's strict XML parser
+		rejected the entire manifest with ITMS-91056 ("Keys and values in your
+		app's privacy manifests must be valid") the moment it met one.
 
-		The asymmetry is easy to get wrong, and getting it wrong produces a
-		manifest that `plutil -lint` happily accepts (it is valid XML and a
-		valid plist) while App Store validation rejects it. A green plutil run
-		does NOT mean this file is acceptable -- do not use it as the check.
-		Validating the type of every value is the only way to catch this
-		locally.
+		Why it took two rejections to find: `plutil -lint` reports OK on those
+		files, because plutil is lenient about comment bodies. So the one check
+		anyone would naturally run says the file is fine while Apple rejects it.
+
+		Never write two hyphens in a row inside a comment here. Use an em dash
+		or a single hyphen. Verify with a STRICT XML parse, never plutil:
+
+		    python3 -c "import xml.etree.ElementTree as ET; \
+		      ET.parse('ios/App/App/PrivacyInfo.xcprivacy'); print('ok')"
+
+		On types, for the record, they are UNIFORM: NSPrivacyTracking at the
+		top level and both NSPrivacyCollectedDataTypeLinked and
+		NSPrivacyCollectedDataTypeTracking inside each entry are BOOLEANS.
+		Apple documents all three as such. (An earlier revision of this file
+		claimed the inner two were strings; that was wrong and is what build 2
+		shipped. Both builds were rejected for the comment hyphens instead.)
 
 		Everything here is a statement of fact about what the app actually
 		does. It was checked against the source rather than filled in from a
@@ -36,7 +41,7 @@
 		it is a signed declaration, and reviewers do diff it against observed
 		behaviour.
 
-		Verified absences -- these are why the corresponding keys are NOT here:
+		Verified absences, which are why the corresponding keys are NOT here:
 		  * No geolocation. Nothing in src/ calls navigator.geolocation. Maps
 		    are rendered from stored trip data, not the device's position.
 		  * No camera, microphone, or photo library access.
@@ -73,7 +78,7 @@
 
 		  * It is all first-party. The data is written to the operator's own
 		    SQLite instance. It is not sent to a third party for processing,
-		    so the purposes are App Functionality only -- not Analytics, not
+		    so the purposes are App Functionality only: not Analytics, not
 		    Third-Party Advertising, not Developer Advertising.
 		  * All of it is user-provided. The user types their email, their
 		    name, and their bookings. Nothing is collected passively from the
@@ -87,15 +92,11 @@
 		<dict>
 			<key>NSPrivacyCollectedDataType</key>
 			<string>NSPrivacyCollectedDataTypeEmailAddress</string>
-			<!--
-				Quoted strings, NOT <true/>. See the TYPES MATTER note above:
-				these two keys are strings in Apple's schema even though the
-				top-level NSPrivacyTracking is a boolean.
-			-->
+			<!-- Both booleans, like the top-level NSPrivacyTracking. -->
 			<key>NSPrivacyCollectedDataTypeLinked</key>
-			<string>true</string>
+			<true/>
 			<key>NSPrivacyCollectedDataTypeTracking</key>
-			<string>false</string>
+			<false/>
 			<key>NSPrivacyCollectedDataTypePurposes</key>
 			<array>
 				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
@@ -107,9 +108,9 @@
 			<key>NSPrivacyCollectedDataType</key>
 			<string>NSPrivacyCollectedDataTypeName</string>
 			<key>NSPrivacyCollectedDataTypeLinked</key>
-			<string>true</string>
+			<true/>
 			<key>NSPrivacyCollectedDataTypeTracking</key>
-			<string>false</string>
+			<false/>
 			<key>NSPrivacyCollectedDataTypePurposes</key>
 			<array>
 				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
@@ -119,7 +120,7 @@
 		<!--
 			Itinerary content: flight numbers, hotel names and addresses, car
 			rentals, notes. Apple has no "travel" category, so this is other
-			user content -- the residual bucket for data that is not identity,
+			user content, the residual bucket for data that is not identity,
 			financial, or device telemetry. It is linked because it belongs to
 			the account that created it.
 		-->
@@ -127,9 +128,9 @@
 			<key>NSPrivacyCollectedDataType</key>
 			<string>NSPrivacyCollectedDataTypeOtherUserContent</string>
 			<key>NSPrivacyCollectedDataTypeLinked</key>
-			<string>true</string>
+			<true/>
 			<key>NSPrivacyCollectedDataTypeTracking</key>
-			<string>false</string>
+			<false/>
 			<key>NSPrivacyCollectedDataTypePurposes</key>
 			<array>
 				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
@@ -147,9 +148,9 @@
 
 		It is empty on purpose rather than by omission. If a future change adds
 		a Capacitor plugin that reads UserDefaults, that plugin ships its own
-		manifest declaring its own reason -- this file does not need to grow
-		for that. It would need to grow only if app-authored Swift started
-		calling one of those APIs directly.
+		manifest declaring its own reason; this file does not need to grow for
+		that. It would need to grow only if app-authored Swift started calling
+		one of those APIs directly.
 	-->
 	<key>NSPrivacyAccessedAPITypes</key>
 	<array/>
