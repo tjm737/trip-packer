@@ -21,6 +21,7 @@ import {
   CheckCircle2,
   Upload,
   Luggage,
+  AlertTriangle,
 } from "lucide-react";
 import { ImportTripModal } from "@/components/ImportTripModal";
 import { NaturalLanguageTripButton } from "@/components/NaturalLanguageTripButton";
@@ -249,6 +250,13 @@ function CreateTripModal({
   const [step, setStep] = useState(1);
   const [importTripId, setImportTripId] = useState<string | null>(null);
   const [importItemIds, setImportItemIds] = useState<string[] | null>(null);
+  /*
+   * Set only when Create did not actually produce a trip. Kept as its own state
+   * rather than reusing AppContext's `error`, which is global and would also be
+   * cleared by unrelated successful writes — this message must survive until the
+   * user retries or corrects it.
+   */
+  const [createError, setCreateError] = useState<string | null>(null);
 
   /*
    * Sources are recomputed from live state on every render, so a bag created in
@@ -289,19 +297,31 @@ function CreateTripModal({
     setStep(1);
     setImportTripId(null);
     setImportItemIds(null);
+    setCreateError(null);
   };
 
   const handleCreate = async () => {
     if (!name.trim()) return;
+    // A retry should not keep showing the previous attempt's failure.
+    setCreateError(null);
     // Dates are optional: store exactly what the user picked. If they chose a
     // start but no end, treat it as a single-day trip. Never silently default
     // to "today" — that turned blank-date trips into phantom trips (and used
     // UTC, which rolled to the wrong day in the evening).
     const start = startDate.trim();
     const end = endDate.trim() || start;
-    // The trip is written to SQLite by the server, so wait for that to resolve
-    // and navigate on the id it returns. The old localStorage poll-and-redirect
-    // raced the write and had nothing to read once persistence moved server-side.
+    /*
+     * The trip is written to SQLite by the server, so wait for that to resolve
+     * and navigate on the id it returns.
+     *
+     * A falsy id is NOT a successful create. `trip.create` returns "" when the
+     * write never reached the server — the op is sitting in the offline queue
+     * waiting for a reconnect. Closing the dialog on that path is what made a
+     * queued create look identical to a lost one: the sheet dismissed, nothing
+     * navigated, and the trip only appeared later (or not until a manual sync),
+     * with no message in between. So the queued case keeps the dialog open and
+     * says what happened, and only a real id closes it.
+     */
     const createdId = await trip.create(
       {
         name: name.trim(),
@@ -313,9 +333,26 @@ function CreateTripModal({
       },
       importTripId ? selection : undefined
     );
-    if (createdId) router.push(`/trips/${createdId}`);
-    reset();
-    onOpenChange(false);
+
+    if (createdId) {
+      router.push(`/trips/${createdId}`);
+      reset();
+      onOpenChange(false);
+      return;
+    }
+
+    /*
+     * No id. Either the request is queued for later, or it failed outright.
+     * Both leave the trip uncreated from the user's point of view, so both must
+     * keep the dialog open and explain — the input is still on screen, so
+     * pressing Create again after reconnecting is a one-click retry rather than
+     * a re-typed form.
+     */
+    setCreateError(
+      typeof navigator !== "undefined" && !navigator.onLine
+        ? "You're offline — this trip is saved and will be created when you reconnect. It is listed in the banner at the top."
+        : "The trip could not be created. Check your connection and try again."
+    );
   };
 
   /*
@@ -520,6 +557,21 @@ function CreateTripModal({
           </div>
         )}
 
+        {/*
+          Rendered outside the step bodies so it is visible wherever Create was
+          pressed from — the failure is about the trip, not about a step. Uses
+          role="alert" so a screen reader announces it; the dialog otherwise
+          changes nothing the user can perceive when this fires.
+        */}
+        {createError && (
+          <p
+            role="alert"
+            className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-snug text-amber-200"
+          >
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>{createError}</span>
+          </p>
+        )}
         <DialogFooter className="gap-2 sm:gap-0">
           {step > 1 && (
             <Button

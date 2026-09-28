@@ -391,11 +391,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ? { state: { bags: current.bags ?? [], items: current.items }, selection: bagImport }
           : undefined;
 
+      /*
+       * The created trip is taken from `createTrip`'s own return value, not by
+       * reading the last element of the state array. That used to be
+       * `result.trips.at(-1)`, which only worked because /api/state happens to
+       * order trips by createdAt ascending — the newest therefore sorting last.
+       * Any change to that ordering (or a tie on createdAt, which is a real
+       * possibility for two quick creates) would silently navigate to the wrong
+       * trip. createTrip already hands back the exact trip it inserted, so ask
+       * it instead of inferring.
+       *
+       * The `catch` shape is preserved: a falsy return means "no trip was
+       * created" and callers must treat it as such rather than as success.
+       */
+      let createdTripId = "";
       const result = await run(
         (prev) => prev,
-        async () => (await createTrip(ownerId, data, resolved)).state
+        async () => {
+          const created = await createTrip(ownerId, data, resolved);
+          createdTripId = created.trip.id;
+          return created.state;
+        }
       );
-      return result ? (result.trips.at(-1)?.id ?? "") : "";
+      /*
+       * Only report an id when the write actually reached the server. `run`
+       * returns null for a queued-for-later write (offline), and in that case
+       * the trip does not exist yet — returning its would-be id would navigate
+       * the user to a trip that 404s.
+       */
+      return result ? createdTripId : "";
     },
     update: async (id: string, data: Partial<Trip>) => {
       await run(
@@ -482,11 +506,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const categoryActions = {
     create: async (tripId: string, name: string, icon: string): Promise<string> => {
+      /*
+       * Same contract as trip.create: take the id from the created record
+       * itself. The previous `result.categories.at(-1)?.id` assumed the new
+       * category was appended last by the server, which is an ORDER BY
+       * artifact rather than a guarantee.
+       */
+      let createdId = "";
       const result = await run(
         (prev) => prev,
-        async () => (await createCategory(tripId, name, icon)).state
+        async () => {
+          const created = await createCategory(tripId, name, icon);
+          createdId = created.category.id;
+          return created.state;
+        }
       );
-      return result ? (result.categories.at(-1)?.id ?? "") : "";
+      return result ? createdId : "";
     },
     update: async (id: string, data: { name?: string; icon?: string }) => {
       await run(
@@ -553,11 +588,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const bagActions = {
     create: async (tripId: string, name: string, kind: BagKind) => {
+      /*
+       * Same contract again: read the created bag off createBag's return value
+       * rather than assuming it is the last element of the server's array. A
+       * wrong id here attaches subsequent items to the wrong bag.
+       */
+      let createdId = "";
       const result = await run(
         (prev) => prev,
-        async () => (await createBag(tripId, { name, kind })).state
+        async () => {
+          const created = await createBag(tripId, { name, kind });
+          createdId = created.bag.id;
+          return created.state;
+        }
       );
-      return result ? (result.bags?.at(-1)?.id ?? "") : "";
+      return result ? createdId : "";
     },
     update: async (id: string, data: { name?: string; kind?: BagKind }) => {
       await run(

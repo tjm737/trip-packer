@@ -411,21 +411,30 @@ export async function createTrip(
     ? buildBagImport(base, trip.id, bagImport.selection, generateId, now)
     : { bags: [], items: [] };
 
-  const state = await mutate({
-    op: "state.replace",
-    state: {
-      ...base,
-      trips: [...base.trips, trip],
-      categories: [...base.categories, ...categories],
-      /*
-       * Imported items are concatenated BEFORE the default packing list, so a
-       * user who imported their own contents sees them at the top of the fresh
-       * trip rather than buried under the generic starter list.
-       */
-      items: [...base.items, ...imported.items, ...items],
-      bags: [...(base.bags ?? []), ...imported.bags],
+  const state = await mutate(
+    {
+      op: "state.replace",
+      state: {
+        ...base,
+        trips: [...base.trips, trip],
+        categories: [...base.categories, ...categories],
+        /*
+         * Imported items are concatenated BEFORE the default packing list, so a
+         * user who imported their own contents sees them at the top of the fresh
+         * trip rather than buried under the generic starter list.
+         */
+        items: [...base.items, ...imported.items, ...items],
+        bags: [...(base.bags ?? []), ...imported.bags],
+      },
     },
-  });
+    /*
+     * Labelled so the offline banner names what is waiting ("New trip: Lisbon")
+     * instead of falling back to the generic "Change". A queued create is the
+     * most alarming thing that can sit in that queue — the user watched a dialog
+     * close — so it is the one that most needs identifying.
+     */
+    `New trip: ${trip.name}`
+  );
 
   /*
    * Recorded only after the write resolves, so the count reflects trips that
