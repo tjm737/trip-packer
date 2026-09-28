@@ -612,11 +612,21 @@ export default function DashboardClient() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {/* On-device natural-language entry. Web-only omission is handled
-                inside the button: it disables itself with a tooltip rather than
-                unmounting, so the header keeps a stable layout and the reason
-                is discoverable. */}
-            <div className="hidden sm:block">
+            {/* On-device natural-language entry.
+
+                Shown ONLY below `sm`. This is the inverse of the Import button
+                beside it, and the inversion is the point: the model is a native
+                iOS 26 capability reached through the Capacitor plugin, so the
+                phone is the one surface where this can ever work — and the
+                desktop is the one surface where it never can. Hiding it on
+                desktop also removes a permanently-disabled control from the
+                roomier layout, where it was pure noise.
+
+                The wrapper carries the visibility rather than the Button: the
+                Button's cva base hardcodes `inline-flex`, and Tailwind emits
+                `inline-flex` after `hidden`, so a `hidden` class on the Button
+                itself loses the source-order tie and stays visible. */}
+            <div className="sm:hidden">
               <NaturalLanguageTripButton
                 onExtracted={(draft) => {
                   setTripPrefill(draft);

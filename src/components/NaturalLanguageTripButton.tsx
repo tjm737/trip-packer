@@ -26,6 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -164,31 +165,58 @@ export function NaturalLanguageTripButton({
 
   return (
     <>
-      <Tooltip label={hint}>
-        <span className={className}>
-          {/*
-           * The disabled treatment is explicit rather than the Button's default
-           * opacity, which at 0.5 still read as an ordinary secondary button in
-           * review — a control that looks pressable but is not. Dimming the
-           * border and text, and dropping the fill entirely, makes "not
-           * available here" legible at a glance.
-           */}
+      {/*
+       * On a narrow (phone) viewport an unavailable button cannot explain
+       * itself: the Tooltip below is hover/focus driven, and a disabled button
+       * is neither hoverable on touch nor focusable at all. So on those widths
+       * the reason is rendered as visible text instead, and the Tooltip is
+       * suppressed to avoid showing the same sentence twice.
+
+       * `sm:` mirrors the caller, which shows this control only below `sm`.
+       * Both sides move together: if the wrapper's breakpoint changes, this one
+       * must change with it, or the phone loses the explanation again.
+       */}
+      {!available && !checking ? (
+        <div className={cn("flex flex-col items-stretch gap-1.5", className)}>
           <Button
             variant="outline"
-            onClick={() => setOpen(true)}
-            disabled={checking || !available}
-            title={hint}
-            className={
-              checking || !available
-                ? "focus-ring border-dashed border-zinc-800 bg-transparent text-zinc-600"
-                : "focus-ring"
-            }
+            disabled
+            className="focus-ring border-dashed border-zinc-800 bg-transparent text-zinc-600"
           >
             <Wand2 className="mr-1.5 h-4 w-4" />
             Describe a trip
           </Button>
-        </span>
-      </Tooltip>
+          <p className="max-w-[16rem] text-[11px] leading-snug text-zinc-500">
+            {hint}
+          </p>
+        </div>
+      ) : (
+        <Tooltip label={hint}>
+          <span className={className}>
+            {/*
+             * The disabled treatment is explicit rather than the Button's default
+             * opacity, which at 0.5 still read as an ordinary secondary button in
+             * review — a control that looks pressable but is not. Dimming the
+             * border and text, and dropping the fill entirely, makes "not
+             * available here" legible at a glance.
+             */}
+            <Button
+              variant="outline"
+              onClick={() => setOpen(true)}
+              disabled={checking || !available}
+              title={hint}
+              className={
+                checking || !available
+                  ? "focus-ring border-dashed border-zinc-800 bg-transparent text-zinc-600"
+                  : "focus-ring"
+              }
+            >
+              <Wand2 className="mr-1.5 h-4 w-4" />
+              Describe a trip
+            </Button>
+          </span>
+        </Tooltip>
+      )}
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="sm:max-w-[520px] bg-zinc-900 border-zinc-700">
