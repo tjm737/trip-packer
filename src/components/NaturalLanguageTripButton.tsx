@@ -17,7 +17,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Sparkles, Loader2, Wand2 } from "lucide-react";
+import { Sparkles, Loader2, Wand2, ChevronRight } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -175,10 +175,14 @@ export function NaturalLanguageTripButton({
     <>
       {variant === "card" ? (
         /*
-         * The card face. Deliberately reuses StatCard's visual grammar -- same
-         * border/radius/`surface-stat` fill, the same w-8 h-8 icon tile, the same
-         * label treatment and sub-line -- so it reads as one of the dashboard's
-         * own cards rather than a stray button that grew.
+         * The card face. Reuses StatCard's SHAPE -- same border/radius, the same
+         * w-8 h-8 icon tile, the same label treatment and sub-line -- so it sits
+         * in the dashboard's card grid without looking foreign.
+         *
+         * The FILL deliberately departs from the stat cards: this one is bright
+         * green where they are neutral. That is the whole point -- it is the
+         * primary action, and as an identical dark card it read as decoration
+         * rather than a button.
          *
          * The whole card is the button, so the hit target is the full width
          * rather than a ~44px pill, which is the point of moving it down here.
@@ -199,7 +203,31 @@ export function NaturalLanguageTripButton({
               "transition-colors focus-ring",
               checking || !available
                 ? "cursor-not-allowed border-dashed border-zinc-800 bg-transparent"
-                : "border-zinc-700/60 surface-stat hover:border-emerald-600/60"
+                : /*
+                   * A FILLED bright-green card, not another dark card with a green
+                   * icon. The point of moving this control down here is that it
+                   * is the easiest way to start a trip, so it has to read as the
+                   * thing to press. Previously the only green was a 32px icon
+                   * tile, which sat in a row of otherwise identical dark cards
+                   * and did not stand out at all.
+                   *
+                   * The fill is sidebar-primary (#6ba991) with DARK text, which
+                   * is the app's existing pattern for a bright green surface, and
+                   * it is a deliberate choice over the muted primary (#406655):
+                   *
+                   *   #406655 + white   white 6.46:1  fill-vs-page 3.06:1
+                   *   #6ba991 + white   white 2.72:1  fill-vs-page 7.27:1
+                   *   #6ba991 + #0b1f18 dark  6.30:1  fill-vs-page 7.27:1
+                   *
+                   * The muted primary is tuned for white text on a small button;
+                   * at card size it only reaches 3.06:1 against the page, so it
+                   * reads as a grey-olive panel rather than a green action and
+                   * loses to the header's New Trip button. The bright fill is the
+                   * only one of the three that both pops AND keeps its text
+                   * legible -- bright green needs dark text, not white. So this
+                   * inverts the icon-tile text treatment to match.
+                   */
+                  "border-[#6ba991] bg-[#6ba991] text-[#0b1f18] hover:bg-emerald-400"
             )}
           >
             <div
@@ -207,7 +235,9 @@ export function NaturalLanguageTripButton({
                 "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
                 checking || !available
                   ? "bg-zinc-800/60 text-zinc-600"
-                  : "bg-emerald-500/15 text-emerald-400"
+                  : // Dark-on-green chip, matching the card's inverted treatment.
+                    // White here would be the lowest-contrast part of the card.
+                    "bg-[#0b1f18]/15 text-[#0b1f18]"
               )}
             >
               <Sparkles className="h-4 w-4" />
@@ -216,7 +246,7 @@ export function NaturalLanguageTripButton({
               <div
                 className={cn(
                   "text-sm font-semibold",
-                  checking || !available ? "text-zinc-600" : "text-zinc-50"
+                  checking || !available ? "text-zinc-600" : "text-[#0b1f18]"
                 )}
               >
                 Describe a trip
@@ -224,12 +254,28 @@ export function NaturalLanguageTripButton({
               <div
                 className={cn(
                   "mt-0.5 text-[11px] leading-snug",
-                  checking || !available ? "text-zinc-600" : "text-zinc-400"
+                  checking || !available ? "text-zinc-600" : "text-[#0b1f18]/75"
                 )}
               >
                 {hint}
               </div>
             </div>
+            {/*
+              * An affordance, so the card reads as pressable rather than as an
+              * informational banner. The fill alone was not enough: a full-width
+              * coloured strip with no control-like detail reads as a promo, and
+              * the card competes with the header's New Trip button for "what do
+              * I press". The chevron is the conventional "this opens something"
+              * cue, and nudging it on hover confirms the whole card is the
+              * target. Hidden in the unavailable state, where there is no
+              * action to take.
+              */}
+            {!(checking || !available) && (
+              <ChevronRight
+                aria-hidden="true"
+                className="ml-auto h-4 w-4 shrink-0 text-[#0b1f18]/60 transition-transform group-hover:translate-x-0.5"
+              />
+            )}
           </button>
         </div>
       ) : !available && !checking ? (
