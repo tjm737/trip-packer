@@ -612,34 +612,18 @@ export default function DashboardClient() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {/* On-device natural-language entry.
+            {/* On-device natural-language entry moved out of the header and into
+                a full-width card below the stat row (see the card variant of
+                NaturalLanguageTripButton). It was a small disabled pill up here,
+                competing with "New Trip" for the eye while being unavailable on
+                every non-iOS surface.
 
-                Shown ONLY below `sm`. This is the inverse of the Import button
-                beside it, and the inversion is the point: the model is a native
-                iOS 26 capability reached through the Capacitor plugin, so the
-                phone is the one surface where this can ever work — and the
-                desktop is the one surface where it never can. Hiding it on
-                desktop also removes a permanently-disabled control from the
-                roomier layout, where it was pure noise.
-
-                The wrapper carries the visibility rather than the Button: the
-                Button's cva base hardcodes `inline-flex`, and Tailwind emits
-                `inline-flex` after `hidden`, so a `hidden` class on the Button
-                itself loses the source-order tie and stays visible. */}
-            <div className="sm:hidden">
-              <NaturalLanguageTripButton
-                onExtracted={(draft) => {
-                  setTripPrefill(draft);
-                  setCreateOpen(true);
-                }}
-              />
-            </div>
-            {/* Hidden below `sm` to keep the mobile header to a single action.
-                The wrapper carries the visibility rather than the Button: the
-                Button's cva base hardcodes `inline-flex`, and Tailwind emits
-                `inline-flex` after `hidden`, so a `hidden` class on the Button
-                itself loses the source-order tie and stays visible. Hiding the
-                parent avoids the conflict. */}
+                The Import button keeps its `hidden sm:block` wrapper so the
+                mobile header stays to a single action (New Trip). The wrapper
+                carries the visibility rather than the Button: the Button's cva
+                base hardcodes `inline-flex`, and Tailwind emits `inline-flex`
+                after `hidden`, so a `hidden` class on the Button itself loses
+                the source-order tie and stays visible. */}
             <div className="hidden sm:block">
               <Tooltip label="Create a trip from a saved itinerary file" side="left">
                 <Button
@@ -667,8 +651,19 @@ export default function DashboardClient() {
         {/* Stats row.
             Always rendered (previously hidden whenever totalItems was 0, which
             made the header jump as items were added). While unhydrated the
-            values are placeholders so the first client render still matches SSR. */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+            values are placeholders so the first client render still matches SSR.
+
+            Mobile is 2-up, not 1-up: three full-width cards stacked pushed the
+            trip grid below the fold on a phone. Total items and Next trip pair
+            on the first row (the two the user scans for), and Packed spans the
+            second at full width. `col-span-2` on Packed is what keeps its
+            progress sub-line readable -- halved, "64% complete" would wrap.
+
+            The value text is the tightest constraint here: a phone gives each
+            card ~166px, leaving ~90px for text after the icon and padding.
+            formatDate emits "Dec 1" (month+day, no year), ~66px, so it fits
+            with room to spare; a full-year date would not. */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
           <StatCard
             icon={<Package className="w-4 h-4" />}
             value={totalItems}
@@ -676,30 +671,56 @@ export default function DashboardClient() {
             accent="emerald"
             hint="Every item across your upcoming trips"
           />
-          <StatCard
-            icon={<CheckCircle2 className="w-4 h-4" />}
-            value={checkedItems}
-            label="Packed"
-            accent="sage"
-            hint="Items you have ticked off"
-            sub={
-              totalItems > 0
-                ? `${Math.round((checkedItems / totalItems) * 100)}% complete`
-                : undefined
-            }
-          />
-          <StatCard
-            icon={<Calendar className="w-4 h-4" />}
-            value={
-              upcomingTrips.length > 0
-                ? formatDate(upcomingTrips[0].startDate) ??
-                  formatDate(upcomingTrips[0].endDate) ??
-                  "TBD"
-                : "—"
-            }
-            label="Next trip"
-            accent="violet"
-            hint="Your soonest upcoming departure"
+          {/*
+            Sits second on mobile so it lands beside Total items, and third on
+            desktop where the original order (Total items, Packed, Next trip) is
+            restored by `order` -- the wide layout has room for the reading
+            order, the narrow one has room for the pairing.
+          */}
+          <div className="order-3 sm:order-2 col-span-2 sm:col-span-1">
+            <StatCard
+              icon={<CheckCircle2 className="w-4 h-4" />}
+              value={checkedItems}
+              label="Packed"
+              accent="sage"
+              hint="Items you have ticked off"
+              sub={
+                totalItems > 0
+                  ? `${Math.round((checkedItems / totalItems) * 100)}% complete`
+                  : undefined
+              }
+            />
+          </div>
+          <div className="order-2 sm:order-3">
+            <StatCard
+              icon={<Calendar className="w-4 h-4" />}
+              value={
+                upcomingTrips.length > 0
+                  ? formatDate(upcomingTrips[0].startDate) ??
+                    formatDate(upcomingTrips[0].endDate) ??
+                    "TBD"
+                  : "—"
+              }
+              label="Next trip"
+              accent="violet"
+              hint="Your soonest upcoming departure"
+            />
+          </div>
+        </div>
+
+        {/* On-device natural-language entry, as a full-width card.
+            Mobile only: the extraction runs on Apple's on-device model via the
+            Capacitor plugin, so it can never work on the desktop web build and a
+            permanently-disabled card would just be dead weight there.
+            Sits below the stats so the numbers stay the first thing read, and
+            above the trip grid so it is reachable without scrolling past trips. */}
+        <div className="sm:hidden mb-6">
+          <NaturalLanguageTripButton
+            variant="card"
+            onExtracted={(draft) => {
+              setTripPrefill(draft);
+              setCreateOpen(true);
+            }}
           />
         </div>
 

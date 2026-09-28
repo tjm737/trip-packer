@@ -62,10 +62,18 @@ const EXAMPLES = [
 export function NaturalLanguageTripButton({
   onExtracted,
   className,
+  variant = "button",
 }: {
   /** Receives a draft the user has confirmed. */
   onExtracted: (draft: TripDraft) => void;
   className?: string;
+  /*
+   * "button" is the compact header trigger; "card" is the full-width dashboard
+   * card. Both share every piece of behaviour below -- the availability probe,
+   * the dialog, the extraction -- so they are one component with two faces
+   * rather than two components that would drift apart.
+   */
+  variant?: "button" | "card";
 }) {
   const [availability, setAvailability] = useState<AvailabilityReport | null>(null);
   const [checking, setChecking] = useState(true);
@@ -165,18 +173,66 @@ export function NaturalLanguageTripButton({
 
   return (
     <>
-      {/*
-       * On a narrow (phone) viewport an unavailable button cannot explain
-       * itself: the Tooltip below is hover/focus driven, and a disabled button
-       * is neither hoverable on touch nor focusable at all. So on those widths
-       * the reason is rendered as visible text instead, and the Tooltip is
-       * suppressed to avoid showing the same sentence twice.
-
-       * `sm:` mirrors the caller, which shows this control only below `sm`.
-       * Both sides move together: if the wrapper's breakpoint changes, this one
-       * must change with it, or the phone loses the explanation again.
-       */}
-      {!available && !checking ? (
+      {variant === "card" ? (
+        /*
+         * The card face. Deliberately reuses StatCard's visual grammar -- same
+         * border/radius/`surface-stat` fill, the same w-8 h-8 icon tile, the same
+         * label treatment and sub-line -- so it reads as one of the dashboard's
+         * own cards rather than a stray button that grew.
+         *
+         * The whole card is the button, so the hit target is the full width
+         * rather than a ~44px pill, which is the point of moving it down here.
+         *
+         * The explanation is always visible rather than tooltip-only: on a phone
+         * a tooltip cannot be reached without a hover, and this control is often
+         * legitimately unavailable (it is a native iOS 26 capability).
+         */
+        <div className={cn("flex flex-col gap-1.5", className)}>
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            disabled={checking || !available}
+            title={hint}
+            aria-label="Describe a trip"
+            className={cn(
+              "group flex w-full items-center gap-3 rounded-xl border px-4 py-3.5 text-left",
+              "transition-colors focus-ring",
+              checking || !available
+                ? "cursor-not-allowed border-dashed border-zinc-800 bg-transparent"
+                : "border-zinc-700/60 surface-stat hover:border-emerald-600/60"
+            )}
+          >
+            <div
+              className={cn(
+                "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
+                checking || !available
+                  ? "bg-zinc-800/60 text-zinc-600"
+                  : "bg-emerald-500/15 text-emerald-400"
+              )}
+            >
+              <Sparkles className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+              <div
+                className={cn(
+                  "text-sm font-semibold",
+                  checking || !available ? "text-zinc-600" : "text-zinc-50"
+                )}
+              >
+                Describe a trip
+              </div>
+              <div
+                className={cn(
+                  "mt-0.5 text-[11px] leading-snug",
+                  checking || !available ? "text-zinc-600" : "text-zinc-400"
+                )}
+              >
+                {hint}
+              </div>
+            </div>
+          </button>
+        </div>
+      ) : !available && !checking ? (
         <div className={cn("flex flex-col items-stretch gap-1.5", className)}>
           <Button
             variant="outline"

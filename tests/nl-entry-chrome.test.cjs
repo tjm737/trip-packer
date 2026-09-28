@@ -61,13 +61,49 @@ const BUTTON = h.SRC + "/components/NaturalLanguageTripButton.tsx";
      * A disabled button fires no pointer events and cannot be focused, so the
      * hover/focus tooltip is doubly unreachable on touch -- which is precisely
      * the target platform. The reason must therefore be rendered as visible
-     * text on that path.
+     * text on every unavailable path.
      *
-     * The check is that the unavailable branch renders the hint inside a <p>,
-     * not only as a Tooltip label.
+     * The component now has two faces: `variant="card"` (the full-width
+     * dashboard card) and the default compact button. Both must satisfy this,
+     * so assert it per-variant rather than against a single branch regex.
      */
+
+    // --- The card variant: the whole card is a <button>, and the reason is
+    // rendered as a sub-line always (not only when unavailable), so it is
+    // visible even in the disabled state.
+    const cardBranch = button.match(
+      /variant === "card" \? \(([\s\S]*?)\) : !available && !checking \? \(/
+    );
+    h.assert(
+      cardBranch !== null,
+      "could not find the `variant === \"card\"` branch in the NL button"
+    );
+    /*
+     * Assert {hint} is RENDERED as visible text in the card, not merely present
+     * as an attribute. `title={hint}` alone would satisfy a naive /\{hint\}/
+     * check while giving a touch user nothing, since a disabled button cannot be
+     * hovered. So require {hint} inside a JSX text position -- directly between
+     * a `>` and a `<` -- which excludes attribute usage.
+     */
+    h.assert(
+      />\s*\{hint\}\s*<\//.test(cardBranch[1]),
+      "the card variant must render {hint} as VISIBLE text on its own line " +
+        "(a bare title={hint} attribute is unreachable on touch)"
+    );
+    h.assert(
+      /disabled=\{checking \|\| !available\}/.test(cardBranch[1]),
+      "the card variant must disable itself when the model is unavailable, " +
+        "rather than opening a dialog that cannot work"
+    );
+    h.assert(
+      !/<Tooltip[\s\S]*?<\/Tooltip>/.test(cardBranch[1]),
+      "the card variant must not route the reason through a Tooltip; touch " +
+        "devices cannot hover it"
+    );
+
+    // --- The compact (default) variant: unavailable renders a visible <p>.
     const unavailableBranch = button.match(
-      /\{!available && !checking \? \(([\s\S]*?)\) : \(/
+      /\) : !available && !checking \? \(([\s\S]*?)\) : \(/
     );
     h.assert(
       unavailableBranch !== null,
