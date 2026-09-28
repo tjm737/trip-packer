@@ -23,6 +23,8 @@ import {
   Luggage,
 } from "lucide-react";
 import { ImportTripModal } from "@/components/ImportTripModal";
+import { NaturalLanguageTripButton } from "@/components/NaturalLanguageTripButton";
+import type { TripDraft } from "@/lib/naturalLanguageTrip";
 import {
   bagSourceTrips,
   bagImportCandidates,
@@ -221,7 +223,21 @@ function TripCard({ trip, progress }: { trip: any; progress: number }) {
   );
 }
 
-function CreateTripModal({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+function CreateTripModal({
+  open,
+  onOpenChange,
+  prefill,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  /*
+   * Values extracted from free text, applied when the dialog opens. Treated as
+   * a starting point the user can edit, never as a record to write: the draft
+   * is copied into ordinary field state below, so every existing validation and
+   * the icon/import steps behave exactly as they do for a hand-typed trip.
+   */
+  prefill?: TripDraft | null;
+}) {
   const { trip, state } = useApp();
   const router = useRouter();
   const [name, setName] = useState("");
@@ -243,6 +259,25 @@ function CreateTripModal({ open, onOpenChange }: { open: boolean; onOpenChange: 
   const selection: BagImportSelection = { tripId: importTripId, itemIds: importItemIds };
   const summary = bagImportSummary(state, selection);
   const candidates = bagImportCandidates(state, selection);
+
+  /*
+   * Apply an extracted draft when the dialog opens.
+   *
+   * Keyed on `open` and `prefill`, and guarded on `open`, so a draft that
+   * arrives while the dialog is closed does not clobber fields the user is
+   * part-way through editing. The icon is only set when inference found one,
+   * leaving the dialog's own plane default otherwise.
+   */
+  useEffect(() => {
+    if (!open || !prefill) return;
+    setName(prefill.name);
+    setDestination(prefill.destination);
+    setStartDate(prefill.startDate);
+    setEndDate(prefill.endDate);
+    setNotes(prefill.notes);
+    if (prefill.icon) setIcon(prefill.icon);
+    setStep(1);
+  }, [open, prefill]);
 
   const reset = () => {
     setName("");
@@ -533,6 +568,13 @@ export default function DashboardClient() {
   const { state, helpers, hydrated } = useApp();
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  /*
+   * Set by the natural-language button immediately before opening the create
+   * dialog. Held in the parent rather than inside the modal because the modal
+   * unmounts on close, and the extracted values have to survive the handoff
+   * into it.
+   */
+  const [tripPrefill, setTripPrefill] = useState<TripDraft | null>(null);
   // Suppress entrance animations until after mount: Framer Motion's `initial`
   // styles are serialized into the SSR HTML and then differ on the client
   // (the animation has already resolved), which triggers a hydration warning.
@@ -570,6 +612,18 @@ export default function DashboardClient() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {/* On-device natural-language entry. Web-only omission is handled
+                inside the button: it disables itself with a tooltip rather than
+                unmounting, so the header keeps a stable layout and the reason
+                is discoverable. */}
+            <div className="hidden sm:block">
+              <NaturalLanguageTripButton
+                onExtracted={(draft) => {
+                  setTripPrefill(draft);
+                  setCreateOpen(true);
+                }}
+              />
+            </div>
             {/* Hidden below `sm` to keep the mobile header to a single action.
                 The wrapper carries the visibility rather than the Button: the
                 Button's cva base hardcodes `inline-flex`, and Tailwind emits
@@ -673,7 +727,16 @@ export default function DashboardClient() {
           </motion.div>
         )}
       </header>
-      <CreateTripModal open={createOpen} onOpenChange={setCreateOpen} />
+      {/* Prefill is cleared on close so reopening from the plain "New Trip"
+          button starts blank rather than re-applying the last extraction. */}
+      <CreateTripModal
+        open={createOpen}
+        onOpenChange={(next) => {
+          setCreateOpen(next);
+          if (!next) setTripPrefill(null);
+        }}
+        prefill={tripPrefill}
+      />
       <ImportTripModal open={importOpen} onOpenChange={setImportOpen} />
     </div>
   );

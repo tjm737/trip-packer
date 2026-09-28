@@ -42,14 +42,15 @@ const SECTIONS = [
       "Traffic to the server is encrypted in transit with HTTPS.",
     ],
   },
-  {
-    heading: "Packing suggestions stay on your device",
-    body: [
-      "The packing suggestions feature uses Apple Intelligence to generate ideas based on your destination, trip length, the time of year, and any activities you have booked.",
-      "This generation happens entirely on your iPhone. The prompt is passed to Apple's on-device Foundation Models framework, and neither the prompt nor the result is sent to our server or to any third party. Nothing about what you are packing for leaves your device.",
-      "If your device does not support Apple Intelligence, or the feature is turned off, the suggestions are simply unavailable. No data is collected as a fallback.",
-    ],
-  },
+    {
+      heading: "Smart features stay on your device",
+      body: [
+        "Two features use Apple Intelligence on your iPhone: packing suggestions, and describing a trip in your own words to fill in the details.",
+        "Packing suggestions are generated from your destination, trip length, the time of year, and any activities you have booked. Trip descriptions work from the sentence you type.",
+        "This generation happens entirely on your iPhone. The prompt is passed to Apple's on-device Foundation Models framework, and neither the prompt nor the result is sent to our server or to any third party. Nothing about what you are packing for, or planning, leaves your device.",
+        "If your device does not support Apple Intelligence, or the feature is turned off, these features are simply unavailable. No data is collected as a fallback.",
+      ],
+    },
   {
     heading: "Location and maps",
     body: [

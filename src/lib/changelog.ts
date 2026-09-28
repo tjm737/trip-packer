@@ -37,6 +37,27 @@ export interface Release {
  */
 export const RELEASES: Release[] = [
   {
+    version: "0.7.6",
+    date: "2026-09-27",
+    headline: "Describe a trip in a sentence",
+    groups: [
+      {
+        area: "Trips",
+        items: [
+          "Describe a trip in your own words from the dashboard and the details are filled in for you",
+          "Dates like \"next Friday\" and \"the 3rd of October\" are worked out automatically",
+          "Nothing is saved until you check the details and confirm them",
+        ],
+      },
+      {
+        area: "Notes",
+        items: [
+          "Runs entirely on your iPhone, and needs an iPhone that supports Apple Intelligence",
+        ],
+      },
+    ],
+  },
+  {
     version: "0.7.5",
     date: "2026-09-27",
     headline: "A clearer Suggest items button, and a stated minimum age",

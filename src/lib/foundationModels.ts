@@ -69,7 +69,7 @@ interface FoundationModelsPlugin {
 const WEB_UNAVAILABLE: AvailabilityReport = {
   available: false,
   reason: "os_too_old",
-  message: "Suggestions need the iOS app on iOS 26 or later.",
+  message: "Trip entry by description needs the iOS app on iOS 26 or later.",
 };
 
 const Plugin = registerPlugin<FoundationModelsPlugin>("FoundationModels", {
@@ -95,7 +95,7 @@ const Plugin = registerPlugin<FoundationModelsPlugin>("FoundationModels", {
 const NO_PLUGIN: AvailabilityReport = {
   available: false,
   reason: "os_too_old",
-  message: "Suggestions need the iOS app on iOS 26 or later.",
+  message: "Trip entry by description needs the iOS app on iOS 26 or later.",
 };
 
 /**
