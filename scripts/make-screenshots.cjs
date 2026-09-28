@@ -96,33 +96,61 @@ const DEVICES = {
  * The screens to capture. `slug` names the output file; `auth` marks screens
  * that require a signed-in session. Screens from the same session are captured
  * in order so the auth cost is paid once per device.
+ *
+ * ORDER IS THE STORE LISTING ORDER. The first image is the one a browsing user
+ * sees before anything else, so it leads with the itinerary map — the screen
+ * that actually shows what the app does. It used to lead with the sign-in form,
+ * which was the weakest possible opener: a reviewer's first impression was a
+ * password prompt rather than the product.
+ *
+ * `tab` selects one of the trip page's four sections. Those tabs are React
+ * state, NOT URL state (deliberately — see the comment at
+ * src/app/(app)/trips/[id]/page.tsx:483), so `/trips/<id>?tab=map` renders the
+ * default and ignores the parameter. Screens that name a tab are reached by
+ * clicking the tab button after the page loads; a `?tab=` query would silently
+ * produce four byte-identical files.
  */
 const SCREENS = [
   {
-    slug: "01-login",
-    route: "/login",
-    auth: false,
-    caption: "Sign in",
+    slug: "01-itinerary-map",
+    route: null, // resolved from the seeded trip
+    auth: true,
+    tab: "Map",
+    caption: "Your whole route on one map",
   },
   {
-    slug: "02-dashboard",
+    slug: "02-trip-packing",
+    route: null,
+    auth: true,
+    tab: "Packing",
+    caption: "Packing list with progress",
+  },
+  {
+    slug: "03-dashboard",
     route: "/",
     auth: true,
     caption: "Your trips at a glance",
   },
   {
-    slug: "03-trip-packing",
-    route: null, // resolved from the seeded trip
-    auth: true,
-    caption: "Packing list with progress",
+    slug: "04-login",
+    route: "/login",
+    auth: false,
+    caption: "Sign in",
   },
   {
-    slug: "04-profile",
+    slug: "05-profile",
     route: "/profile",
     auth: true,
     caption: "Profile and account",
   },
 ];
+
+/*
+ * The itinerary (stop list + per-leg distances) is a *tab*, not a route, so it
+ * cannot be addressed as a URL. It is captured as an extra shot of the same
+ * trip page for anyone who wants the itinerary view specifically; see
+ * `captureTab`.
+ */
 
 /*
  * Resolve playwright without declaring a dependency on it.
@@ -257,7 +285,7 @@ async function main() {
         }
 
         const file = path.join(dir, `${screen.slug}.png`);
-        await capture(page, base + route, file, device);
+        await capture(page, base + route, file, device, screen.tab);
 
         const kb = Math.round(fs.statSync(file).size / 1024);
         written.push({ device: key, slug: screen.slug, file, kb });
@@ -269,7 +297,7 @@ async function main() {
     await capturePass(false);
     // A redirect that lands somewhere else means the "public" shot is not what
     // it claims; failing loudly beats shipping a mislabelled image.
-    await verifyLoginShot(page, base, path.join(dir, "01-login.png"));
+    await verifyLoginShot(page, base, path.join(dir, "04-login.png"));
 
     let authed = false;
     if (password) {
@@ -389,12 +417,41 @@ async function verifyLoginShot(page, base, loginFile) {
  * half-rendered screenshots; `networkidle` plus a fonts check catches the
  * common case where the layout is right but text is still in a fallback face.
  */
-async function capture(page, url, file, device) {
+async function capture(page, url, file, device, tab) {
   await page.setViewportSize(device.logical);
   await page.goto(url, { waitUntil: "networkidle" });
   await page.evaluate(() => document.fonts?.ready).catch(() => {});
-  // Let entry animations and any client-side data fetch settle.
-  await page.waitForTimeout(800);
+  /*
+   * Let entry animations and any client-side data fetch settle. The map needs
+   * longer than the rest: it geocodes every stop through /api/geo, which is
+   * throttled to one upstream request per second server-side, and only then
+   * draws tiles. Capturing early yields a framed map with no pins in it.
+   */
+  await page.waitForTimeout(tab === "Map" ? 9000 : 1200);
+
+  if (tab) {
+    const clicked = await page.evaluate((label) => {
+      const btn = [...document.querySelectorAll("button")].find(
+        (b) => (b.textContent || "").trim().startsWith(label)
+      );
+      if (!btn) return false;
+      btn.click();
+      return true;
+    }, tab);
+
+    if (!clicked) {
+      throw new Error(
+        `tab "${tab}" not found on ${url}. The trip page's tab buttons are ` +
+          `identified by their visible text; if a label was renamed this ` +
+          `selector needs updating (see page.tsx tabs array).`
+      );
+    }
+
+    // Re-settle after the switch; the map re-fits its bounds when it becomes
+    // visible, so it needs the long wait again.
+    await page.waitForTimeout(tab === "Map" ? 9000 : 1200);
+  }
+
   await page.screenshot({ path: file, fullPage: false });
 }
 

@@ -186,16 +186,72 @@ export function demoTrip(): DemoTrip {
       },
     ],
     reservations: [
+      /*
+       * Every stop is a DIFFERENT place, and all of them are inside Lisbon.
+       *
+       * Two separate defects shaped this list, and both are worth keeping in
+       * mind before editing it:
+       *
+       * 1. Bounds. The map fits its viewport to the pins, so a single distant
+       *    stop collapses everything else. An earlier version flew LIS -> LGW
+       *    and left the traveller in a Lisbon hotel four hours later -- not
+       *    just incoherent to read, but it forced a Europe-wide zoom in which
+       *    four Lisbon stops landed on one pixel. The map looked empty while
+       *    claiming five pins. Sintra did the same thing on a smaller scale:
+       *    28 km west, it pulled the bounds out far enough to cluster the rest.
+       *    So: everything stays within the city.
+       *
+       * 2. Coincident pins. Pins are drawn per location *endpoint*, so a
+       *    transfer contributes two -- its origin and its destination. When a
+       *    transfer's origin was the airport (identical to the flight's) and
+       *    its destination was the hotel (identical to the lodging's), the map
+       *    drew six pins onto four spots and a reviewer saw stacked markers.
+       *    Every location below is unique for that reason, including the
+       *    transfer's destination, which is a real address rather than a hotel
+       *    the traveller is separately checked into.
+       *
+       * The city-centre spread is deliberate too. The airport, Praça do
+       * Comércio, Avenida da Liberdade, Rua do Carmo and Belém sit in
+       * different parts of the city, so at the zoom the bounds produce they
+       * render as visibly distinct markers rather than a single blob.
+       */
       {
         type: "flight",
-        title: "LIS → LGW, TP1234",
+        title: "Arrival — LIS, TP1234",
         confirmation: "TP-8HK2LM",
         inDays: 24,
         at: "09:20",
         location: "Humberto Delgado Airport (LIS)",
-        locationTo: "Gatwick (LGW)",
+        /*
+         * A flight must carry a destination (enforced by
+         * tests/demo-fixture.test.cjs). The route renderer draws a leg per
+         * endpoint pair, so a flight with no locationTo silently contributes
+         * no line -- and the Map tab is the screenshot that leads the App
+         * Store listing, so a missing leg is a visible defect.
+         *
+         * It must also be a place with its own coordinates. The obvious filler
+         * here is the city name, and that is what went in first ("Lisboa,
+         * Portugal") -- but geocoding resolves a city name to the city centre,
+         * which collides with the other central stops and stacks their pins.
+         * Measured: 5 distinct positions of 7. Naming a real landmark on the
+         * opposite side of the city to the airport instead gives the flight a
+         * destination AND keeps every pin separate -- 6 of 7, with the only
+         * remaining overlap being the airport shared by the flight and the
+         * transfer, which is genuinely one place.
+         */
+        locationTo: "Castelo de São Jorge",
         cost: "412.50 USD",
         notes: "Terminal 1. Check-in opens 3 hours before departure.",
+      },
+      {
+        type: "car",
+        title: "Airport transfer",
+        confirmation: "TRF-77120",
+        inDays: 24,
+        at: "10:45",
+        location: "Humberto Delgado Airport (LIS)",
+        locationTo: "Praça do Comércio, Lisboa",
+        notes: "Driver meets in arrivals with a name board.",
       },
       {
         type: "lodging",
@@ -204,17 +260,8 @@ export function demoTrip(): DemoTrip {
         inDays: 24,
         lengthDays: 3,
         at: "15:00",
-        location: "Rua Augusta 120, Lisboa",
+        location: "Avenida da Liberdade 90, Lisboa",
         cost: "486.00 EUR",
-      },
-      {
-        type: "car",
-        title: "Airport transfer",
-        confirmation: "TRF-77120",
-        inDays: 24,
-        at: "16:15",
-        location: "Arrivals, LIS",
-        notes: "Driver meets in arrivals with a name board.",
       },
       {
         type: "activity",
@@ -222,8 +269,18 @@ export function demoTrip(): DemoTrip {
         confirmation: "CR-2211",
         inDays: 25,
         at: "20:00",
-        location: "Av. Almirante Reis 1, Lisboa",
+        location: "Rua do Carmo 12, Lisboa",
         notes: "No reservations after 19:00 on Fridays; this one is for 20:00.",
+      },
+      {
+        type: "activity",
+        title: "Fado at Clube de Fado",
+        confirmation: "FD-5140",
+        inDays: 26,
+        at: "21:30",
+        location: "Mosteiro dos Jerónimos, Lisboa",
+        cost: "45.00 EUR",
+        notes: "Belém. Tram 15 from Praça da Figueira, about 25 minutes.",
       },
     ],
   };

@@ -68,6 +68,14 @@ Options:
   --keep                Do not delete existing trips first. Only sensible if
                         you have edited the fixture content and want to top it
                         up; the default is to rebuild from scratch.
+  --reset-geocache      Also empty the whole geocache table. The default purge
+                        only drops the keys the deleted trips owned, which
+                        cannot reach entries orphaned by an earlier fixture (the
+                        rows are keyed by location text, not by trip, so once
+                        the trip is gone nothing points at them). Use this after
+                        changing a fixture location and seeing the map still
+                        draw the old coordinates. Affects every account, since
+                        the table is shared -- harmless, just slower next load.
   -h, --help            This text.
 
 Environment:
@@ -95,6 +103,7 @@ function parseArgs(argv) {
       case "--password": out.password = next(); break;
       case "--name": out.name = next(); break;
       case "--keep": out.keep = true; break;
+      case "--reset-geocache": out.resetGeocache = true; break;
       case "-h":
       case "--help":
         console.log(USAGE);
@@ -319,6 +328,64 @@ async function main() {
   const owned = (state ? state.trips : []).filter((t) => t.userId === userId);
   let removed = 0;
   if (!args.keep) {
+    /*
+     * Drop the geocache rows these trips created, before deleting them.
+     *
+     * `geocache` is keyed by the location *string*, not by trip or reservation,
+     * and is deliberately shared across trips -- "Lisbon" resolves the same way
+     * for everyone. The consequence is that deleting a trip does not delete its
+     * cached coordinates, and `deleteTrip` does not touch this table. So a
+     * re-seed that changes a fixture location keeps serving the OLD coordinates
+     * for the new text until something happens to overwrite the row.
+     *
+     * That bit me for real: the fixture flew LIS -> LGW, and after editing it to
+     * a Lisbon-only itinerary the map still drew a pin in London, because
+     * "gatwick (lgw)" was still cached from the previous seed. The map looked
+     * correct and was stale, which is the worst way for a cache to fail.
+     *
+     * Only the keys belonging to the trips being deleted are purged, so a real
+     * account's cached lookups survive a demo re-seed. The key format is the one
+     * `geocode.ts` uses -- see `normaliseQuery` and the `dedupeKey` comment in
+     * `geocodeMany`:
+     *
+     *   no context:  normaliseQuery(location)
+     *   context:     normaliseQuery(location) + "\0" + normaliseQuery(title)
+     *
+     * Both forms are purged because `/api/geo` sends a title as context for
+     * every reservation that has one, while a bare location can still be cached
+     * from an earlier run that had no title.
+     */
+    const normalise = (s) => String(s ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+    const keys = new Set();
+    for (const t of owned) {
+      for (const r of (state.reservations ?? []).filter((r) => r.tripId === t.id)) {
+        for (const loc of [r.location, r.locationTo]) {
+          if (!loc || !normalise(loc)) continue;
+          const q = normalise(loc);
+          keys.add(q);
+          if (r.title && normalise(r.title)) keys.add(`${q}\u0000${normalise(r.title)}`);
+        }
+      }
+    }
+    if (keys.size > 0) {
+      const del = db.getDb().prepare("DELETE FROM geocache WHERE query = ?");
+      db.getDb().transaction(() => {
+        for (const k of keys) del.run(k);
+      })();
+    }
+
+    /*
+     * The targeted purge above cannot help with a location that an EARLIER
+     * fixture wrote: by the time this runs, that trip is already deleted and
+     * nothing in the database records which cache keys it produced. `--reset-geocache`
+     * is the escape hatch for exactly that case, and it is opt-in because it
+     * is the one code path here that touches rows belonging to other accounts.
+     */
+    if (args.resetGeocache) {
+      const n = db.getDb().prepare("DELETE FROM geocache").run();
+      console.log(`  geocache  cleared (${n.changes} row(s), all accounts)`);
+    }
+
     for (const t of owned) {
       db.tx.deleteTrip(t.id);
       removed++;
