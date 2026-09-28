@@ -11,6 +11,25 @@
 		do (they arrive via SPM into the built product, which is why none are
 		found loose in this repo).
 
+		TYPES MATTER, AND THEY ARE NOT UNIFORM -- this is what got a build
+		rejected with ITMS-91056 ("Keys and values in your app's privacy
+		manifests must be valid"), so please read before editing:
+
+		  * NSPrivacyTracking, at the top level, is a real plist BOOLEAN:
+		    <false/>. Apple's own SDK manifests (Capacitor, Cordova) all ship
+		    it exactly that way.
+		  * NSPrivacyCollectedDataTypeLinked and
+		    NSPrivacyCollectedDataTypeTracking, *inside* each entry of
+		    NSPrivacyCollectedDataTypes, are STRINGS: <string>true</string>.
+		    They must be quoted.
+
+		The asymmetry is easy to get wrong, and getting it wrong produces a
+		manifest that `plutil -lint` happily accepts (it is valid XML and a
+		valid plist) while App Store validation rejects it. A green plutil run
+		does NOT mean this file is acceptable -- do not use it as the check.
+		Validating the type of every value is the only way to catch this
+		locally.
+
 		Everything here is a statement of fact about what the app actually
 		does. It was checked against the source rather than filled in from a
 		template, because an inaccurate manifest is worse than a missing one:
@@ -68,11 +87,15 @@
 		<dict>
 			<key>NSPrivacyCollectedDataType</key>
 			<string>NSPrivacyCollectedDataTypeEmailAddress</string>
-			<!-- Plain integer, not a string: Apple's schema requires a boolean. -->
+			<!--
+				Quoted strings, NOT <true/>. See the TYPES MATTER note above:
+				these two keys are strings in Apple's schema even though the
+				top-level NSPrivacyTracking is a boolean.
+			-->
 			<key>NSPrivacyCollectedDataTypeLinked</key>
-			<true/>
+			<string>true</string>
 			<key>NSPrivacyCollectedDataTypeTracking</key>
-			<false/>
+			<string>false</string>
 			<key>NSPrivacyCollectedDataTypePurposes</key>
 			<array>
 				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
@@ -84,9 +107,9 @@
 			<key>NSPrivacyCollectedDataType</key>
 			<string>NSPrivacyCollectedDataTypeName</string>
 			<key>NSPrivacyCollectedDataTypeLinked</key>
-			<true/>
+			<string>true</string>
 			<key>NSPrivacyCollectedDataTypeTracking</key>
-			<false/>
+			<string>false</string>
 			<key>NSPrivacyCollectedDataTypePurposes</key>
 			<array>
 				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
@@ -104,9 +127,9 @@
 			<key>NSPrivacyCollectedDataType</key>
 			<string>NSPrivacyCollectedDataTypeOtherUserContent</string>
 			<key>NSPrivacyCollectedDataTypeLinked</key>
-			<true/>
+			<string>true</string>
 			<key>NSPrivacyCollectedDataTypeTracking</key>
-			<false/>
+			<string>false</string>
 			<key>NSPrivacyCollectedDataTypePurposes</key>
 			<array>
 				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
