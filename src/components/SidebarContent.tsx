@@ -34,7 +34,7 @@ import {
   type SectionKey,
 } from "@/lib/sidebarSections";
 import { isSectionVisible } from "@/lib/sidebarVisibility";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Plus,
   Users,
@@ -1210,6 +1210,7 @@ function TripList() {
 
 export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
   const { activeUser, hydrated } = useApp();
+  const router = useRouter();
   const [aboutOpen, setAboutOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
 
@@ -1231,10 +1232,29 @@ export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
 
   return (
     <>
-      {/* Brand — the whole block links home, matching the wordmark-as-home
-          affordance users expect from a top-left logo. */}
-      <Link
+      {/* Brand — the whole block goes home, matching the wordmark-as-home
+          affordance users expect from a top-left logo.
+
+          Not a <Link>. In the native shell the sidebar is a drawer, and
+          MobileSidebar closes it from the same tap's bubble phase — unmounting
+          this subtree. A <Link> defers navigation to the router's own click
+          handler, so on iOS the unmount sometimes won and the commit was lost:
+          the tap did nothing at all. A synchronous router.push here commits
+          the navigation before the parent can tear this element down, which is
+          what makes it work in the app and not just in a desktop browser.
+
+          Kept as a real <a href="/"> anyway: middle-click, Cmd-click, and any
+          future no-JS path still behave, and the href is what makes it
+          crawlable as the home link. */}
+      <a
         href="/"
+        onClick={(e) => {
+          // Let modified clicks fall through to the browser so "open in new
+          // tab" still works; only take over a plain left click.
+          if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+          e.preventDefault();
+          router.push("/");
+        }}
         className="focus-ring flex items-center gap-2.5 border-b border-white/8 px-4 py-3.5 transition-colors hover:bg-white/5"
         title="Back to the TripPlanner home page"
         aria-label="TripPlanner home"
@@ -1250,7 +1270,7 @@ export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
             Plan smarter, stress less
           </p>
         </div>
-      </Link>
+      </a>
 
       <UserSwitcher />
 

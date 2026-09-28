@@ -137,21 +137,69 @@ async function run() {
     );
   });
 
-  await h.test("the brand logo links home and is inside the drawer body", () => {
+  await h.test("the brand logo navigates home imperatively, not via <Link>", () => {
     /*
      * The logo must send the user to "/" from any screen. It is rendered by
-     * SidebarBody, which both the desktop aside and the mobile drawer use, so
-     * a single Link covers both. This pins the href so a refactor cannot
-     * quietly point the wordmark somewhere else.
+     * SidebarBody, which both the desktop aside and the mobile drawer use.
+     *
+     * This used to assert a <Link>, which is the shape that BROKE on iOS. A
+     * <Link> defers navigation to the router's own click handler, while
+     * MobileSidebar closes the drawer from the same tap's bubble phase and
+     * unmounts the subtree. In WKWebView the unmount could win and the commit
+     * was lost, so the tap did nothing. The fix is a synchronous router.push
+     * in the anchor's own onClick, which commits before the teardown.
+     *
+     * So this pins the contract, not the tag: the element must be an anchor
+     * with href="/" (middle-click and Cmd-click still work) AND must call
+     * router.push("/") itself. A refactor back to <Link> fails here instead of
+     * in the user's hands, which is precisely what the old version allowed.
      */
     const source = fs.readFileSync(SIDEBAR, "utf8");
-    const brand = source.match(
-      /aria-label="TripPlanner home"[\s\S]{0,600}?<\/Link>/
-    );
-    h.assert(brand !== null, "could not find the TripPlanner home Link");
+    /*
+     * Match from just before the opening tag so `href`/`onClick` (which sit
+     * above aria-label in the JSX) are inside the captured block, through to
+     * the closing </a>. The comment above the element mentions "<Link>", so
+     * anchor on the tag itself rather than the word.
+     */
+    const start = source.indexOf('aria-label="TripPlanner home"');
+    h.assert(start !== -1, "could not find the TripPlanner home anchor");
+    const tagStart = source.lastIndexOf("<a", start);
+    h.assert(tagStart !== -1, "the TripPlanner home element is not an anchor");
+    const end = source.indexOf("</a>", start);
+    h.assert(end !== -1, "could not find the TripPlanner home anchor's close tag");
+    const block = source.slice(tagStart, end + 4);
     h.assert(
-      /href="\/"/.test(source.slice(Math.max(0, brand.index - 400), brand.index)),
+      /href="\/"/.test(block),
       "the brand logo does not link to /"
+    );
+    h.assert(
+      /router\.push\("\/"\)/.test(block),
+      "the brand logo does not navigate imperatively; without router.push it " +
+        "defers to <Link>'s handler and loses the race against the drawer " +
+        "closing on iOS, which reads on a phone as the logo doing nothing"
+    );
+    h.assert(
+      /e\.metaKey|e\.ctrlKey/.test(block),
+      "the brand logo's onClick does not let modified clicks through, so " +
+        "Cmd-click / middle-click would be swallowed instead of opening a new tab"
+    );
+  });
+
+  await h.test("the drawer still unmounts the sidebar body on a link tap", () => {
+    /*
+     * The imperative navigation above only exists because of this unmount. If
+     * the drawer ever stops closing on link taps, the router.push is no longer
+     * load-bearing and this guard should be revisited rather than kept as
+     * cargo. Asserting the premise keeps the reasoning honest.
+     */
+    const drawer = fs.readFileSync(
+      path.join(__dirname, "..", "src", "components", "MobileSidebar.tsx"),
+      "utf8"
+    );
+    h.assert(
+      drawer.includes('el.closest("button, a[href]")'),
+      "the drawer no longer closes on link taps, so the brand-logo race this " +
+        "works around may no longer exist -- re-check before deleting it"
     );
   });
 
