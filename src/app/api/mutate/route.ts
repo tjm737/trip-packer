@@ -431,7 +431,7 @@ export function applyMutation(
         if (!scoped) {
           return { ok: false, status: 403, error: "Not permitted" };
         }
-        t.replaceOwnedRows(
+        const written = t.replaceOwnedRows(
       actor.id,
       // scopeStateForUser's return type is deliberately structural (AccessState),
       // because it is also used against small test fixtures. Here the input is a
@@ -443,6 +443,37 @@ export function applyMutation(
         "trips" | "categories" | "items" | "tasks" | "reservations" | "bags"
       >
     );
+
+        /*
+         * Verify the snapshot's trips actually reached the database.
+         *
+         * state.replace is the only path that creates a trip, and its previous
+         * failure mode was silence: the write matched nothing, committed
+         * nothing, and still returned ok: true, so a new trip appeared to save
+         * and then was simply absent. Comparing intended against written turns
+         * any recurrence into a 500 the client can surface.
+         *
+         * Only trips are checked: they are the row the caller created and the
+         * one whose absence the user notices. A dropped child row is a bug too,
+         * but it is not this guard's job to enumerate, and every child is
+         * gated on the same ownership set as its trip, so a trip that lands
+         * implies its children were eligible.
+         */
+        const intended = new Set(
+          (body.state.trips ?? []).map((trip) => trip.id)
+        );
+        const missing = [...intended].filter((id) => !written.includes(id));
+        if (missing.length > 0) {
+          console.error(
+            `[api/mutate] state.replace dropped ${missing.length} trip(s):`,
+            missing
+          );
+          return {
+            ok: false,
+            status: 500,
+            error: "Mutation did not persist",
+          };
+        }
         break;
       }
     }

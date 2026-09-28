@@ -1529,8 +1529,20 @@ export const tx = {
       AppState,
       "trips" | "categories" | "items" | "tasks" | "reservations" | "bags"
     >
-  ): void {
+  ): string[] {
     const db = getDb();
+
+    /*
+     * Trip ids this call actually wrote, returned so the caller can verify the
+     * write landed instead of assuming it did.
+     *
+     * This exists because the previous silent-drop bug was invisible from the
+     * outside: the transaction committed zero rows while the route answered
+     * ok: true, so a create looked successful and simply never appeared. A
+     * caller that can compare this against what it sent turns that class of bug
+     * into a loud failure.
+     */
+    const writtenTripIds: string[] = [];
 
     const run = db.transaction(
       (
@@ -1540,60 +1552,129 @@ export const tx = {
           "trips" | "categories" | "items" | "tasks" | "reservations" | "bags"
         >
       ) => {
-      const ownedTripIds = (
+      /*
+       * Scope = the actor's OWN trips, in the DATABASE plus the trips this
+       * snapshot introduces.
+       *
+       * The database alone is not enough, and that is the bug this replaces: a
+       * snapshot that creates a trip contains a trip id that cannot yet exist
+       * in the database, so a DB-only scope excluded it from `ownedSet` and the
+       * re-insert loop silently skipped it. Every create went through
+       * state.replace ("the whole tree goes in as one"), so no trip could ever
+       * be created, while the route still answered ok: true. A user with zero
+       * trips never got a first one.
+       *
+       * The payload half is NOT trusted blindly. It is intersected with
+       * `t.userId === uid`, so a snapshot can only introduce trips it already
+       * claims are yours; a trip belonging to another account is still ignored
+       * rather than adopted. `scoped` has additionally been through
+       * scopeStateForUser, so these are trips the actor has a role on.
+       */
+      const dbTripIds = (
         db.prepare("SELECT id FROM trips WHERE userId = ?").all(uid) as {
           id: string;
         }[]
       ).map((r) => r.id);
 
-      if (ownedTripIds.length === 0) return;
-
-      const placeholders = ownedTripIds.map(() => "?").join(",");
-
       /*
-       * Order matters: children before parents, because the foreign keys point
-       * upward. Items are deleted by their own tripId, with a fallback to the
-       * parent category for legacy rows that predate the column.
+       * Trips the snapshot introduces: ids that are genuinely NEW.
+       *
+       * The "not already in the trips table" test is the whole security story
+       * here, and it is deliberately an existence check rather than a
+       * `t.userId === uid` trust check. `userId` is client-supplied, so
+       * trusting it let a snapshot claim ANY trip id -- including another
+       * account's -- by asserting ownership of it, which adopted the row and
+       * rewrote its owner. Verified against a live server: that hole was real.
+       *
+       * Requiring the id to be absent from the whole table means a snapshot can
+       * only ever ADD trips, never seize an existing one, whoever owns it. An
+       * id that already exists is handled the other way: it is only in scope if
+       * it belongs to the actor, via dbTripIds above. So a create works (the id
+       * is new), while an adoption fails (the id exists, and not for the
+       * actor).
+       *
+       * `scoped` has already been through scopeStateForUser, but that is NOT
+       * sufficient on its own -- roleOnTrip reads the same client-supplied
+       * userId, so it confirms rather than establishes ownership.
+       *
+       * Residual, accepted: an actor can pick an id that collides with another
+       * account's trip and be silently ignored (the insert is skipped, so the
+       * create is dropped and the route now 500s). Ids are UUIDs, so a
+       * collision is not reachable by accident, and the alternative -- letting
+       * the insert run -- is a UNIQUE violation inside the transaction.
        */
-      db.prepare(
-        `DELETE FROM items WHERE tripId IN (${placeholders})
-           OR categoryId IN (SELECT id FROM categories WHERE tripId IN (${placeholders}))`
-      ).run(...ownedTripIds, ...ownedTripIds);
+      const existingTripIds = new Set(
+        (db.prepare("SELECT id FROM trips").all() as { id: string }[]).map(
+          (r) => r.id
+        )
+      );
 
-      db.prepare(`DELETE FROM tasks WHERE tripId IN (${placeholders})`).run(
-        ...ownedTripIds
-      );
-      db.prepare(`DELETE FROM reservations WHERE tripId IN (${placeholders})`).run(
-        ...ownedTripIds
-      );
+      const introducedTripIds = s.trips
+        .filter((t) => !existingTripIds.has(t.id))
+        .map((t) => t.id);
+
+      const ownedTripIds = [...new Set([...dbTripIds, ...introducedTripIds])];
+
       /*
-       * Bags before items, and this ordering is load-bearing in a way the other
-       * deletes are not: items carry a bagId, so deleting bags first means the
-       * explicit bagId clear in deleteBag (or the FK's SET NULL, where enabled)
-       * applies to rows that are about to be deleted anyway. Doing it the other
-       * way would leave a window where items still referenced bags mid-transaction.
+       * Deletes are skipped entirely when the scope is empty: a first-ever
+       * create has nothing to remove, and that is a valid state rather than an
+       * early exit. Deletes do not need to wait on `insertTrip` -- a trip being
+       * introduced by this snapshot has no rows in the database yet, so its
+       * DELETE is a harmless no-op.
        */
-      db.prepare(`DELETE FROM bags WHERE tripId IN (${placeholders})`).run(
-        ...ownedTripIds
-      );
-      db.prepare(`DELETE FROM categories WHERE tripId IN (${placeholders})`).run(
-        ...ownedTripIds
-      );
-      db.prepare(`DELETE FROM trip_members WHERE tripId IN (${placeholders})`).run(
-        ...ownedTripIds
-      );
-      db.prepare(`DELETE FROM trips WHERE id IN (${placeholders})`).run(
-        ...ownedTripIds
-      );
+      if (ownedTripIds.length > 0) {
+        const placeholders = ownedTripIds.map(() => "?").join(",");
+
+        /*
+         * Order matters: children before parents, because the foreign keys point
+         * upward. Items are deleted by their own tripId, with a fallback to the
+         * parent category for legacy rows that predate the column.
+         */
+        db.prepare(
+          `DELETE FROM items WHERE tripId IN (${placeholders})
+             OR categoryId IN (SELECT id FROM categories WHERE tripId IN (${placeholders}))`
+        ).run(...ownedTripIds, ...ownedTripIds);
+
+        db.prepare(`DELETE FROM tasks WHERE tripId IN (${placeholders})`).run(
+          ...ownedTripIds
+        );
+        db.prepare(`DELETE FROM reservations WHERE tripId IN (${placeholders})`).run(
+          ...ownedTripIds
+        );
+        /*
+         * Bags before items, and this ordering is load-bearing in a way the other
+         * deletes are not: items carry a bagId, so deleting bags first means the
+         * explicit bagId clear in deleteBag (or the FK's SET NULL, where enabled)
+         * applies to rows that are about to be deleted anyway. Doing it the other
+         * way would leave a window where items still referenced bags mid-transaction.
+         */
+        db.prepare(`DELETE FROM bags WHERE tripId IN (${placeholders})`).run(
+          ...ownedTripIds
+        );
+        db.prepare(`DELETE FROM categories WHERE tripId IN (${placeholders})`).run(
+          ...ownedTripIds
+        );
+        db.prepare(`DELETE FROM trip_members WHERE tripId IN (${placeholders})`).run(
+          ...ownedTripIds
+        );
+        db.prepare(`DELETE FROM trips WHERE id IN (${placeholders})`).run(
+          ...ownedTripIds
+        );
+      }
 
       /*
-       * Re-insert. Only rows whose owning trip is in ownedTripIds are written,
-       * so a payload cannot smuggle in a row owned by someone else. Trips are
-       * force-owned by uid for the same reason.
+       * Re-insert. The scope is the union computed above, so this now writes
+       * trips the snapshot introduces as well as ones it replaces. Trips are
+       * force-owned by uid so a payload cannot reassign ownership, and the
+       * child loops only accept rows whose parent trip is in the scope, so a
+       * row belonging to another account is still ignored.
        */
       const ownedSet = new Set(ownedTripIds);
       for (const t of s.trips) {
-        if (ownedSet.has(t.id)) tx.insertTrip({ ...t, userId: uid });
+        if (ownedSet.has(t.id)) {
+          tx.insertTrip({ ...t, userId: uid });
+          writtenTripIds.push(t.id);
+        }
       }
       for (const c of s.categories ?? []) {
         if (ownedSet.has(c.tripId)) tx.insertCategory(c);
@@ -1622,6 +1703,8 @@ export const tx = {
     });
 
     run(userId, scoped);
+
+    return writtenTripIds;
   },
 
   /**
