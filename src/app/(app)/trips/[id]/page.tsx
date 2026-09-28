@@ -66,6 +66,7 @@ import { TripBags } from "@/components/TripBags";
 import { TripMap } from "@/components/TripMap";
 import { Tabs } from "@/components/Tabs";
 import { PackingSuggestions } from "@/components/PackingSuggestions";
+import { TripConflicts } from "@/components/TripConflicts";
 import { NativePackingAutoOpen } from "@/components/NativePackingAutoOpen";
 import { NativeItineraryAutoOpen } from "@/components/NativeItineraryAutoOpen";
 import { shouldRenderWebTabContent } from "@/lib/nativeTabPresentation";
@@ -894,6 +895,11 @@ export default function TripDetail() {
                   <div className="space-y-6">
                     {/* Bookings: flights, lodging, cars, trains, ferries. */}
                     <TripReservations tripId={tripInfo.id} />
+                    {/* Conflict check -- reads the bookings above and flags
+                        clashes, gaps and impossible days. Sits directly under
+                        the list it reviews: the findings reference specific
+                        rows, so they need to be visible together. */}
+                    <TripConflicts tripId={tripInfo.id} />
                     {/* Weather forecast section */}
                     {tripInfo.destination && (
                       <div className="mb-6 p-4 rounded-xl border border-zinc-800 surface-raised">
