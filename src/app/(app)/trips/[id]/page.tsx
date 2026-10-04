@@ -60,7 +60,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { TripTasks } from "@/components/TripTasks";
+import { TripActions } from "@/components/TripActions";
 import { TripReservations } from "@/components/TripReservations";
 import { TripBags } from "@/components/TripBags";
 import { TripMap } from "@/components/TripMap";
@@ -1424,8 +1424,8 @@ export default function TripDetail() {
                       )}
                     </div>
 
-                    {/* Pre-trip tasks */}
-                    <TripTasks tripId={tripInfo.id} />
+                    {/* Trip actions (chores + reminders) */}
+                    <TripActions tripId={tripInfo.id} />
                   </div>
                 </>
               ),
