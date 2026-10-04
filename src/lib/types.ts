@@ -130,13 +130,34 @@ export const BAG_KIND_LABELS: Record<BagKind, string> = {
 };
 
 /**
+ * `remindMinutes` sentinel meaning "no reminder".
+ *
+ * Deliberately not 0. `0` is a real, useful setting — "remind me at the
+ * deadline" — so using it as the absent value would make every action with no
+ * reminder quietly remind at its deadline, and would leave no way to express
+ * "at the deadline" at all.
+ *
+ * Lives here rather than in storage.ts because the pure parser and the storage
+ * layer both need it, and storage drags in the network layer — importing it
+ * from there would tie the parser to the fetch machinery for one integer.
+ */
+export const NO_REMINDER = -1;
+
+/**
  * A pre-trip chore: "renew passport", "book the rental car".
+ *
+ * Pre-trip to-do list, presented as "Actions".
  *
  * Deliberately not a PackingItem. A packing item answers "did I put this in
  * the bag"; a task answers "is this done before I leave", and often has a
  * deadline rather than a quantity. Reusing PackingItem would have meant an
  * unused `quantity` on every task and a `dueDate` that packing rows could
  * never sensibly use.
+ *
+ * The reminder fields were added to this entity rather than introducing a
+ * parallel `Action` entity: both would answer the same question ("what do I
+ * still need to do before I leave?"), and two near-identical lists is a worse
+ * UI than one. See the reminder notes on each field below.
  */
 export type Task = {
   id: string;
@@ -145,6 +166,32 @@ export type Task = {
   done: boolean;
   /** "YYYY-MM-DD" or "" when the task has no deadline. */
   dueDate: string;
+  /**
+   * Clock time "HH:MM" (24h) or "" — the time of day the deadline falls at.
+   * Deliberately a string and not part of a timestamp: a deadline of "3pm" is
+   * local to wherever you are, and storing an instant would silently shift it
+   * across timezones. Same convention as Reservation.startTime.
+   */
+  dueTime: string;
+  /**
+   * How long before the deadline the reminder becomes active, in minutes.
+   * `-1` means "no reminder" and is deliberately distinct from `0` ("remind me
+   * at the deadline"): a `0` default would make an action the user chose not to
+   * be reminded about start reminding them the moment it was created.
+   * Only meaningful together with a real `dueDate`.
+   */
+  remindMinutes: number;
+  /**
+   * When the user cleared this action's reminder banner (ISO), or "" if they
+   * have not.
+   *
+   * NOT a "we have shown this" marker. An unacknowledged reminder is meant to
+   * keep surfacing on every visit until it is dismissed or the action is done —
+   * repeating is the feature here, unlike a notification dedupe key where
+   * repeating is the bug. Conflating the two produces either a banner that
+   * disappears before it is read, or one that can never be dismissed.
+   */
+  acknowledgedAt: string;
   notes: string;
   order: number;
   createdAt: string;

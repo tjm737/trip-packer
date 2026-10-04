@@ -10,7 +10,7 @@ import {
   ReactNode,
 } from "react";
 import { AppState, User, Trip, Category, PackingItem, Task, Reservation } from "@/lib/types";
-import type { BagKind } from "@/lib/types";
+import { NO_REMINDER, type BagKind } from "@/lib/types";
 import {
   fetchState,
   initializeRemoteState,
@@ -44,9 +44,15 @@ import {
   getTasksForTrip,
   getTaskProgress,
   getTaskStatus,
+  getReminderState,
+  needsAttention,
+  getActionableReminders,
+  formatReminderLead,
+  REMINDER_OPTIONS,
   getReservationsForTrip,
   ReservationDraft,
   TaskStatus,
+  ReminderState,
   ApiError,
   reconcilePending,
 } from "@/lib/storage";
@@ -145,11 +151,27 @@ interface AppContextType {
     delete: (id: string) => Promise<void>;
   };
   task: {
-    create: (tripId: string, title: string, dueDate?: string) => Promise<void>;
+    create: (
+      tripId: string,
+      title: string,
+      dueDate?: string,
+      dueTime?: string,
+      remindMinutes?: number
+    ) => Promise<void>;
     update: (
       id: string,
-      data: { title?: string; done?: boolean; dueDate?: string; notes?: string }
+      data: {
+        title?: string;
+        done?: boolean;
+        dueDate?: string;
+        dueTime?: string;
+        remindMinutes?: number;
+        acknowledgedAt?: string;
+        notes?: string;
+      }
     ) => Promise<void>;
+    /** Clear a reminder without completing the action. */
+    acknowledge: (id: string) => Promise<void>;
     delete: (id: string) => Promise<void>;
   };
   reservation: {
@@ -179,6 +201,15 @@ interface AppContextType {
       percent: number;
     };
     getTaskStatus: (dueDate: string, done: boolean) => TaskStatus;
+    /**
+     * Reminders. All derived from `now` at call time — see getReminderState in
+     * storage.ts for why nothing here is scheduled or persisted.
+     */
+    getReminderState: (task: Task, now?: Date) => ReminderState;
+    needsAttention: (task: Task, now?: Date) => boolean;
+    getActionableReminders: (tasks: Task[], now?: Date) => Task[];
+    formatReminderLead: (minutes: number) => string;
+    reminderOptions: { minutes: number; label: string }[];
     getReservations: (tripId: string) => Reservation[];
   };
 }
@@ -632,15 +663,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const taskActions = {
-    create: async (tripId: string, title: string, dueDate = "") => {
+    create: async (
+      tripId: string,
+      title: string,
+      dueDate = "",
+      dueTime = "",
+      remindMinutes = NO_REMINDER
+    ) => {
       await run(
         (prev) => prev,
-        async () => (await createTask(tripId, title, dueDate)).state
+        async () => (await createTask(tripId, title, dueDate, dueTime, remindMinutes)).state
       );
     },
     update: async (
       id: string,
-      data: { title?: string; done?: boolean; dueDate?: string; notes?: string }
+      data: {
+        title?: string;
+        done?: boolean;
+        dueDate?: string;
+        dueTime?: string;
+        remindMinutes?: number;
+        acknowledgedAt?: string;
+        notes?: string;
+      }
     ) => {
       await run(
         (prev) => ({
@@ -648,6 +693,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
           tasks: prev.tasks.map((t) => (t.id === id ? { ...t, ...data } : t)),
         }),
         () => updateTask(id, data)
+      );
+    },
+    /*
+     * Clear a reminder banner without completing the action.
+     *
+     * Deliberately not folded into update(): dismissing a reminder is a
+     * distinct intent from editing the action, and it is the one place that
+     * writes `acknowledgedAt`. Completing instead of acknowledging is what the
+     * checkbox is for; conflating them would make "seen" mean "done".
+     */
+    acknowledge: async (id: string) => {
+      const acknowledgedAt = new Date().toISOString();
+      await run(
+        (prev) => ({
+          ...prev,
+          tasks: prev.tasks.map((t) => (t.id === id ? { ...t, acknowledgedAt } : t)),
+        }),
+        () => updateTask(id, { acknowledgedAt })
       );
     },
     delete: async (id: string) => {
@@ -723,6 +786,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     getTasks: (tripId: string) => getTasksForTrip(tripId, state.tasks),
     getTaskProgress: (tripId: string) => getTaskProgress(tripId, state.tasks),
     getTaskStatus,
+    getReminderState,
+    needsAttention,
+    getActionableReminders,
+    formatReminderLead,
+    reminderOptions: REMINDER_OPTIONS,
     getReservations: (tripId: string) => getReservationsForTrip(tripId, state.reservations),
   };
 

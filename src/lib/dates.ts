@@ -130,6 +130,36 @@ export function daysUntilDate(value: string | null | undefined): number | null {
   return Math.round((target.getTime() - startOfToday.getTime()) / 86_400_000);
 }
 
+/**
+ * Combine a "YYYY-MM-DD" date and an optional "HH:MM" time into a local Date.
+ *
+ * Returns null when the date is absent or invalid — an action with no deadline
+ * has no instant, and callers must treat that as "nothing to remind about"
+ * rather than substituting now.
+ *
+ * A missing or malformed time resolves to *midnight* on that date, not to the
+ * current clock time. Substituting "now" would make an undated-in-time action
+ * fire a reminder the instant it was created, which is the same class of bug as
+ * a task inheriting today's date as its deadline.
+ *
+ * Stays here rather than in the actions module for the same reason as every
+ * other helper in this file: a second private date parser is how the
+ * UTC-vs-local off-by-one gets reintroduced somewhere else.
+ */
+export function dateTimeToLocal(value: string | null | undefined, time?: string): Date | null {
+  const day = parseDateOnly(value ?? "");
+  if (!day) return null;
+
+  const match = /^(\d{1,2}):(\d{2})$/.exec((time ?? "").trim());
+  if (!match) return day; // midnight — see above.
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return day;
+
+  return new Date(day.getFullYear(), day.getMonth(), day.getDate(), hours, minutes);
+}
+
 /** Inclusive trip length in days; null when unknown. */
 export function tripDurationDays(startDate: string | null | undefined, endDate: string | null | undefined): number | null {
   const start = parseDateOnly(startDate ?? "");

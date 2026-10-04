@@ -222,6 +222,28 @@ function migrate(db: SqliteDb): void {
   addColumnIfMissing(db, "reservations", "orderManual", "INTEGER");
 
   /*
+   * Reminders on tasks ("Actions").
+   *
+   * `tasks` already exists, so the CREATE TABLE above is a no-op here and these
+   * columns would never appear — every query naming them fails with
+   * "no such column", which surfaces as a broken page rather than a migration
+   * error.
+   *
+   * `remindMinutes` defaults to -1, NOT 0, and that default is load-bearing:
+   * 0 means "remind me at the deadline", so defaulting to it would give every
+   * pre-existing task a live reminder the moment this shipped, for a reminder
+   * the user never asked for. -1 is "no reminder" — see Task in types.ts for
+   * why the two must stay distinct.
+   *
+   * `dueTime` defaults to "" rather than midnight so an existing dated task
+   * keeps meaning "sometime that day" instead of silently acquiring a 00:00
+   * deadline that would read as overdue from the start of the day.
+   */
+  addColumnIfMissing(db, "tasks", "dueTime", "TEXT NOT NULL DEFAULT ''");
+  addColumnIfMissing(db, "tasks", "remindMinutes", "INTEGER NOT NULL DEFAULT -1");
+  addColumnIfMissing(db, "tasks", "acknowledgedAt", "TEXT NOT NULL DEFAULT ''");
+
+  /*
    * Accounts.
    *
    * `users` predates authentication: it was a profile list living inside one
@@ -632,6 +654,9 @@ type TaskRow = {
   title: string;
   done: number;
   dueDate: string;
+  dueTime: string;
+  remindMinutes: number;
+  acknowledgedAt: string;
   notes: string;
   order: number;
   createdAt: string;
@@ -764,6 +789,15 @@ const toTask = (r: TaskRow): Task => ({
   title: r.title,
   done: r.done === 1,
   dueDate: r.dueDate,
+  dueTime: r.dueTime,
+  /*
+   * Coerce the reminder lead to a number and normalise the "no reminder"
+   * sentinel. A row written by an older build has no value here, and SQLite
+   * will hand back whatever type it holds — a string "1440" must not end up
+   * compared against a number and silently never firing.
+   */
+  remindMinutes: Number.isFinite(Number(r.remindMinutes)) ? Number(r.remindMinutes) : -1,
+  acknowledgedAt: r.acknowledgedAt,
   notes: r.notes,
   order: r.order,
   createdAt: r.createdAt,
@@ -1375,8 +1409,8 @@ export const tx = {
   insertTask(t: Task): void {
     getDb()
       .prepare(
-        `INSERT INTO tasks (id, tripId, title, done, dueDate, notes, "order", createdAt)
-         VALUES (@id, @tripId, @title, @done, @dueDate, @notes, @order, @createdAt)`
+        `INSERT INTO tasks (id, tripId, title, done, dueDate, dueTime, remindMinutes, acknowledgedAt, notes, "order", createdAt)
+         VALUES (@id, @tripId, @title, @done, @dueDate, @dueTime, @remindMinutes, @acknowledgedAt, @notes, @order, @createdAt)`
       )
       .run({ ...t, done: t.done ? 1 : 0 });
   },
@@ -1384,7 +1418,20 @@ export const tx = {
   updateTask(id: string, updates: Partial<Task>): void {
     // `title` is included because tasks are renamed inline; `tripId` is not,
     // since a task belongs to the trip it was created under.
-    const allowed = ["title", "done", "dueDate", "notes", "order"] as const;
+    //
+    // The reminder columns are allow-listed here or an edit silently drops
+    // them: the UPDATE reports success and the field just never changes, which
+    // is the hardest kind of bug to notice from the UI.
+    const allowed = [
+      "title",
+      "done",
+      "dueDate",
+      "dueTime",
+      "remindMinutes",
+      "acknowledgedAt",
+      "notes",
+      "order",
+    ] as const;
     const keys = allowed.filter((k) => updates[k] !== undefined);
     if (keys.length === 0) return;
     const set = keys.map((k) => (k === "order" ? `"order" = @order` : `${k} = @${k}`)).join(", ");

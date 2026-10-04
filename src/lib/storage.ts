@@ -9,8 +9,9 @@ import {
     Task,
     Reservation,
     ReservationType,
+    NO_REMINDER,
   } from "./types";
-import { compareByDate, daysUntilDate, isValidDate } from "./dates";
+import { compareByDate, daysUntilDate, dateTimeToLocal, isValidDate } from "./dates";
 import {
   buildBagImport,
   type BagImportSelection,
@@ -594,7 +595,9 @@ export async function deleteItem(id: string): Promise<AppState> {
 export async function createTask(
   tripId: string,
   title: string,
-  dueDate: string
+  dueDate: string,
+  dueTime = "",
+  remindMinutes = NO_REMINDER
 ): Promise<{ state: AppState; task: Task }> {
   const current = await fetchState();
   const order = current?.tasks.filter((t) => t.tripId === tripId).length ?? 0;
@@ -606,6 +609,15 @@ export async function createTask(
     // Optional deadline. Empty string, never a defaulted "today" — a task
     // with no real deadline must not appear overdue the moment it is created.
     dueDate,
+    // Empty string, not "00:00", for the same reason: an action with no stated
+    // time means "sometime that day", and midnight would read as overdue from
+    // the first moment of the day.
+    dueTime,
+    // `NO_REMINDER` (-1) rather than 0: 0 means "remind me at the deadline", so
+    // defaulting to it would remind the user about an action they deliberately
+    // did not attach a reminder to.
+    remindMinutes,
+    acknowledgedAt: "",
     notes: "",
     order,
     createdAt: new Date().toISOString(),
@@ -616,7 +628,15 @@ export async function createTask(
 
 export async function updateTask(
   id: string,
-  data: { title?: string; done?: boolean; dueDate?: string; notes?: string }
+  data: {
+    title?: string;
+    done?: boolean;
+    dueDate?: string;
+    dueTime?: string;
+    remindMinutes?: number;
+    acknowledgedAt?: string;
+    notes?: string;
+  }
 ): Promise<AppState> {
   return mutate({ op: "task.update", id, updates: data });
 }
@@ -747,6 +767,28 @@ export function getItemsForCategory(categoryId: string, items: PackingItem[]): P
 
 export type TaskStatus = "overdue" | "due-soon" | "upcoming" | "no-date";
 
+/**
+ * Lead times offered in the reminder picker, in minutes.
+ *
+ * Ordered shortest-first so the list reads as a progression. Values are the
+ * ones a traveller actually reaches for: at the time, a couple of hours, a day,
+ * and a week — the last being when passport/visa chores stop being someone
+ * else's problem.
+ */
+export const REMINDER_OPTIONS: { minutes: number; label: string }[] = [
+  { minutes: NO_REMINDER, label: "No reminder" },
+  { minutes: 0, label: "At the time" },
+  { minutes: 60, label: "1 hour before" },
+  { minutes: 24 * 60, label: "1 day before" },
+  { minutes: 3 * 24 * 60, label: "3 days before" },
+  { minutes: 7 * 24 * 60, label: "1 week before" },
+];
+
+/** Human label for a stored lead time; falls back rather than throwing. */
+export function formatReminderLead(minutes: number): string {
+  return REMINDER_OPTIONS.find((o) => o.minutes === minutes)?.label ?? `${minutes} min before`;
+}
+
 /** Within this many days of the deadline, a task counts as "due soon". */
 const DUE_SOON_DAYS = 7;
 
@@ -766,6 +808,82 @@ export function getTaskStatus(dueDate: string, done: boolean): TaskStatus {
   if (days < 0) return "overdue";
   if (days <= DUE_SOON_DAYS) return "due-soon";
   return "upcoming";
+}
+
+/**
+ * Whether an action's reminder is currently asking for attention.
+ *
+ * Derived on every read from `now` rather than scheduled with a timer. A timer
+ * cannot survive a reload, leaks on unmount, and — worst — never fires at all
+ * if the app was closed when the deadline passed, because the timer that would
+ * have fired it never existed. A pure function of the current time is correct
+ * in all three cases and needs no fake timers to test.
+ *
+ * States:
+ *   "none"         no reminder configured, or nothing to remind about
+ *   "scheduled"    a reminder exists but is not due yet
+ *   "active"       the reminder is within its lead window
+ *   "due"          the deadline itself has passed
+ *   "acknowledged" the user cleared it (and it is not yet past due)
+ *
+ * An action with no date is "none", never "due": there is no deadline to have
+ * missed. This is the same rule as the `no-date` status — an empty optional
+ * field must not classify as a failure state.
+ */
+export type ReminderState = "none" | "scheduled" | "active" | "due" | "acknowledged";
+
+export function getReminderState(task: Task, now: Date = new Date()): ReminderState {
+  if (task.done) return "none";
+  if (task.remindMinutes < 0) return "none";
+
+  const due = dateTimeToLocal(task.dueDate, task.dueTime);
+  if (due === null) return "none";
+
+  const msUntilDue = due.getTime() - now.getTime();
+  if (msUntilDue <= 0) return "due";
+
+  const fireAt = due.getTime() - task.remindMinutes * 60_000;
+  if (now.getTime() < fireAt) return "scheduled";
+
+  // Inside the lead window. A dismissed reminder stays quiet until it is
+  // actually overdue — but only until then: an overdue action must resurface,
+  // because "I'll deal with it later" is not "I did it".
+  if (task.acknowledgedAt) return "acknowledged";
+  return "active";
+}
+
+/** True when this action should be surfaced in the trip's reminders list. */
+export function needsAttention(task: Task, now: Date = new Date()): boolean {
+  const state = getReminderState(task, now);
+  return state === "active" || state === "due";
+}
+
+/**
+ * Actions whose reminder is asking for attention, most urgent first.
+ *
+ * Overdue sorts above merely-active: something already late outranks something
+ * that has only just started asking.
+ */
+export function getActionableReminders(tasks: Task[], now: Date = new Date()): Task[] {
+  const rank: Record<ReminderState, number> = {
+    due: 0,
+    active: 1,
+    scheduled: 2,
+    acknowledged: 3,
+    none: 4,
+  };
+
+  return tasks
+    .filter((t) => needsAttention(t, now))
+    .sort((a, b) => {
+      const ra = rank[getReminderState(a, now)];
+      const rb = rank[getReminderState(b, now)];
+      if (ra !== rb) return ra - rb;
+      const cmp = compareByDate(a.dueDate, b.dueDate);
+      if (cmp !== 0) return cmp;
+      // Same day: chronologically by clock time, blank first as "all day".
+      return (a.dueTime || "").localeCompare(b.dueTime || "");
+    });
 }
 
 /** Whole days until a deadline; null when there is no valid deadline. */

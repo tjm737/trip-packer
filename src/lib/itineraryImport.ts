@@ -23,7 +23,7 @@
  * full DOM implementation we then have to sanitise.
  */
 
-import type { Reservation, ReservationType, Task } from "./types";
+import { NO_REMINDER, type Reservation, type ReservationType, type Task } from "./types";
 
 /** Reserved for callers that want to pre-check before importing. */
 export type ParsedItinerary = {
@@ -511,7 +511,20 @@ function parseTodos(sec: ParsedSection) {
   for (const block of blocksOfClass(sec.body, "todo-item")) {
     const text = toText(block);
     if (!text) continue;
-    out.push({ title: text, done: false, dueDate: "", notes: "", order: out.length });
+    // Imported todos have no deadline and no reminder: the source itinerary
+    // carries neither, and inventing them would put every imported chore on a
+    // schedule the user never set. NO_REMINDER (-1) keeps them out of the
+    // reminders list until the user opts in per action.
+    out.push({
+      title: text,
+      done: false,
+      dueDate: "",
+      dueTime: "",
+      remindMinutes: NO_REMINDER,
+      acknowledgedAt: "",
+      notes: "",
+      order: out.length,
+    });
   }
   return out;
 }
