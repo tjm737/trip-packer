@@ -1,5 +1,7 @@
 import type { Category, PackingItem, Reservation, ReservationType, Task, Trip } from "@/lib/types";
+import { formatReminderLead, NO_REMINDER } from "@/lib/types";
 import { formatDate, formatDateRange, nightsBetween } from "@/lib/dates";
+import type { PrintSection } from "@/lib/itineraryLayout";
 import {
   groupByDay,
   groupPacking,
@@ -94,12 +96,15 @@ export function PrintableItinerary({
   tasks,
   categories,
   items,
+  sections,
 }: {
   trip: Trip;
   reservations: Reservation[];
   tasks: Task[];
   categories: Category[];
   items: PackingItem[];
+  /** Which sections to render. Absent or all three = the full document. */
+  sections: readonly PrintSection[];
 }) {
   const days = groupByDay(reservations);
   const dated = days.filter((d) => d.date);
@@ -107,10 +112,23 @@ export function PrintableItinerary({
   const sortedTasks = sortTasks(tasks);
   const packing = groupPacking(categories, items);
 
+  const showItinerary = sections.includes("itinerary");
+  const showActions = sections.includes("actions");
+  const showPacking = sections.includes("packing");
+
   const packedCount = items.filter((i) => i.checked).length;
   const dateRange = formatDateRange(trip.startDate, trip.endDate);
   const nights =
     trip.startDate && trip.endDate ? nightsBetween(trip.startDate, trip.endDate) : 0;
+
+  /*
+   * The header describes the trip, and the section counts describe the LIST.
+   * When only some sections are selected the header must not advertise a count
+   * for a list that is not on the page ("3 bookings" above a sheet with no
+   * itinerary reads as a missing page). So each count is shown only when its
+   * section is present.
+   */
+  const bookingCount = sortReservations(reservations).length;
 
   return (
     <article className="print-sheet">
@@ -120,62 +138,85 @@ export function PrintableItinerary({
           {trip.destination && <span>{trip.destination}</span>}
           {dateRange && dateRange !== "No dates set" && <span>{dateRange}</span>}
           {nights > 0 && <span>{nights} night{nights === 1 ? "" : "s"}</span>}
-          <span>
-            {sortReservations(reservations).length} booking
-            {sortReservations(reservations).length === 1 ? "" : "s"}
-          </span>
+          {showItinerary && (
+            <span>
+              {bookingCount} booking{bookingCount === 1 ? "" : "s"}
+            </span>
+          )}
+          {showActions && sortedTasks.length > 0 && (
+            <span>
+              {sortedTasks.length} action{sortedTasks.length === 1 ? "" : "s"}
+            </span>
+          )}
+          {showPacking && items.length > 0 && (
+            <span>
+              {items.length} item{items.length === 1 ? "" : "s"}
+            </span>
+          )}
         </div>
       </header>
 
-      <section className="print-section">
-        <h2>Itinerary</h2>
-        {days.length === 0 ? (
-          <p className="print-empty">No bookings added yet.</p>
-        ) : (
-          <>
-            {dated.map((day) => (
-              // A day is the unit that must not be torn across pages.
-              <div className="print-day" key={day.date}>
-                <h3 className="print-day-head">
-                  <span className="print-day-date">{fmt(day.date)}</span>
-                  <span className="print-day-dow">{weekday(day.date)}</span>
-                </h3>
-                {day.reservations.map((r) => (
-                  <BookingRow key={r.id} r={r} />
-                ))}
-              </div>
-            ))}
+      {showItinerary && (
+        <section className="print-section">
+          <h2>Itinerary</h2>
+          {days.length === 0 ? (
+            <p className="print-empty">No bookings added yet.</p>
+          ) : (
+            <>
+              {dated.map((day) => (
+                // A day is the unit that must not be torn across pages.
+                <div className="print-day" key={day.date}>
+                  <h3 className="print-day-head">
+                    <span className="print-day-date">{fmt(day.date)}</span>
+                    <span className="print-day-dow">{weekday(day.date)}</span>
+                  </h3>
+                  {day.reservations.map((r) => (
+                    <BookingRow key={r.id} r={r} />
+                  ))}
+                </div>
+              ))}
 
-            {undated && (
-              <div className="print-day">
-                <h3 className="print-day-head">
-                  <span className="print-day-date">Unscheduled</span>
-                </h3>
-                {undated.reservations.map((r) => (
-                  <BookingRow key={r.id} r={r} />
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </section>
+              {undated && (
+                <div className="print-day">
+                  <h3 className="print-day-head">
+                    <span className="print-day-date">Unscheduled</span>
+                  </h3>
+                  {undated.reservations.map((r) => (
+                    <BookingRow key={r.id} r={r} />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      )}
 
-      {sortedTasks.length > 0 && (
+      {showActions && sortedTasks.length > 0 && (
         <section className="print-section print-avoid-break">
-          <h2>Before you go</h2>
-          <ul className="print-checklist">
+          <h2>Actions</h2>
+          <ul className="print-checklist print-cols">
             {sortedTasks.map((t) => (
               <li key={t.id}>
                 <span className="print-box">{t.done ? "x" : ""}</span>
                 <span className={t.done ? "print-done" : undefined}>{t.title}</span>
-                {t.dueDate && <span className="print-due">due {fmt(t.dueDate)}</span>}
+                {/* A due time and its reminder ride with the due date, because
+                    they are meaningless without one. */}
+                {t.dueDate && (
+                  <span className="print-due">
+                    due {fmt(t.dueDate)}
+                    {t.dueTime ? ` ${t.dueTime}` : ""}
+                    {t.remindMinutes !== NO_REMINDER
+                      ? ` · ${formatReminderLead(t.remindMinutes).toLowerCase()}`
+                      : ""}
+                  </span>
+                )}
               </li>
             ))}
           </ul>
         </section>
       )}
 
-      {packing.length > 0 && (
+      {showPacking && packing.length > 0 && (
         <section className="print-section">
           <h2>
             Packing list

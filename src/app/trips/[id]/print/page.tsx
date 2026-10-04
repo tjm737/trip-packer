@@ -6,6 +6,7 @@ import { getActingUser } from "@/lib/session";
 import { canReadEntityById } from "@/lib/access";
 import { PrintableItinerary } from "@/components/PrintableItinerary";
 import { PrintNowButton } from "@/components/PrintNowButton";
+import { parsePrintSections, PRINT_SECTIONS } from "@/lib/itineraryLayout";
 import { normalizeTheme } from "@/lib/theme";
 
 /*
@@ -104,10 +105,10 @@ export default async function PrintTripPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ autoprint?: string }>;
+  searchParams: Promise<{ autoprint?: string; parts?: string | string[] }>;
 }) {
   const { id } = await params;
-  const { autoprint } = await searchParams;
+  const { autoprint, parts } = await searchParams;
 
   /*
    * See the SECURITY note above: middleware would let a forged cookie through,
@@ -162,6 +163,9 @@ export default async function PrintTripPage({
   const categories = state.categories.filter((c) => c.tripId === trip.id);
   const items = state.items.filter((i) => i.tripId === trip.id);
 
+  /* Which lists this printout carries. See parsePrintSections for the rules. */
+  const sections = parsePrintSections(parts);
+
   /*
    * The print sheet is always light (a printed page is not a screen), but the
    * surrounding page background should match the user's chosen theme so opening
@@ -171,15 +175,49 @@ export default async function PrintTripPage({
    */
   const theme = normalizeTheme(state.users.find((u) => u.id === trip.userId)?.theme);
 
+  /*
+   * A syntactically valid `?parts=` whose tokens are all unknown (e.g.
+   * `?parts=notes`) means the user asked for something this sheet cannot carry.
+   * Say so rather than either ignoring the parameter (printing everything they
+   * explicitly did not ask for) or rendering a bare header (which looks like a
+   * broken page). The toolbar still renders, so they can pick a real section.
+   */
+  if (sections.length === 0) {
+    return (
+      <div className={theme === "light" ? "" : "dark"}>
+        <PrintNowButton
+          auto={false}
+          tripId={trip.id}
+          tripName={trip.name}
+          selected={sections}
+          allSections={PRINT_SECTIONS}
+        />
+        <main className="print-sheet">
+          <h1>{trip.name}</h1>
+          <p className="print-empty">
+            No sections selected to print. Choose at least one above.
+          </p>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className={theme === "light" ? "" : "dark"}>
-      <PrintNowButton auto={autoprint === "1"} tripId={trip.id} tripName={trip.name} />
+      <PrintNowButton
+        auto={autoprint === "1"}
+        tripId={trip.id}
+        tripName={trip.name}
+        selected={sections}
+        allSections={PRINT_SECTIONS}
+      />
       <PrintableItinerary
         trip={trip}
         reservations={reservations}
         tasks={tasks}
         categories={categories}
         items={items}
+        sections={sections}
       />
     </div>
   );
