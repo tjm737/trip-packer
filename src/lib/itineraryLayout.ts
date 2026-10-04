@@ -148,3 +148,97 @@ export function groupPacking(
     }))
     .filter((g) => g.items.length > 0);
 }
+
+/* ---------------------------------------------------------------------------
+ * Printable section selection (`?parts=`).
+ *
+ * The print sheet can carry three independent lists. Rather than three
+ * near-identical routes, the selection is one query parameter and the page
+ * renders exactly what it names. Keeping the parse here — pure, no React — means
+ * the server component stays a thin pass-through and the rules below are
+ * unit-testable without a browser.
+ * ------------------------------------------------------------------------- */
+
+/** The page sections a printout can contain, in the order they are printed. */
+export const PRINT_SECTIONS = ["itinerary", "actions", "packing"] as const;
+
+export type PrintSection = (typeof PRINT_SECTIONS)[number];
+
+/**
+ * Which sections appear when `?parts=` is absent — all of them.
+ *
+ * The parameter is opt-OUT, not opt-in. A bare `/trips/x/print` is what the
+ * existing Print button links to, and a link that started printing a blank page
+ * unless it was edited by hand would be a regression. Defaulting to "everything"
+ * also means a bookmarked or shared URL from before this feature keeps working.
+ */
+export const DEFAULT_PRINT_SECTIONS: readonly PrintSection[] = PRINT_SECTIONS;
+
+function isPrintSection(value: string): value is PrintSection {
+  return (PRINT_SECTIONS as readonly string[]).includes(value);
+}
+
+/**
+ * Parse the `parts` query parameter into the set of sections to render.
+ *
+ * Rules, and why each one is what it is:
+ *
+ *   - Absent, empty or whitespace-only  -> all sections (see above). An empty
+ *     `?parts=` is far more likely to be a stray `&` in a hand-edited URL than a
+ *     deliberate request to print nothing.
+ *   - Unknown tokens are dropped        -> `?parts=packing,notes` prints the
+ *     packing list. Garbage must not error the page, and a typo should degrade
+ *     to the sections that ARE understood rather than to a blank sheet.
+ *   - Duplicates collapse               -> `packing,packing` prints it once.
+ *   - Output is in PRINT_SECTIONS order, never the order typed, so the document
+ *     has one fixed section order regardless of how the URL was written.
+ *
+ * Returns [] for exactly one case: a syntactically valid list whose tokens are
+ * ALL unknown (e.g. `?parts=notes,photos`). The caller renders an explicit "no
+ * sections selected" notice for that, because silently printing the full
+ * itinerary would ignore the parameter, and printing nothing with no explanation
+ * looks like the page is broken. Deliberately NOT the same as "absent".
+ */
+export function parsePrintSections(raw: string | string[] | undefined): PrintSection[] {
+  const value = Array.isArray(raw) ? raw.join(",") : raw;
+
+  if (value === undefined || value.trim() === "") {
+    return [...DEFAULT_PRINT_SECTIONS];
+  }
+
+  const wanted = new Set(
+    value
+      .split(",")
+      .map((token) => token.trim().toLowerCase())
+      .filter(isPrintSection)
+  );
+
+  // Fixed print order, not the order the tokens happened to be typed in.
+  return PRINT_SECTIONS.filter((section) => wanted.has(section));
+}
+
+/**
+ * One-toggle control for a section, derived from a selection.
+ *
+ * A PURE toggle: switching off the only selected section returns `[]`, with no
+ * "helpfully" keeping it on. That is deliberate — the helper answers "what is
+ * the selection after this click", nothing more, so it stays trivially testable
+ * and has no opinion about UI policy.
+ *
+ * Preventing the empty selection is the toolbar's job, not this function's: it
+ * disables the checkbox when it is the last one on (`isLast` in
+ * PrintNowButton), so the user cannot click into an empty sheet in the first
+ * place. Callers that DO pass an empty result must handle it — the print page
+ * renders a "no sections selected" notice, and the toolbar refuses to navigate.
+ */
+export function togglePrintSection(
+  selected: readonly PrintSection[],
+  section: PrintSection
+): PrintSection[] {
+  if (selected.includes(section)) {
+    return selected.filter((s) => s !== section);
+  }
+  // Re-sorted so the URL the toolbar writes is canonical too.
+  return PRINT_SECTIONS.filter((s) => s === section || selected.includes(s));
+}
+

@@ -144,6 +144,33 @@ export const BAG_KIND_LABELS: Record<BagKind, string> = {
 export const NO_REMINDER = -1;
 
 /**
+ * Lead times offered in the reminder picker, in minutes.
+ *
+ * Ordered shortest-first so the list reads as a progression. Values are the
+ * ones a traveller actually reaches for: at the time, a couple of hours, a day,
+ * and a week — the last being when passport/visa chores stop being someone
+ * else's problem.
+ *
+ * Lives here rather than in storage.ts for the same reason NO_REMINDER does:
+ * it is pure data, and the printable sheet (a server component) needs the label
+ * to print a reminder line without importing storage's network layer.
+ */
+export const REMINDER_OPTIONS: { minutes: number; label: string }[] = [
+  { minutes: NO_REMINDER, label: "No reminder" },
+  { minutes: 0, label: "At the time" },
+  { minutes: 60, label: "1 hour before" },
+  { minutes: 24 * 60, label: "1 day before" },
+  { minutes: 3 * 24 * 60, label: "3 days before" },
+  { minutes: 7 * 24 * 60, label: "1 week before" },
+];
+
+/** Human label for a stored lead time; falls back rather than throwing. */
+export function formatReminderLead(minutes: number): string {
+  return REMINDER_OPTIONS.find((o) => o.minutes === minutes)?.label ?? `${minutes} min before`;
+}
+
+
+/**
  * A pre-trip chore: "renew passport", "book the rental car".
  *
  * Pre-trip to-do list, presented as "Actions".

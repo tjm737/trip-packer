@@ -767,27 +767,12 @@ export function getItemsForCategory(categoryId: string, items: PackingItem[]): P
 
 export type TaskStatus = "overdue" | "due-soon" | "upcoming" | "no-date";
 
-/**
- * Lead times offered in the reminder picker, in minutes.
- *
- * Ordered shortest-first so the list reads as a progression. Values are the
- * ones a traveller actually reaches for: at the time, a couple of hours, a day,
- * and a week — the last being when passport/visa chores stop being someone
- * else's problem.
+/*
+ * REMINDER_OPTIONS and formatReminderLead now live in types.ts (pure data, no
+ * network layer) so the printable sheet can use them. Re-exported here so the
+ * existing importer in this module's consumers keeps working unchanged.
  */
-export const REMINDER_OPTIONS: { minutes: number; label: string }[] = [
-  { minutes: NO_REMINDER, label: "No reminder" },
-  { minutes: 0, label: "At the time" },
-  { minutes: 60, label: "1 hour before" },
-  { minutes: 24 * 60, label: "1 day before" },
-  { minutes: 3 * 24 * 60, label: "3 days before" },
-  { minutes: 7 * 24 * 60, label: "1 week before" },
-];
-
-/** Human label for a stored lead time; falls back rather than throwing. */
-export function formatReminderLead(minutes: number): string {
-  return REMINDER_OPTIONS.find((o) => o.minutes === minutes)?.label ?? `${minutes} min before`;
-}
+export { REMINDER_OPTIONS, formatReminderLead } from "./types";
 
 /** Within this many days of the deadline, a task counts as "due soon". */
 const DUE_SOON_DAYS = 7;
