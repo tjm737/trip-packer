@@ -36,6 +36,7 @@ import {
   RefreshCw,
   CalendarDays,
   Luggage,
+  ListTodo,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -486,7 +487,7 @@ export default function TripDetail() {
    * entries for them would make the back button step through tabs instead of
    * leaving the trip.
    */
-  const [tab, setTab] = useState<"map" | "itinerary" | "packing" | "notes">("map");
+  const [tab, setTab] = useState<"map" | "itinerary" | "packing" | "notes" | "actions">("map");
 
   /*
    * Whether the native packing screen currently owns the Packing tab.
@@ -1373,11 +1374,12 @@ export default function TripDetail() {
               icon: <Flag className="w-3.5 h-3.5" />,
               content: (
                 <>
-                  {/* Notes and the pre-trip task list travel together: both are
-                      free-text reference material rather than trip data. */}
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6 items-start">
-                    {/* Notes section */}
-                    <div className="p-4 rounded-xl border border-zinc-800 surface-raised">
+                  {/* Notes only. Actions used to share this tab in a two-column
+                      grid, but they are different kinds of thing -- notes are
+                      free-text reference, actions are a checklist you work
+                      through -- and sharing a tab made both cramped. Actions
+                      now has its own tab (see below). */}
+                  <div className="p-4 rounded-xl border border-zinc-800 surface-raised">
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-sm font-medium text-zinc-300 flex items-center gap-1.5">
                           <Flag className="w-3.5 h-3.5 text-zinc-500" />
@@ -1422,11 +1424,20 @@ export default function TripDetail() {
                           {tripInfo.notes || "No notes yet..."}
                         </p>
                       )}
-                    </div>
-
-                    {/* Trip actions (chores + reminders) */}
-                    <TripActions tripId={tripInfo.id} />
                   </div>
+                </>
+              ),
+            },
+            {
+              id: "actions",
+              label: "Actions",
+              icon: <ListTodo className="w-3.5 h-3.5" />,
+              content: (
+                <>
+                  {/* Pre-trip to-do list + reminders. Its own tab because it is a
+                      working checklist, not reference material -- grouping it
+                      with Notes hid it behind a tab the user only opens to read. */}
+                  <TripActions tripId={tripInfo.id} />
                 </>
               ),
             },
