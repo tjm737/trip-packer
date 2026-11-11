@@ -19,6 +19,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Plane, ArrowLeft } from "lucide-react";
 import { LoginDialog } from "@/components/LoginDialog";
+import { LegalFooter } from "@/components/LegalFooter";
 
 /*
  * Only same-origin, path-only destinations are honoured.
@@ -60,7 +61,7 @@ export function SignInClient() {
         </Link>
         <Link
           href="/"
-          className="focus-ring inline-flex items-center gap-2 rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-300 transition-colors hover:border-zinc-600 hover:bg-[var(--surface-2)] hover:text-white"
+          className="focus-ring inline-flex items-center gap-2 rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-300 transition-colors hover:border-zinc-600 hover:bg-[var(--surface-2)] hover:text-zinc-50"
         >
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
           Back
@@ -100,6 +101,8 @@ export function SignInClient() {
           </p>
         </div>
       </main>
+
+      <LegalFooter maxWidth="max-w-5xl" />
 
       <LoginDialog
         open={open}

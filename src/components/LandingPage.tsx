@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 
 import { RELEASES } from "@/lib/changelog";
+import { LegalFooter } from "@/components/LegalFooter";
 
 /*
  * Product surface. Kept as data rather than hand-written markup so the cards
@@ -121,7 +122,7 @@ export default function LandingPage() {
         </div>
         <Link
           href="/login"
-          className="focus-ring rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-200 transition-colors hover:border-zinc-600 hover:bg-[var(--surface-2)] hover:text-white"
+          className="focus-ring rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-200 transition-colors hover:border-zinc-600 hover:bg-[var(--surface-2)] hover:text-zinc-50"
         >
           Sign in
         </Link>
@@ -181,8 +182,9 @@ export default function LandingPage() {
 
         <div className="mx-auto max-w-5xl px-6 pt-24 pb-28 sm:pt-32 sm:pb-36">
           <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-center lg:gap-16">
-            <div>
-              <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-emerald-200/90">
+            {/* Over the photo in both themes, so it keeps the dark ramp. */}
+            <div className="theme-dark-scope">
+              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-emerald-50">
                 Trip planning
               </p>
               <h1 className="mt-5 text-[34px] font-bold leading-[1.15] tracking-tight text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.55)] sm:text-[44px]">
@@ -204,7 +206,7 @@ export default function LandingPage() {
                 </Link>
                 <Link
                   href="/login"
-                  className="focus-ring rounded-lg border border-zinc-700 px-5 py-2.5 text-sm font-medium text-zinc-300 transition-colors hover:border-zinc-600 hover:bg-[var(--surface-2)] hover:text-white"
+                  className="focus-ring rounded-lg border border-zinc-700 px-5 py-2.5 text-sm font-medium text-zinc-300 transition-colors hover:border-zinc-600 hover:bg-[var(--surface-2)] hover:text-zinc-50"
                 >
                   Create an account
                 </Link>
@@ -225,7 +227,7 @@ export default function LandingPage() {
             */}
             <div className="hidden lg:block">
               <div className="surface-raised rounded-xl border border-white/8 p-4">
-                <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-zinc-500">
+                <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-500">
                   Iceland Ring Road
                 </p>
                 <div className="mt-3 space-y-2.5">
@@ -254,7 +256,7 @@ export default function LandingPage() {
       <main className="mx-auto max-w-5xl px-6">
         {/* Features */}
         <section className="border-t border-white/8 py-16">
-          <h2 className="text-[10px] font-medium uppercase tracking-[0.08em] text-zinc-500">
+          <h2 className="text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-500">
             What it does
           </h2>
           <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -274,7 +276,7 @@ export default function LandingPage() {
         {/* What's new — derived from the changelog, so it cannot go stale */}
         <section className="border-t border-white/8 py-16">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h2 className="text-[10px] font-medium uppercase tracking-[0.08em] text-zinc-500">
+            <h2 className="text-[11px] font-medium uppercase tracking-[0.08em] text-zinc-500">
               What&rsquo;s new
             </h2>
             <p className="text-[11px] text-zinc-600">
@@ -288,7 +290,7 @@ export default function LandingPage() {
                 className="surface-raised rounded-xl border border-white/8 p-5"
               >
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-emerald-400">
+                  <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-emerald-400">
                     v{release.version}
                   </span>
                   <span className="shrink-0 text-[11px] text-zinc-600">{release.date}</span>
@@ -338,9 +340,7 @@ export default function LandingPage() {
         </section>
       </main>
 
-      <footer className="mx-auto max-w-5xl px-6 pb-10">
-        <p className="text-xs text-zinc-600">TripPlanner</p>
-      </footer>
+      <LegalFooter maxWidth="max-w-5xl" />
     </div>
   );
 }
