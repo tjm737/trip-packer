@@ -278,7 +278,7 @@ function UserSwitcher() {
       <button
         onClick={() => toggleSectionKey("accounts")}
         data-keep-drawer-open
-        className="mb-2 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500 transition-colors hover:text-zinc-300 focus-ring"
+        className="mb-2 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500 transition-colors hover:text-zinc-300 focus-ring"
         title={expanded.accounts ? "Collapse accounts" : "Expand accounts"}
         aria-expanded={expanded.accounts}
       >
@@ -289,7 +289,7 @@ function UserSwitcher() {
         )}
         <UserCog className="h-3.5 w-3.5" />
         <span className="flex-1 text-left">Accounts</span>
-        <span className="text-[10px] text-zinc-600 tnum">{accounts.length}</span>
+        <span className="text-[11px] text-zinc-600 tnum">{accounts.length}</span>
       </button>
 
       <AnimatePresence initial={false}>
@@ -598,7 +598,7 @@ function UserSwitcher() {
       <button
         onClick={() => toggleSectionKey("companions")}
         data-keep-drawer-open
-        className="mb-2 mt-4 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500 transition-colors hover:text-zinc-300 focus-ring"
+        className="mb-2 mt-4 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500 transition-colors hover:text-zinc-300 focus-ring"
         title={expanded.companions ? "Collapse companions" : "Expand companions"}
         aria-expanded={expanded.companions}
       >
@@ -609,7 +609,7 @@ function UserSwitcher() {
         )}
         <Users className="h-3.5 w-3.5" />
         <span className="flex-1 text-left">Companions</span>
-        <span className="text-[10px] text-zinc-600 tnum">{companions.length}</span>
+        <span className="text-[11px] text-zinc-600 tnum">{companions.length}</span>
       </button>
 
       <AnimatePresence initial={false}>
@@ -953,7 +953,7 @@ function TripCard({
             style={{ width: `${progress}%` }}
           />
         </div>
-        <span className="w-7 flex-shrink-0 text-right text-[10px] tabular-nums text-zinc-500">
+        <span className="w-7 flex-shrink-0 text-right text-[11px] tabular-nums text-zinc-500">
           {progress}%
         </span>
       </div>
@@ -1006,7 +1006,7 @@ function TripActionsSection() {
     <div className="border-t border-white/8 px-4 py-3">
       <div className="mb-2 flex items-center gap-1.5">
         <PlaneTakeoff className="h-3.5 w-3.5 text-zinc-500" />
-        <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">
           This trip
         </span>
       </div>
@@ -1065,7 +1065,7 @@ function TripList() {
         <button
           onClick={() => toggleSectionKey("upcoming")}
         data-keep-drawer-open
-          className="flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500 transition-colors hover:text-zinc-300 focus-ring"
+          className="flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500 transition-colors hover:text-zinc-300 focus-ring"
           title={expanded.upcoming ? "Collapse" : "Expand"}
         >
           {expanded.upcoming ? (
@@ -1111,7 +1111,7 @@ function TripList() {
           <button
             onClick={() => toggleSectionKey("archived")}
         data-keep-drawer-open
-            className="flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500 transition-colors hover:text-zinc-300 focus-ring"
+            className="flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500 transition-colors hover:text-zinc-300 focus-ring"
             title={expanded.archived ? "Collapse" : "Expand"}
           >
             {expanded.archived ? (
@@ -1266,7 +1266,7 @@ export function SidebarBody({ onNewTrip }: { onNewTrip?: () => void }) {
           <h1 className="truncate text-sm font-bold leading-tight tracking-tight text-white">
             TripPlanner
           </h1>
-          <p className="truncate text-[10px] leading-tight text-zinc-500">
+          <p className="truncate text-[11px] leading-tight text-zinc-500">
             Plan smarter, stress less
           </p>
         </div>

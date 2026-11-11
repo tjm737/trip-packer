@@ -464,7 +464,7 @@ export function ShareDialog({
               <section aria-labelledby="share-create">
                 <h3
                   id="share-create"
-                  className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500"
+                  className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500"
                 >
                   Create a link
                 </h3>
@@ -496,12 +496,12 @@ export function ShareDialog({
                 <div className="mb-2 flex items-center justify-between">
                   <h3
                     id="share-links"
-                    className="text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500"
+                    className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500"
                   >
                     Active links
                   </h3>
                   {tokens.length > 0 && (
-                    <span className="text-[10px] text-zinc-600 tnum">{tokens.length}</span>
+                    <span className="text-[11px] text-zinc-600 tnum">{tokens.length}</span>
                   )}
                 </div>
 
@@ -535,7 +535,7 @@ export function ShareDialog({
                             </span>
                           </div>
                           <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                            <span className="truncate text-[10px] text-zinc-500">
+                            <span className="truncate text-[11px] text-zinc-500">
                               {formatCreated(t.createdAt)
                                 ? `Created ${formatCreated(t.createdAt)}`
                                 : "Active link"}
@@ -629,7 +629,7 @@ export function ShareDialog({
                             housesitter gets only the dates.
                           */}
                           <div className="mt-2.5 border-t border-white/8 pt-2.5">
-                            <h4 className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500">
+                            <h4 className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">
                               <EyeOff className="h-3 w-3" />
                               This link shows
                             </h4>
@@ -673,7 +673,7 @@ export function ShareDialog({
                               the confirmation-number toggle blanks a field
                               within each booking rather than removing bookings.
                             */}
-                            <p className="mt-1.5 text-[10px] leading-relaxed text-zinc-500">
+                            <p className="mt-1.5 text-[11px] leading-relaxed text-zinc-500">
                               The itinerary itself always shows. Booking
                               confirmation numbers can be added or hidden
                               separately.

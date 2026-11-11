@@ -108,7 +108,7 @@ export function DangerZone({
 
   return (
     <section className="mt-5 rounded-xl border border-red-500/25 bg-red-500/[0.04] p-5">
-      <h2 className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-red-300/80">
+      <h2 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-red-300/80">
         <AlertTriangle className="h-3 w-3" />
         Danger zone
       </h2>

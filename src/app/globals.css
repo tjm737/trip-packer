@@ -285,6 +285,42 @@
   --color-sidebar-border: #e4e4e2;
   --color-sidebar-ring: #406655;
 
+  /*
+   * Neutral ramp, inverted for light.
+   *
+   * The zinc scale was left at its dark values when the light theme shipped, so
+   * every `text-zinc-100` heading rendered #f4f4f4 on a #fbfbfa page (1.06:1)
+   * and body copy in `text-zinc-400` sat at 2.5:1 — both WCAG AA failures.
+   * Inverting the ramp in role (low number = high contrast against the page)
+   * keeps every call site's intent: "bright" still means "prominent", which on a
+   * light page is dark. Hover variants follow automatically because they resolve
+   * through the same properties.
+   *
+   * Text steps 400-600 are tuned to clear 4.5:1 against the greyest light
+   * surface (--surface-3, #ebebe9), so secondary text stays AA on every surface.
+   */
+  --color-zinc-50: #141414;
+  --color-zinc-100: #1a1a1a;
+  --color-zinc-200: #262626;
+  --color-zinc-300: #363636;
+  --color-zinc-400: #4d4d4d;
+  --color-zinc-500: #5a5a5a;
+  --color-zinc-600: #666666;
+  --color-zinc-700: #cfcfcd;
+  --color-zinc-800: #e4e4e2;
+  --color-zinc-900: #efefed;
+  --color-zinc-950: #fbfbfa;
+
+  /* The bright sage steps are text accents on dark (links, tags). On a light
+     page they fall to ~2.5:1, so they take the primary's darker greens. */
+  --color-emerald-200: #2f4d40;
+  --color-emerald-300: #3a5e4e;
+  --color-emerald-400: #406655;
+
+  /* See the text-zinc-500/600 utilities at the end of this file. */
+  --fg-zinc-500: var(--color-zinc-500);
+  --fg-zinc-600: var(--color-zinc-600);
+
   color-scheme: light;
 }
 
@@ -1062,3 +1098,59 @@
 }
 
 
+
+/*
+ * Secondary text, AA on every dark surface.
+ *
+ * `text-zinc-500` (#727272) measured 4.11:1 on the page and 2.98:1 on an input
+ * (--surface-2); `text-zinc-600` (#535353) was 2.1-2.6:1. Both are used ~230
+ * times for small text — labels, meta, timestamps — so they are fixed here, at
+ * the text utility, rather than at the token: the same tokens also draw borders
+ * (`border-zinc-600`) and placeholders, which do not need to lighten.
+ *
+ * The dark values clear 4.5:1 against --surface-2 (#2a2a2a), the lightest
+ * surface small text normally sits on. Light reads the inverted ramp via the
+ * `.light` block above. Declared in the utilities layer after Tailwind's own
+ * output, at the same specificity, so hover:/focus: variants still win.
+ */
+:root:not(.light) {
+  --fg-zinc-500: #9a9a9a;
+  --fg-zinc-600: #949494;
+}
+
+@layer utilities {
+  .text-zinc-500 {
+    color: var(--fg-zinc-500);
+  }
+  .text-zinc-600 {
+    color: var(--fg-zinc-600);
+  }
+}
+
+/*
+ * Always-dark island, for content drawn over a photo (the landing hero).
+ *
+ * The hero copy sits on a darkened photograph in both themes, so it must keep
+ * the dark ramp even when the page is light — otherwise the inverted light ramp
+ * above turns its light-grey copy dark-on-dark. Re-declaring the tokens here
+ * makes every existing utility inside the island resolve to its dark value.
+ */
+.theme-dark-scope {
+  --color-zinc-50: #fafafa;
+  --color-zinc-100: #f4f4f4;
+  --color-zinc-200: #e4e4e4;
+  --color-zinc-300: #d4d4d4;
+  --color-zinc-400: #a2a2a2;
+  --color-zinc-500: #727272;
+  --color-zinc-600: #535353;
+  --color-zinc-700: #404040;
+  --color-zinc-800: #272727;
+  --color-zinc-900: #181818;
+  --color-zinc-950: #0a0a0a;
+  --color-emerald-200: #748a80;
+  --color-emerald-300: #89ab9c;
+  --color-emerald-400: #82ab99;
+  --fg-zinc-500: #9a9a9a;
+  --fg-zinc-600: #949494;
+  --surface-2: #2a2a2a;
+}

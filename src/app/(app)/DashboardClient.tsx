@@ -492,7 +492,7 @@ function CreateTripModal({
             {importTripId && candidates.length > 0 && (
               <div className="rounded-lg bg-zinc-800/60 px-3 py-2.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase tracking-[0.08em] text-zinc-500">
+                  <span className="text-[11px] uppercase tracking-[0.08em] text-zinc-500">
                     Contents
                   </span>
                   <span className="text-[11px] text-zinc-500">{summary}</span>

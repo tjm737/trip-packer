@@ -346,7 +346,7 @@ export function SharedTripView({
                 <span
                   className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded border ${
                     t.done
-                      ? "border-emerald-500 bg-emerald-500 text-zinc-950"
+                      ? "border-emerald-500 bg-emerald-500 text-black"
                       : "border-zinc-600"
                   }`}
                 >
@@ -403,7 +403,7 @@ export function SharedTripView({
                           <span
                             className={`grid h-3.5 w-3.5 shrink-0 place-items-center rounded border ${
                               i.checked
-                                ? "border-emerald-500 bg-emerald-500 text-zinc-950"
+                                ? "border-emerald-500 bg-emerald-500 text-black"
                                 : "border-zinc-600"
                             }`}
                           >

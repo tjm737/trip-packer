@@ -336,7 +336,7 @@ export function NaturalLanguageTripButton({
             <div>
               <label
                 htmlFor="nl-trip-input"
-                className="text-[10px] uppercase tracking-[0.08em] text-zinc-500"
+                className="text-[11px] uppercase tracking-[0.08em] text-zinc-500"
               >
                 Your trip
               </label>

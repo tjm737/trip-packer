@@ -216,7 +216,7 @@ export function LoginDialog({
             <div className="space-y-1.5">
               <Label
                 htmlFor="login-email"
-                className="text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500"
+                className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500"
               >
                 Email
               </Label>
@@ -247,7 +247,7 @@ export function LoginDialog({
             <div className="space-y-1.5">
               <Label
                 htmlFor="login-password"
-                className="text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500"
+                className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500"
               >
                 Password
               </Label>
@@ -280,7 +280,7 @@ export function LoginDialog({
           ) : null}
 
           <div className="mt-4 flex items-center justify-between gap-3">
-            <p className="text-[10px] leading-snug text-zinc-500">
+            <p className="text-[11px] leading-snug text-zinc-500">
               Accounts are created by the trip owner from their sidebar.
               TripPlanner is for people aged 13 and over.
             </p>

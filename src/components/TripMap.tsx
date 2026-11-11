@@ -1442,14 +1442,14 @@ export function TripMap({ tripId }: { tripId: string }) {
                       className="group flex cursor-grab items-center gap-1 active:cursor-grabbing"
                     >
                       <GripVertical className="h-3.5 w-3.5 shrink-0 text-zinc-600 group-hover:text-emerald-400" />
-                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-semibold text-white">
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[11px] font-semibold text-white">
                         {s.index}
                       </span>
                     </div>
                   ) : (
                     /* Indent under the handle so a flight's arrival pin reads as
                        a continuation of the booking above it. */
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-900/60 text-[10px] font-semibold text-emerald-300 ring-1 ring-emerald-500/20 ml-[18px]">
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-900/60 text-[11px] font-semibold text-emerald-300 ring-1 ring-emerald-500/20 ml-[18px]">
                       {s.index}
                     </span>
                   )}
@@ -1552,7 +1552,7 @@ export function TripMap({ tripId }: { tripId: string }) {
       )}
 
       {!loading && hasStops && (
-        <p className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[10px] text-zinc-600">
+        <p className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-zinc-600">
           <ExternalLink className="h-3 w-3" />
           {skippedLegs > 0
             ? `${skippedLegs} leg${skippedLegs === 1 ? "" : "s"} not drivable (ferry or no road) · `

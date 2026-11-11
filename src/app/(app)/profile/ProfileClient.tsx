@@ -221,7 +221,7 @@ export function ProfileClient({ userId }: { userId: string }) {
       </section>
 
       <section className="mt-5 rounded-xl border border-white/8 p-5">
-        <h2 className="text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500">
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">
           Account
         </h2>
         <p className="mt-2 text-xs text-zinc-400">

@@ -128,7 +128,7 @@ export function TripBags({ tripId }: { tripId: string }) {
           <Luggage className="w-3.5 h-3.5 text-zinc-500" />
           Bags
           {bags.length > 0 && (
-            <Badge variant="secondary" className="ml-1 bg-zinc-800 text-zinc-400 text-[10px]">
+            <Badge variant="secondary" className="ml-1 bg-zinc-800 text-zinc-400 text-[11px]">
               {bags.length}
             </Badge>
           )}

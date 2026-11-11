@@ -268,7 +268,7 @@ export function PackingSuggestions({
           nothing else. */}
       {view === "list" && canAddAnything && (
         <div className="mt-3">
-          <p className="text-[10px] uppercase tracking-[0.08em] text-zinc-500 mb-2">
+          <p className="text-[11px] uppercase tracking-[0.08em] text-zinc-500 mb-2">
             Suggestions — tap to add
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

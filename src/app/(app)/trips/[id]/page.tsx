@@ -155,7 +155,7 @@ function PackingItemRow({ item }: { item: any }) {
                       ? `${item.name} is in ${assignedBag.name}. Change bag`
                       : `Assign ${item.name} to a bag`
                   }
-                  className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] transition-colors focus-ring ${
+                  className={`shrink-0 rounded-md px-1.5 py-0.5 text-[11px] transition-colors focus-ring ${
                     assignedBag
                       ? "bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25"
                       : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"
@@ -167,7 +167,7 @@ function PackingItemRow({ item }: { item: any }) {
             />
           </Tooltip>
           <DropdownMenuContent align="end" className="bg-zinc-900 border-zinc-700">
-            <DropdownMenuLabel className="text-[10px] uppercase tracking-[0.08em] text-zinc-500">
+            <DropdownMenuLabel className="text-[11px] uppercase tracking-[0.08em] text-zinc-500">
               Bag
             </DropdownMenuLabel>
             {tripBags.map((b: any) => (

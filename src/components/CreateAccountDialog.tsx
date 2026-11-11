@@ -206,7 +206,7 @@ export function CreateAccountDialog({
               <div className="space-y-1.5">
                 <Label
                   htmlFor="new-account-name"
-                  className="text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500"
+                  className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500"
                 >
                   Name
                 </Label>
@@ -225,7 +225,7 @@ export function CreateAccountDialog({
               <div className="space-y-1.5">
                 <Label
                   htmlFor="new-account-email"
-                  className="text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500"
+                  className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500"
                 >
                   Email
                 </Label>
@@ -247,7 +247,7 @@ export function CreateAccountDialog({
               <div className="space-y-1.5">
                 <Label
                   htmlFor="new-account-password"
-                  className="text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500"
+                  className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500"
                 >
                   Starting password
                 </Label>
@@ -264,7 +264,7 @@ export function CreateAccountDialog({
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500">
+                <Label className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">
                   Avatar colour
                 </Label>
                 <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Avatar colour">
@@ -302,7 +302,7 @@ export function CreateAccountDialog({
             ) : null}
 
             <div className="mt-4 flex items-center justify-between gap-3">
-              <p className="text-[10px] leading-snug text-zinc-500">
+              <p className="text-[11px] leading-snug text-zinc-500">
                 New accounts can plan trips but cannot manage other people&apos;s
                 accounts.
               </p>

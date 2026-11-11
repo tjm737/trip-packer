@@ -111,7 +111,7 @@ export function Tabs({ tabs, value, onChange, className }: Props) {
               {t.badge != null && (
                 <span
                   className={cn(
-                    "rounded-full px-1.5 py-0.5 text-[10px] leading-none tnum",
+                    "rounded-full px-1.5 py-0.5 text-[11px] leading-none tnum",
                     selected
                       ? "bg-emerald-500/15 text-emerald-300"
                       : "bg-white/5 text-zinc-500"

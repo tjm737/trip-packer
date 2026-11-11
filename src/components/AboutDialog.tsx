@@ -81,7 +81,7 @@ export function AboutDialog({
           <section aria-labelledby="about-build">
             <h3
               id="about-build"
-              className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500"
+              className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500"
             >
               Build
             </h3>
@@ -100,7 +100,7 @@ export function AboutDialog({
           <section aria-labelledby="about-notes" className="mt-5">
             <h3
               id="about-notes"
-              className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500"
+              className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500"
             >
               Release notes
             </h3>
@@ -115,12 +115,12 @@ export function AboutDialog({
                         {release.version}
                       </span>
                       {isCurrent && (
-                        <span className="rounded-full border border-emerald-500/60 bg-emerald-500/25 px-2 py-0.5 text-[10px] font-medium text-emerald-200">
+                        <span className="rounded-full border border-emerald-500/60 bg-emerald-500/25 px-2 py-0.5 text-[11px] font-medium text-emerald-200">
                           Current
                         </span>
                       )}
                       {release.tag && (
-                        <span className="rounded-full border border-zinc-700 bg-white/5 px-2 py-0.5 text-[10px] font-medium text-zinc-400">
+                        <span className="rounded-full border border-zinc-700 bg-white/5 px-2 py-0.5 text-[11px] font-medium text-zinc-400">
                           {release.tag}
                         </span>
                       )}
@@ -166,7 +166,7 @@ export function AboutDialog({
           <section aria-labelledby="about-storage" className="mt-5">
             <h3
               id="about-storage"
-              className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500"
+              className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500"
             >
               Where your data lives
             </h3>
