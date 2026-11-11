@@ -954,6 +954,11 @@ export function getSessionRecords(): {
 
 /* ----------------------------------------------------------------- writes */
 
+/** How long usage events are kept. Stated in the privacy policy (/privacy). */
+export const METRICS_RETENTION_DAYS = 365;
+const METRICS_PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+let lastMetricsPruneAt = 0;
+
 export const tx = {
   setActiveUser(userId: string): void {
     getDb()
@@ -1936,6 +1941,24 @@ export const tx = {
     );
 
     run(events);
+
+    // Retention: drop events older than METRICS_RETENTION_DAYS. Throttled so
+    // the delete runs at most every few hours rather than on every flush; the
+    // privacy policy states this window, so it must actually be enforced.
+    const nowMs = Date.now();
+    if (nowMs - lastMetricsPruneAt > METRICS_PRUNE_INTERVAL_MS) {
+      lastMetricsPruneAt = nowMs;
+      tx.pruneMetricsBefore(
+        new Date(nowMs - METRICS_RETENTION_DAYS * 86_400_000).toISOString()
+      );
+    }
+  },
+
+  /** Delete usage events recorded before an ISO cutoff. Returns rows removed. */
+  pruneMetricsBefore(cutoffIso: string): number {
+    return getDb()
+      .prepare("DELETE FROM metrics_events WHERE createdAt < ?")
+      .run(cutoffIso).changes;
   },
 
   /**
